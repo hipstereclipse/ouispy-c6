@@ -17,6 +17,18 @@ void app_state_init(void)
     g_app.lcd_brightness  = 200;
     g_app.sound_enabled   = true;
     g_app.led_enabled     = true;
+    g_app.ap_broadcast_enabled = true;
+    g_app.display_sleep_timeout_sec = 60;
+    g_app.menu_led_color = MENU_LED_GOLD;
+    g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
+    g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
+    g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;
+    g_app.shortcut_mode_btn = SHORTCUT_NEXT_MODE;
+    g_app.shortcut_action_btn = SHORTCUT_FOX_LED_MODE;
+    g_app.shortcut_back_btn = SHORTCUT_MODE_SELECT;
+    g_app.use_microsd_logs = false;
+    g_app.last_input_ms = uptime_ms();
+    g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();
     g_app.drone_mutex     = xSemaphoreCreateMutex();
 }

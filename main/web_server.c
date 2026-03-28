@@ -12,6 +12,7 @@
  *   POST /api/settings — Update prefs {brightness, sound, led}
  *   GET  /api/devices  — Flock device list (JSON array)
  *   GET  /api/drones   — Sky Spy drone list (JSON array)
+ *   POST /api/fox/registry/update — Update registry metadata
  *   GET  /api/export/csv — Export Flock detections as CSV
  *   WS   /ws           — WebSocket for live push updates
  *
@@ -21,7 +22,9 @@
 #include "app_common.h"
 #include "fox_hunter.h"
 #include "nvs_store.h"
+#include "storage_ext.h"
 #include "display.h"
+#include "wifi_manager.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include <string.h>
@@ -45,6 +48,7 @@ static esp_err_t get_index(httpd_req_t *req)
 /* ── JSON builders ── */
 static char *build_state_json(void)
 {
+    uint32_t now_ms = uptime_ms();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "mode", g_app.current_mode);
     cJSON_AddNumberToObject(root, "uptime", g_app.uptime_sec);
@@ -53,6 +57,18 @@ static char *build_state_json(void)
     cJSON_AddNumberToObject(root, "brightness", g_app.lcd_brightness);
     cJSON_AddBoolToObject(root, "sound", g_app.sound_enabled);
     cJSON_AddBoolToObject(root, "led", g_app.led_enabled);
+    cJSON_AddBoolToObject(root, "apBroadcast", g_app.ap_broadcast_enabled);
+    cJSON_AddNumberToObject(root, "displaySleepSec", g_app.display_sleep_timeout_sec);
+    cJSON_AddNumberToObject(root, "menuLedColor", g_app.menu_led_color);
+    cJSON_AddNumberToObject(root, "soundProfileFlock", g_app.sound_profile_flock);
+    cJSON_AddNumberToObject(root, "soundProfileFox", g_app.sound_profile_fox);
+    cJSON_AddNumberToObject(root, "soundProfileSky", g_app.sound_profile_sky);
+    cJSON_AddNumberToObject(root, "shortcutModeBtn", g_app.shortcut_mode_btn);
+    cJSON_AddNumberToObject(root, "shortcutActionBtn", g_app.shortcut_action_btn);
+    cJSON_AddNumberToObject(root, "shortcutBackBtn", g_app.shortcut_back_btn);
+    cJSON_AddBoolToObject(root, "useMicrosdLogs", g_app.use_microsd_logs);
+    cJSON_AddBoolToObject(root, "microsdAvailable", storage_ext_is_available());
+    cJSON_AddNumberToObject(root, "logCapacityKb", storage_ext_log_capacity_kb());
     cJSON_AddNumberToObject(root, "deviceCount", g_app.device_count);
     cJSON_AddNumberToObject(root, "droneCount", g_app.drone_count);
 
@@ -67,6 +83,26 @@ static char *build_state_json(void)
     cJSON_AddBoolToObject(fox, "found", g_app.fox_target_found);
     cJSON_AddNumberToObject(fox, "ledMode", g_app.fox_led_mode);
     cJSON_AddNumberToObject(fox, "registryCount", g_app.fox_registry_count);
+    uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now_ms > g_app.fox_last_seen)
+                             ? (now_ms - g_app.fox_last_seen) / 1000U
+                             : 0;
+    cJSON_AddNumberToObject(fox, "lastSeenSec", last_seen_sec);
+    const char *prox = "very far";
+    if (g_app.fox_rssi >= -45) prox = "very close";
+    else if (g_app.fox_rssi >= -60) prox = "close";
+    else if (g_app.fox_rssi >= -72) prox = "near";
+    else if (g_app.fox_rssi >= -84) prox = "far";
+    cJSON_AddStringToObject(fox, "proximity", prox);
+
+    /* WiFi AP client MACs */
+    cJSON *wc_arr = cJSON_AddArrayToObject(root, "wifiClientMacs");
+    uint8_t tracked = (g_app.wifi_clients < WIFI_MAX_AP_CLIENTS)
+                      ? g_app.wifi_clients : WIFI_MAX_AP_CLIENTS;
+    for (uint8_t i = 0; i < tracked; i++) {
+        char mc[18];
+        mac_to_str(g_app.wifi_client_macs[i], mc, sizeof(mc));
+        cJSON_AddItemToArray(wc_arr, cJSON_CreateString(mc));
+    }
 
     char *str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -239,6 +275,10 @@ static esp_err_t get_fox_registry(httpd_req_t *req)
         mac_to_str(e->mac, mac_str, sizeof(mac_str));
         cJSON_AddStringToObject(item, "mac", mac_str);
         cJSON_AddStringToObject(item, "label", e->label);
+        cJSON_AddStringToObject(item, "originalName", e->original_name);
+        cJSON_AddStringToObject(item, "nickname", e->nickname);
+        cJSON_AddStringToObject(item, "notes", e->notes);
+        cJSON_AddStringToObject(item, "section", e->section);
         cJSON_AddItemToArray(arr, item);
     }
     char *json = cJSON_PrintUnformatted(arr);
@@ -251,7 +291,7 @@ static esp_err_t get_fox_registry(httpd_req_t *req)
 
 static esp_err_t post_fox_registry(httpd_req_t *req)
 {
-    char buf[128];
+    char buf[384];
     int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
     buf[len] = '\0';
@@ -275,7 +315,29 @@ static esp_err_t post_fox_registry(httpd_req_t *req)
     cJSON *label_item = cJSON_GetObjectItem(root, "label");
     if (label_item && cJSON_IsString(label_item)) label = label_item->valuestring;
 
-    int idx = fox_hunter_registry_add(mac, label);
+    const char *original_name = "";
+    cJSON *name_item = cJSON_GetObjectItem(root, "originalName");
+    if (!name_item) name_item = cJSON_GetObjectItem(root, "name");
+    if (name_item && cJSON_IsString(name_item)) original_name = name_item->valuestring;
+
+    const char *section = "auto";
+    cJSON *section_item = cJSON_GetObjectItem(root, "section");
+    if (section_item && cJSON_IsString(section_item) && section_item->valuestring[0]) {
+        section = section_item->valuestring;
+    }
+
+    const char *nickname = NULL;
+    cJSON *nickname_item = cJSON_GetObjectItem(root, "nickname");
+    if (nickname_item && cJSON_IsString(nickname_item)) nickname = nickname_item->valuestring;
+
+    const char *notes = NULL;
+    cJSON *notes_item = cJSON_GetObjectItem(root, "notes");
+    if (notes_item && cJSON_IsString(notes_item)) notes = notes_item->valuestring;
+
+    int idx = fox_hunter_registry_add(mac, label, original_name, section);
+    if (idx >= 0 && (nickname || notes)) {
+        fox_hunter_registry_update(idx, nickname, notes, NULL, NULL, NULL);
+    }
     cJSON_Delete(root);
 
     if (idx < 0) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Registry full");
@@ -284,6 +346,70 @@ static esp_err_t post_fox_registry(httpd_req_t *req)
     snprintf(resp, sizeof(resp), "{\"ok\":true,\"index\":%d}", idx);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, resp);
+}
+
+static esp_err_t post_fox_registry_update(httpd_req_t *req)
+{
+    char buf[512];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+
+    int idx = -1;
+    cJSON *idx_item = cJSON_GetObjectItem(root, "index");
+    if (idx_item && cJSON_IsNumber(idx_item)) {
+        idx = idx_item->valueint;
+    } else {
+        cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
+        if (mac_item && cJSON_IsString(mac_item)) {
+            uint8_t mac[6];
+            if (mac_from_str(mac_item->valuestring, mac) == 0) {
+                for (int i = 0; i < g_app.fox_registry_count; i++) {
+                    if (mac_equal(g_app.fox_registry[i].mac, mac)) {
+                        idx = i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (idx < 0 || idx >= g_app.fox_registry_count) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing/invalid index or mac");
+    }
+
+    const char *nickname = NULL;
+    const char *notes = NULL;
+    const char *section = NULL;
+    const char *label = NULL;
+    const char *original_name = NULL;
+
+    cJSON *nickname_item = cJSON_GetObjectItem(root, "nickname");
+    if (nickname_item && cJSON_IsString(nickname_item)) nickname = nickname_item->valuestring;
+
+    cJSON *notes_item = cJSON_GetObjectItem(root, "notes");
+    if (notes_item && cJSON_IsString(notes_item)) notes = notes_item->valuestring;
+
+    cJSON *section_item = cJSON_GetObjectItem(root, "section");
+    if (section_item && cJSON_IsString(section_item)) section = section_item->valuestring;
+
+    cJSON *label_item = cJSON_GetObjectItem(root, "label");
+    if (label_item && cJSON_IsString(label_item)) label = label_item->valuestring;
+
+    cJSON *name_item = cJSON_GetObjectItem(root, "originalName");
+    if (name_item && cJSON_IsString(name_item)) original_name = name_item->valuestring;
+
+    int rc = fox_hunter_registry_update(idx, nickname, notes, section, label, original_name);
+    cJSON_Delete(root);
+
+    if (rc < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
 static esp_err_t delete_fox_registry(httpd_req_t *req)
@@ -312,7 +438,7 @@ static esp_err_t delete_fox_registry(httpd_req_t *req)
 
 static esp_err_t post_settings(httpd_req_t *req)
 {
-    char buf[128];
+    char buf[512];
     int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
     buf[len] = '\0';
@@ -329,6 +455,104 @@ static esp_err_t post_settings(httpd_req_t *req)
     if (snd) g_app.sound_enabled = cJSON_IsTrue(snd);
     cJSON *led = cJSON_GetObjectItem(root, "led");
     if (led) g_app.led_enabled = cJSON_IsTrue(led);
+
+    bool old_ap_broadcast = g_app.ap_broadcast_enabled;
+    cJSON *ap_bcast = cJSON_GetObjectItem(root, "apBroadcast");
+    if (ap_bcast) g_app.ap_broadcast_enabled = cJSON_IsTrue(ap_bcast);
+
+    cJSON *sleep_sec = cJSON_GetObjectItem(root, "displaySleepSec");
+    if (sleep_sec && cJSON_IsNumber(sleep_sec)) {
+        int val = sleep_sec->valueint;
+        if (val < 0) val = 0;
+        if (val > 3600) val = 3600;
+        g_app.display_sleep_timeout_sec = (uint16_t)val;
+    }
+
+    cJSON *menu_led = cJSON_GetObjectItem(root, "menuLedColor");
+    if (menu_led && cJSON_IsNumber(menu_led)) {
+        int val = menu_led->valueint;
+        if (val < 0) val = 0;
+        if (val >= MENU_LED_COUNT) val = MENU_LED_COUNT - 1;
+        g_app.menu_led_color = (uint8_t)val;
+    }
+
+    cJSON *snd_flock = cJSON_GetObjectItem(root, "soundProfileFlock");
+    if (snd_flock && cJSON_IsNumber(snd_flock)) {
+        int val = snd_flock->valueint;
+        if (val < 0) val = 0;
+        if (val >= SOUND_PROFILE_COUNT) val = SOUND_PROFILE_COUNT - 1;
+        g_app.sound_profile_flock = (uint8_t)val;
+    }
+
+    cJSON *snd_fox = cJSON_GetObjectItem(root, "soundProfileFox");
+    if (snd_fox && cJSON_IsNumber(snd_fox)) {
+        int val = snd_fox->valueint;
+        if (val < 0) val = 0;
+        if (val >= SOUND_PROFILE_COUNT) val = SOUND_PROFILE_COUNT - 1;
+        g_app.sound_profile_fox = (uint8_t)val;
+    }
+
+    cJSON *snd_sky = cJSON_GetObjectItem(root, "soundProfileSky");
+    if (snd_sky && cJSON_IsNumber(snd_sky)) {
+        int val = snd_sky->valueint;
+        if (val < 0) val = 0;
+        if (val >= SOUND_PROFILE_COUNT) val = SOUND_PROFILE_COUNT - 1;
+        g_app.sound_profile_sky = (uint8_t)val;
+    }
+
+    cJSON *sc_mode = cJSON_GetObjectItem(root, "shortcutModeBtn");
+    if (sc_mode && cJSON_IsNumber(sc_mode)) {
+        int val = sc_mode->valueint;
+        if (val < 0) val = 0;
+        if (val >= SHORTCUT_COUNT) val = SHORTCUT_COUNT - 1;
+        g_app.shortcut_mode_btn = (uint8_t)val;
+    }
+
+    cJSON *sc_action = cJSON_GetObjectItem(root, "shortcutActionBtn");
+    if (sc_action && cJSON_IsNumber(sc_action)) {
+        int val = sc_action->valueint;
+        if (val < 0) val = 0;
+        if (val >= SHORTCUT_COUNT) val = SHORTCUT_COUNT - 1;
+        g_app.shortcut_action_btn = (uint8_t)val;
+    }
+
+    cJSON *sc_back = cJSON_GetObjectItem(root, "shortcutBackBtn");
+    if (sc_back && cJSON_IsNumber(sc_back)) {
+        int val = sc_back->valueint;
+        if (val < 0) val = 0;
+        if (val >= SHORTCUT_COUNT) val = SHORTCUT_COUNT - 1;
+        g_app.shortcut_back_btn = (uint8_t)val;
+    }
+
+    cJSON *sd_logs = cJSON_GetObjectItem(root, "useMicrosdLogs");
+    if (sd_logs) g_app.use_microsd_logs = cJSON_IsTrue(sd_logs);
+
+    if (old_ap_broadcast != g_app.ap_broadcast_enabled) {
+        const char *ssid = "ouispy-c6";
+        const char *pass = "ouispy123";
+        switch (g_app.current_mode) {
+        case MODE_FLOCK_YOU:
+            ssid = "flockyou-c6";
+            pass = "flockyou123";
+            break;
+        case MODE_FOX_HUNTER:
+            ssid = "foxhunt-c6";
+            pass = "foxhunt123";
+            break;
+        case MODE_SKY_SPY:
+            ssid = "skyspy-c6";
+            pass = "skyspy1234";
+            break;
+        case MODE_SETTINGS:
+        case MODE_SELECT:
+        case MODE_COUNT:
+        default:
+            break;
+        }
+        wifi_manager_stop();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        wifi_manager_start_ap(ssid, pass, 6);
+    }
 
     nvs_store_save_prefs();
     cJSON_Delete(root);
@@ -428,11 +652,46 @@ static void ws_push_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ── Fox nearby candidates ── */
+static char *build_fox_nearby_json(void)
+{
+    cJSON *arr = cJSON_CreateArray();
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        for (int i = 0; i < g_app.fox_nearby_count; i++) {
+            ble_device_t *d = &g_app.fox_nearby[i];
+            cJSON *item = cJSON_CreateObject();
+            char mac_str[18];
+            mac_to_str(d->mac, mac_str, sizeof(mac_str));
+            cJSON_AddStringToObject(item, "mac", mac_str);
+            cJSON_AddStringToObject(item, "name", d->name);
+            cJSON_AddNumberToObject(item, "rssi", d->rssi);
+            cJSON_AddNumberToObject(item, "bestRssi", d->rssi_best);
+            cJSON_AddNumberToObject(item, "hits", d->hit_count);
+            cJSON_AddNumberToObject(item, "firstSeen", d->first_seen / 1000);
+            cJSON_AddNumberToObject(item, "lastSeen", d->last_seen / 1000);
+            cJSON_AddItemToArray(arr, item);
+        }
+        xSemaphoreGive(g_app.device_mutex);
+    }
+    char *str = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    return str;
+}
+
+static esp_err_t get_fox_nearby(httpd_req_t *req)
+{
+    char *json = build_fox_nearby_json();
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
+    free(json);
+    return ret;
+}
+
 /* ── Register routes and start server ── */
 void web_server_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 20;
     config.stack_size       = 8192;
     config.lru_purge_enable = true;
 
@@ -473,11 +732,17 @@ void web_server_start(void)
     httpd_uri_t uri_fox_reg_del = { .uri="/api/fox/registry", .method=HTTP_DELETE, .handler=delete_fox_registry };
     httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_del);
 
+    httpd_uri_t uri_fox_reg_update = { .uri="/api/fox/registry/update", .method=HTTP_POST, .handler=post_fox_registry_update };
+    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_update);
+
     httpd_uri_t uri_settings = { .uri="/api/settings", .method=HTTP_POST, .handler=post_settings };
     httpd_register_uri_handler(g_app.http_server, &uri_settings);
 
     httpd_uri_t uri_csv = { .uri="/api/export/csv", .method=HTTP_GET, .handler=get_export_csv };
     httpd_register_uri_handler(g_app.http_server, &uri_csv);
+
+    httpd_uri_t uri_fox_nearby = { .uri="/api/fox/nearby", .method=HTTP_GET, .handler=get_fox_nearby };
+    httpd_register_uri_handler(g_app.http_server, &uri_fox_nearby);
 
     /* WebSocket */
     httpd_uri_t uri_ws = {

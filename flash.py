@@ -710,7 +710,7 @@ def ensure_firmware():
             sz = os.path.getsize(os.path.join(bd, rel)) / 1024
             color_print(f"    {name:28s}  {sz:>7.1f} kB", C.CYAN)
         print()
-        if ask_yes("  Rebuild firmware from current source code?", default_yes=False):
+        if ask_yes("  Rebuild firmware from source code?", default_yes=False):
             return _find_idf_and_build()
         return bd
 

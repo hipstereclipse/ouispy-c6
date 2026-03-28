@@ -56,8 +56,38 @@ typedef enum {
     MODE_FLOCK_YOU = 1,
     MODE_FOX_HUNTER= 2,
     MODE_SKY_SPY   = 3,
+    MODE_SETTINGS  = 4,
     MODE_COUNT
 } app_mode_t;
+
+typedef enum {
+    MENU_LED_GOLD = 0,
+    MENU_LED_MINT,
+    MENU_LED_SKY,
+    MENU_LED_AMBER,
+    MENU_LED_MAGENTA,
+    MENU_LED_COUNT,
+} menu_led_color_t;
+
+typedef enum {
+    SOUND_PROFILE_STANDARD = 0,
+    SOUND_PROFILE_CHIRP,
+    SOUND_PROFILE_SONAR,
+    SOUND_PROFILE_RETRO,
+    SOUND_PROFILE_ALARM,
+    SOUND_PROFILE_COUNT,
+} sound_profile_t;
+
+typedef enum {
+    SHORTCUT_NONE = 0,
+    SHORTCUT_NEXT_MODE,
+    SHORTCUT_MODE_SELECT,
+    SHORTCUT_SETTINGS,
+    SHORTCUT_TOGGLE_SOUND,
+    SHORTCUT_TOGGLE_LED,
+    SHORTCUT_FOX_LED_MODE,
+    SHORTCUT_COUNT,
+} shortcut_action_t;
 
 /* ── Detection Method Bitmask ────────────────────────────── */
 
@@ -66,6 +96,7 @@ typedef enum {
 #define DETECT_CID      0x04
 #define DETECT_UUID     0x08
 #define DETECT_RAVEN    0x10
+#define DETECT_FOX      0x20  /* Detected by fox hunter passive scan */
 
 /* ── Protocol Identifiers ────────────────────────────────── */
 
@@ -97,6 +128,8 @@ typedef struct {
 
 #define MAX_DRONES       16
 #define DRONE_ID_LEN     21
+#define WIFI_MAX_AP_CLIENTS  4
+#define FOX_NEARBY_MAX       40
 
 typedef struct {
     uint8_t  mac[6];
@@ -122,11 +155,21 @@ typedef struct {
 
 #define FOX_REGISTRY_MAX     8
 #define FOX_REG_LABEL_LEN   16
+#define FOX_REG_NICK_LEN    24
+#define FOX_REG_NOTES_LEN   96
+#define FOX_REG_SECTION_LEN 12
 
 typedef struct {
     uint8_t  mac[6];
     char     label[FOX_REG_LABEL_LEN];
+    char     original_name[DEVICE_NAME_LEN];
+    char     nickname[FOX_REG_NICK_LEN];
+    char     notes[FOX_REG_NOTES_LEN];
+    char     section[FOX_REG_SECTION_LEN]; /* auto|wifi|flock|drone|ble|known */
 } fox_reg_entry_t;
+
+/* Alias: fox nearby list reuses ble_device_t storage */
+typedef ble_device_t fox_nearby_t;
 
 /* ── Global Application State ────────────────────────────── */
 
@@ -153,6 +196,13 @@ typedef struct {
     fox_reg_entry_t fox_registry[FOX_REGISTRY_MAX];
     int             fox_registry_count;
 
+    /* Fox Hunter nearby BLE candidates (cleared on mode start) */
+    fox_nearby_t    fox_nearby[FOX_NEARBY_MAX];
+    int             fox_nearby_count;
+
+    /* WiFi AP connected client MACs */
+    uint8_t         wifi_client_macs[WIFI_MAX_AP_CLIENTS][6];
+
     /* Sky Spy drone list */
     drone_info_t    drones[MAX_DRONES];
     int             drone_count;
@@ -162,6 +212,16 @@ typedef struct {
     uint8_t         lcd_brightness;   /* 0-255 */
     bool            sound_enabled;
     bool            led_enabled;
+    bool            ap_broadcast_enabled;
+    uint16_t        display_sleep_timeout_sec; /* 0 disables sleep */
+    uint8_t         menu_led_color;
+    uint8_t         sound_profile_flock;
+    uint8_t         sound_profile_fox;
+    uint8_t         sound_profile_sky;
+    uint8_t         shortcut_mode_btn;
+    uint8_t         shortcut_action_btn;
+    uint8_t         shortcut_back_btn;
+    bool            use_microsd_logs;
 
     /* Web server handle */
     httpd_handle_t  http_server;
@@ -174,6 +234,8 @@ typedef struct {
     /* UI navigation (button-driven cursor) */
     int             ui_cursor;        /* current selection index  */
     int             ui_item_count;    /* selectable items in view */
+    uint32_t        last_input_ms;
+    bool            display_sleeping;
 } app_state_t;
 
 /* ── Global Instance ─────────────────────────────────────── */

@@ -14,6 +14,7 @@ idf_component_register(
         "flock_you.c"
         "fox_hunter.c"
         "sky_spy.c"
+            "storage_ext.c"
     INCLUDE_DIRS "." "${IDF_PATH}/components/bt/host/nimble/esp-hci/include"
     REQUIRES
         bt
@@ -24,5 +25,8 @@ idf_component_register(
         esp_lcd
         nvs_flash
         json
+            fatfs
+            sdmmc
+            esp_driver_sdspi
     EMBED_TXTFILES "index.html"
 )

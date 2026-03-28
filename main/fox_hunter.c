@@ -65,18 +65,72 @@ static int rssi_to_bar(int8_t rssi)
     return bars;
 }
 
+static const char *rssi_to_proximity_label(int8_t rssi)
+{
+    if (rssi >= -45) return "VERY CLOSE";
+    if (rssi >= -60) return "CLOSE";
+    if (rssi >= -72) return "NEAR";
+    if (rssi >= -84) return "FAR";
+    return "VERY FAR";
+}
+
+int fox_hunter_registry_view_count(void)
+{
+    int nearby = g_app.fox_nearby_count;
+    if (nearby < 0) nearby = 0;
+    return g_app.fox_registry_count + nearby;
+}
+
 /* ── Scan callback ── */
 static void fox_scan_cb(const uint8_t *addr, int8_t rssi,
                         const uint8_t *adv_data, uint8_t adv_len,
                         const uint8_t *name, uint8_t name_len)
 {
-    if (!g_app.fox_target_set) return;
-    if (!mac_equal(addr, g_app.fox_target_mac)) return;
+    /* ── Track active target ── */
+    if (g_app.fox_target_set && mac_equal(addr, g_app.fox_target_mac)) {
+        g_app.fox_rssi = rssi;
+        if (rssi > g_app.fox_rssi_best) g_app.fox_rssi_best = rssi;
+        g_app.fox_target_found = true;
+        g_app.fox_last_seen = uptime_ms();
+    }
 
-    g_app.fox_rssi = rssi;
-    if (rssi > g_app.fox_rssi_best) g_app.fox_rssi_best = rssi;
-    g_app.fox_target_found = true;
-    g_app.fox_last_seen = uptime_ms();
+    /* ── Accumulate all nearby BLE devices for candidate selection ── */
+    char name_str[DEVICE_NAME_LEN] = {0};
+    if (name_len > 0) {
+        int n = (name_len < DEVICE_NAME_LEN - 1) ? name_len : DEVICE_NAME_LEN - 1;
+        memcpy(name_str, name, n);
+    }
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(10)) != pdTRUE) return;
+
+    uint32_t now = uptime_ms();
+    int idx = -1;
+    for (int i = 0; i < g_app.fox_nearby_count; i++) {
+        if (mac_equal(g_app.fox_nearby[i].mac, addr)) { idx = i; break; }
+    }
+
+    if (idx >= 0) {
+        ble_device_t *d = &g_app.fox_nearby[idx];
+        d->rssi      = rssi;
+        if (rssi > d->rssi_best) d->rssi_best = rssi;
+        d->last_seen = now;
+        if (d->hit_count < 65535) d->hit_count++;
+        if (name_str[0] && d->name[0] == '\0')
+            strncpy(d->name, name_str, DEVICE_NAME_LEN - 1);
+    } else if (g_app.fox_nearby_count < FOX_NEARBY_MAX) {
+        ble_device_t *d = &g_app.fox_nearby[g_app.fox_nearby_count];
+        memset(d, 0, sizeof(*d));
+        memcpy(d->mac, addr, 6);
+        strncpy(d->name, name_str, DEVICE_NAME_LEN - 1);
+        d->rssi       = rssi;
+        d->rssi_best  = rssi;
+        d->first_seen = now;
+        d->last_seen  = now;
+        d->hit_count  = 1;
+        g_app.fox_nearby_count++;
+    }
+
+    xSemaphoreGive(g_app.device_mutex);
 }
 
 /* ── Beep + display loop -- Amber hunting aesthetic ── */
@@ -150,55 +204,92 @@ static void fox_beep_task(void *arg)
 
             if (g_app.fox_registry_open) {
                 /* ── Registry view ── */
-                display_draw_text_centered(DISPLAY_CONTENT_TOP + 2, "TARGET REGISTRY", accent, bg);
+                display_draw_text_centered(DISPLAY_CONTENT_TOP + 2, "TARGET REGISTRY (ALL)", accent, bg);
                 display_draw_hline(4, DISPLAY_CONTENT_TOP + 14, LCD_H_RES - 8, dim_accent);
 
-                if (g_app.fox_registry_count == 0) {
+                int total_count = fox_hunter_registry_view_count();
+                if (total_count == 0) {
                     display_draw_text_centered(100, "No saved targets", text_dim, bg);
-                    display_draw_text_centered(114, "Add via web UI", text_dim, bg);
+                    display_draw_text_centered(114, "No nearby devices", text_dim, bg);
                 } else {
-                    g_app.ui_item_count = g_app.fox_registry_count;
-                    if (g_app.ui_cursor >= g_app.fox_registry_count)
-                        g_app.ui_cursor = g_app.fox_registry_count - 1;
+                    g_app.ui_item_count = total_count;
+                    if (g_app.ui_cursor >= total_count)
+                        g_app.ui_cursor = total_count - 1;
 
                     int max_show = 6;
                     int start = 0;
                     if (g_app.ui_cursor >= max_show) start = g_app.ui_cursor - max_show + 1;
 
-                    for (int idx = start, row = 0; idx < g_app.fox_registry_count && row < max_show; idx++, row++) {
-                        fox_reg_entry_t *e = &g_app.fox_registry[idx];
+                    int nearby_count = 0;
+                    bool have_nearby_lock = false;
+                    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+                        nearby_count = g_app.fox_nearby_count;
+                        have_nearby_lock = true;
+                    }
+
+                    for (int idx = start, row = 0; idx < total_count && row < max_show; idx++, row++) {
+                        bool is_saved = (idx < g_app.fox_registry_count);
                         char mac_str[18];
-                        mac_to_str(e->mac, mac_str, sizeof(mac_str));
+                        char line1[FOX_REG_NICK_LEN + 8] = {0};
+                        char line2[DEVICE_NAME_LEN + 20] = {0};
+
+                        if (is_saved) {
+                            fox_reg_entry_t *e = &g_app.fox_registry[idx];
+                            mac_to_str(e->mac, mac_str, sizeof(mac_str));
+                            if (e->nickname[0]) {
+                                snprintf(line1, sizeof(line1), "%s", e->nickname);
+                            } else if (e->label[0]) {
+                                snprintf(line1, sizeof(line1), "%s", e->label);
+                            } else {
+                                snprintf(line1, sizeof(line1), "Saved target");
+                            }
+                            snprintf(line2, sizeof(line2), "%s", mac_str);
+                        } else {
+                            int nidx = idx - g_app.fox_registry_count;
+                            if (have_nearby_lock && nidx >= 0 && nidx < nearby_count) {
+                                ble_device_t *d = &g_app.fox_nearby[nidx];
+                                mac_to_str(d->mac, mac_str, sizeof(mac_str));
+                                if (d->name[0]) {
+                                    snprintf(line1, sizeof(line1), "%s", d->name);
+                                } else {
+                                    snprintf(line1, sizeof(line1), "Nearby BLE");
+                                }
+                                snprintf(line2, sizeof(line2), "%s  %d dBm", mac_str, d->rssi);
+                            } else {
+                                snprintf(line1, sizeof(line1), "Nearby BLE");
+                                snprintf(line2, sizeof(line2), "Unavailable");
+                            }
+                        }
 
                         int y_base = DISPLAY_CONTENT_TOP + 20 + row * 34;
                         bool selected = (idx == g_app.ui_cursor);
                         uint16_t row_bg = selected ? rgb565(30, 20, 8) : panel_bg;
-                        uint16_t row_border = selected ? accent : border_col;
+                        uint16_t row_border = selected ? accent : (is_saved ? border_col : rgb565(45, 58, 76));
 
                         display_draw_bordered_rect(4, y_base, LCD_H_RES - 8, 30, row_border, row_bg);
-                        if (e->label[0]) {
-                            display_draw_text(10, y_base + 3, e->label, selected ? accent : text_main, row_bg);
-                            display_draw_text(10, y_base + 15, mac_str, text_dim, row_bg);
+                        display_draw_text(10, y_base + 3, line1, selected ? accent : text_main, row_bg);
+                        display_draw_text(10, y_base + 15, line2, text_dim, row_bg);
+                        if (is_saved) {
+                            display_draw_text(LCD_H_RES - 60, y_base + 3, "SAVED", rgb565(74, 222, 128), row_bg);
                         } else {
-                            display_draw_text(10, y_base + 5, mac_str, selected ? accent : text_main, row_bg);
-                            display_draw_text(10, y_base + 17, "No label", text_dim, row_bg);
+                            display_draw_text(LCD_H_RES - 66, y_base + 3, "NEARBY", rgb565(56, 189, 248), row_bg);
                         }
                         if (selected) {
                             display_draw_text(LCD_H_RES - 24, y_base + 10, "GO", accent, row_bg);
                         }
                     }
+
+                    if (have_nearby_lock) xSemaphoreGive(g_app.device_mutex);
                 }
 
-                display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 24, "Hold=Select  3xClk=Back", text_dim, bg);
+                display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 24, "DblClk=Select Hold=Prev 3xClk=Back", text_dim, bg);
             } else {
                 /* ── Normal tracker view ── */
-                const char *led_mode_str = g_app.fox_led_mode ? "STING" : "DETECTOR";
-
             if (!g_app.fox_target_set) {
                 display_draw_bordered_rect(20, 80, LCD_H_RES - 40, 80, border_col, panel_bg);
                 display_draw_text(28, 90, "NO TARGET SET", text_main, panel_bg);
                 display_draw_hline(20, 120, LCD_H_RES - 40, dim_accent);
-                display_draw_text(28, 126, "DblClk=Registry", text_dim, panel_bg);
+                display_draw_text(28, 126, "Hold=Registry", text_dim, panel_bg);
                 display_draw_text(28, 138, "Web UI / Flock", text_dim, panel_bg);
 
                 int cx = LCD_H_RES / 2, cy = 190;
@@ -226,6 +317,9 @@ static void fox_beep_task(void *arg)
                     snprintf(buf, sizeof(buf), "Best: %d dBm", g_app.fox_rssi_best);
                     display_draw_text(8, 106, buf, text_main, bg);
 
+                    snprintf(buf, sizeof(buf), "Seen: now");
+                    display_draw_text(96, 106, buf, text_dim, bg);
+
                     display_draw_rect(4, 122, 2, 6, accent);
                     display_draw_rect(LCD_H_RES - 6, 122, 2, 6, accent);
                     int bar_w = rssi_to_bar(g_app.fox_rssi);
@@ -246,12 +340,24 @@ static void fox_beep_task(void *arg)
                     snprintf(buf, sizeof(buf), "%d%%", pct);
                     display_draw_text(72, 180, buf, text_main, bg);
 
+                    snprintf(buf, sizeof(buf), "Prox: %s", rssi_to_proximity_label(g_app.fox_rssi));
+                    display_draw_text_centered(191, buf, text_main, bg);
+
                     display_draw_bordered_rect(20, 196, LCD_H_RES - 40, 20, status_border, status_fill);
                     display_draw_text(40, 202, "TRACKING", status_text, status_fill);
                 } else {
+                    char buf[36];
+                    uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now > g_app.fox_last_seen)
+                        ? (now - g_app.fox_last_seen) / 1000U
+                        : 0;
+
                     display_draw_bordered_rect(20, 90, LCD_H_RES - 40, 50, rgb565(127, 29, 29), rgb565(30, 10, 10));
                     display_draw_text(40, 100, "SIGNAL LOST", rgb565(248, 113, 113), rgb565(30, 10, 10));
                     display_draw_text(30, 120, "Searching...", text_dim, rgb565(30, 10, 10));
+                    snprintf(buf, sizeof(buf), "Seen %lus ago", (unsigned long)last_seen_sec);
+                    display_draw_text(30, 132, buf, text_dim, rgb565(30, 10, 10));
+                    snprintf(buf, sizeof(buf), "Last prox: %s", rssi_to_proximity_label(g_app.fox_rssi));
+                    display_draw_text(22, 146, buf, text_dim, bg);
 
                     int cx = LCD_H_RES / 2, cy = 180;
                     display_draw_rect(cx - 20, cy, 40, 2, dim_accent);
@@ -327,6 +433,13 @@ void fox_hunter_start(void)
     g_app.fox_rssi = -100;
     g_app.fox_rssi_best = -100;
 
+    /* Reset nearby candidate list for this session */
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        memset(g_app.fox_nearby, 0, sizeof(g_app.fox_nearby));
+        g_app.fox_nearby_count = 0;
+        xSemaphoreGive(g_app.device_mutex);
+    }
+
     /* Try to load saved target from NVS */
     if (nvs_store_load_fox_target(g_app.fox_target_mac) == 0) {
         g_app.fox_target_set = true;
@@ -335,8 +448,8 @@ void fox_hunter_start(void)
         ESP_LOGI(TAG, "Loaded target: %s", mac_str);
     }
 
-    /* High-duty BLE scan for maximum responsiveness */
-    ble_scanner_start(fox_scan_cb, 16, 15, false);
+    /* Balanced scan: good responsiveness while preserving WiFi coexistence */
+    ble_scanner_start(fox_scan_cb, 100, 50, false);
 
     if (xTaskCreate(fox_beep_task, "fox_beep", TASK_STACK_UI, NULL, 3, &s_beep_task) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Fox Hunter task");
@@ -373,28 +486,91 @@ void fox_hunter_set_target_from_flock(int device_index)
     fox_hunter_set_target(g_app.devices[device_index].mac);
 }
 
+void fox_hunter_clear_target(void)
+{
+    memset(g_app.fox_target_mac, 0, sizeof(g_app.fox_target_mac));
+    g_app.fox_target_set = false;
+    g_app.fox_target_found = false;
+    g_app.fox_last_seen = 0;
+    g_app.fox_rssi = -100;
+    g_app.fox_rssi_best = -100;
+    nvs_store_clear_fox_target();
+    ESP_LOGI(TAG, "Target cleared");
+}
+
 bool fox_hunter_has_target(void)
 {
     return g_app.fox_target_set;
 }
 
-int fox_hunter_registry_add(const uint8_t mac[6], const char *label)
+static void reg_copy_field(char *dst, size_t dst_len, const char *src)
+{
+    if (!dst || dst_len == 0) return;
+    dst[0] = '\0';
+    if (!src || !src[0]) return;
+    strncpy(dst, src, dst_len - 1);
+    dst[dst_len - 1] = '\0';
+}
+
+int fox_hunter_registry_add(const uint8_t mac[6], const char *label,
+                            const char *original_name, const char *section)
 {
     /* Check for duplicate */
     for (int i = 0; i < g_app.fox_registry_count; i++) {
-        if (mac_equal(g_app.fox_registry[i].mac, mac)) return i; /* already exists */
+        if (mac_equal(g_app.fox_registry[i].mac, mac)) {
+            fox_reg_entry_t *existing = &g_app.fox_registry[i];
+            bool changed = false;
+            if (label && label[0] && !existing->label[0]) {
+                reg_copy_field(existing->label, sizeof(existing->label), label);
+                changed = true;
+            }
+            if (original_name && original_name[0] && !existing->original_name[0]) {
+                reg_copy_field(existing->original_name, sizeof(existing->original_name), original_name);
+                changed = true;
+            }
+            if (section && section[0] && !existing->section[0]) {
+                reg_copy_field(existing->section, sizeof(existing->section), section);
+                changed = true;
+            }
+            if (changed) nvs_store_save_fox_registry();
+            return i; /* already exists */
+        }
     }
     if (g_app.fox_registry_count >= FOX_REGISTRY_MAX) return -1; /* full */
+
     fox_reg_entry_t *e = &g_app.fox_registry[g_app.fox_registry_count];
-    memcpy(e->mac, mac, 6);
-    memset(e->label, 0, FOX_REG_LABEL_LEN);
-    if (label && label[0]) {
-        strncpy(e->label, label, FOX_REG_LABEL_LEN - 1);
-    }
+    memset(e, 0, sizeof(*e));
+    memcpy(e->mac, mac, sizeof(e->mac));
+    reg_copy_field(e->label, sizeof(e->label), label);
+    reg_copy_field(e->original_name, sizeof(e->original_name), original_name);
+    reg_copy_field(e->section, sizeof(e->section), (section && section[0]) ? section : "auto");
+
     g_app.fox_registry_count++;
     nvs_store_save_fox_registry();
     ESP_LOGI(TAG, "Registry add [%d]: %s", g_app.fox_registry_count - 1, label ? label : "");
     return g_app.fox_registry_count - 1;
+}
+
+int fox_hunter_registry_update(int index, const char *nickname,
+                               const char *notes, const char *section,
+                               const char *label, const char *original_name)
+{
+    if (index < 0 || index >= g_app.fox_registry_count) return -1;
+
+    fox_reg_entry_t *e = &g_app.fox_registry[index];
+
+    if (nickname) reg_copy_field(e->nickname, sizeof(e->nickname), nickname);
+    if (notes) reg_copy_field(e->notes, sizeof(e->notes), notes);
+    if (section) reg_copy_field(e->section, sizeof(e->section), section);
+    if (label) reg_copy_field(e->label, sizeof(e->label), label);
+    if (original_name) reg_copy_field(e->original_name, sizeof(e->original_name), original_name);
+
+    if (!e->section[0]) {
+        reg_copy_field(e->section, sizeof(e->section), "auto");
+    }
+
+    nvs_store_save_fox_registry();
+    return 0;
 }
 
 int fox_hunter_registry_remove(int index)
@@ -414,4 +590,23 @@ void fox_hunter_registry_select(int index)
     if (index < 0 || index >= g_app.fox_registry_count) return;
     fox_hunter_set_target(g_app.fox_registry[index].mac);
     g_app.fox_registry_open = false;
+}
+
+void fox_hunter_registry_select_view_index(int index)
+{
+    if (index < 0) return;
+
+    if (index < g_app.fox_registry_count) {
+        fox_hunter_registry_select(index);
+        return;
+    }
+
+    int nearby_index = index - g_app.fox_registry_count;
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(30)) == pdTRUE) {
+        if (nearby_index >= 0 && nearby_index < g_app.fox_nearby_count) {
+            fox_hunter_set_target(g_app.fox_nearby[nearby_index].mac);
+            g_app.fox_registry_open = false;
+        }
+        xSemaphoreGive(g_app.device_mutex);
+    }
 }

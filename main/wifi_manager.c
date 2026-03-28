@@ -23,13 +23,32 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         case WIFI_EVENT_AP_STACONNECTED: {
             wifi_event_ap_staconnected_t *e = data;
             ESP_LOGI(TAG, "Client connected, AID=%d", e->aid);
+            /* Store MAC if we have space */
+            if (g_app.wifi_clients < WIFI_MAX_AP_CLIENTS) {
+                memcpy(g_app.wifi_client_macs[g_app.wifi_clients], e->mac, 6);
+            }
             g_app.wifi_clients++;
             break;
         }
-        case WIFI_EVENT_AP_STADISCONNECTED:
+        case WIFI_EVENT_AP_STADISCONNECTED: {
+            wifi_event_ap_stadisconnected_t *e = data;
+            /* Remove MAC from tracked list */
+            uint8_t tracked = (g_app.wifi_clients < WIFI_MAX_AP_CLIENTS)
+                              ? g_app.wifi_clients : WIFI_MAX_AP_CLIENTS;
+            for (uint8_t i = 0; i < tracked; i++) {
+                if (memcmp(g_app.wifi_client_macs[i], e->mac, 6) == 0) {
+                    for (uint8_t j = i; j < tracked - 1; j++) {
+                        memcpy(g_app.wifi_client_macs[j],
+                               g_app.wifi_client_macs[j + 1], 6);
+                    }
+                    memset(g_app.wifi_client_macs[tracked - 1], 0, 6);
+                    break;
+                }
+            }
             if (g_app.wifi_clients > 0) g_app.wifi_clients--;
             ESP_LOGI(TAG, "Client disconnected");
             break;
+        }
         default:
             break;
         }
@@ -89,6 +108,7 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password, uint8_t 
             .channel        = channel,
             .max_connection = 4,
             .authmode       = WIFI_AUTH_WPA_WPA2_PSK,
+            .ssid_hidden    = 0,
             .pmf_cfg        = { .capable = true, .required = false },
             .pairwise_cipher = WIFI_CIPHER_TYPE_CCMP,
         },
@@ -100,6 +120,7 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password, uint8_t 
     if (strlen(password) < 8) {
         ap_cfg.ap.authmode = WIFI_AUTH_OPEN;
     }
+    ap_cfg.ap.ssid_hidden = g_app.ap_broadcast_enabled ? 0 : 1;
 
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_AP);
     if (err != ESP_OK) {
@@ -120,7 +141,8 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password, uint8_t 
     }
 
     g_app.wifi_clients = 0;
-    ESP_LOGI(TAG, "AP started: SSID=%s CH=%d", ssid, channel);
+    memset(g_app.wifi_client_macs, 0, sizeof(g_app.wifi_client_macs));
+    ESP_LOGI(TAG, "AP started: SSID=%s CH=%d hidden=%d", ssid, channel, ap_cfg.ap.ssid_hidden);
     return ESP_OK;
 }
 

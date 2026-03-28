@@ -113,3 +113,43 @@ void buzzer_melody_sky(void)
     vTaskDelay(pdMS_TO_TICKS(40));
     buzzer_tone(1320, 200);
 }
+
+void buzzer_play_profile(uint8_t profile)
+{
+    switch (profile) {
+    case SOUND_PROFILE_CHIRP:
+        buzzer_tone(1800, 45);
+        vTaskDelay(pdMS_TO_TICKS(22));
+        buzzer_tone(2300, 55);
+        break;
+
+    case SOUND_PROFILE_SONAR:
+        buzzer_tone(820, 70);
+        vTaskDelay(pdMS_TO_TICKS(35));
+        buzzer_tone(980, 80);
+        vTaskDelay(pdMS_TO_TICKS(35));
+        buzzer_tone(1140, 95);
+        break;
+
+    case SOUND_PROFILE_RETRO:
+        buzzer_tone(660, 60);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        buzzer_tone(990, 60);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        buzzer_tone(1320, 90);
+        break;
+
+    case SOUND_PROFILE_ALARM:
+        buzzer_tone(1400, 45);
+        vTaskDelay(pdMS_TO_TICKS(25));
+        buzzer_tone(900, 55);
+        vTaskDelay(pdMS_TO_TICKS(25));
+        buzzer_tone(1400, 45);
+        break;
+
+    case SOUND_PROFILE_STANDARD:
+    default:
+        buzzer_beep(70);
+        break;
+    }
+}
