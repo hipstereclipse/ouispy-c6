@@ -495,7 +495,7 @@ static void fox_beep_task(void *arg)
     /* Snapshot state for dirty-check: avoid full redraw when nothing visual changed */
     bool last_target_set = false;
     bool last_target_visible = false;
-    int8_t last_rssi_zone = -128;   /* coarse RSSI bucket for display */
+    int8_t last_rssi = -128;
     uint8_t last_led_mode = 0xFF;
     int last_wifi_clients = -1;
     bool last_registry_open = false;
@@ -512,13 +512,12 @@ static void fox_beep_task(void *arg)
         char target_header[DEVICE_NAME_LEN] = {0};
         fox_target_display_name(target_header, sizeof(target_header));
 
-        /* Coarse RSSI bucket (5 dBm steps) — avoid redrawing for tiny fluctuations */
-        int8_t rssi_zone = target_visible ? (g_app.fox_rssi / 5) : -128;
+        int8_t live_rssi = target_visible ? g_app.fox_rssi : -128;
 
         bool dirty = !display_drawn
                    || (g_app.fox_target_set != last_target_set)
                    || (target_visible != last_target_visible)
-                   || (rssi_zone != last_rssi_zone)
+                   || (live_rssi != last_rssi)
                    || (g_app.fox_led_mode != last_led_mode)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || (g_app.fox_registry_open != last_registry_open)
@@ -531,7 +530,7 @@ static void fox_beep_task(void *arg)
         if (dirty) {
             last_target_set = g_app.fox_target_set;
             last_target_visible = target_visible;
-            last_rssi_zone = rssi_zone;
+            last_rssi = live_rssi;
             last_led_mode = g_app.fox_led_mode;
             last_wifi_clients = g_app.wifi_clients;
             last_registry_open = g_app.fox_registry_open;
@@ -747,8 +746,9 @@ static void fox_beep_task(void *arg)
                     snprintf(buf, sizeof(buf), "Pulse %s", cadence);
                     display_draw_text(10, 134, buf, text_main, panel_bg);
 
-                    const int right_col_x = 100;
-                    const int right_col_w = (LCD_H_RES - 8) - right_col_x;
+                    const int right_col_x = 96;
+                    const int right_col_right = LCD_H_RES - 8;
+                    const int right_col_w = right_col_right - right_col_x;
                     int rssi_scale = 2;
                     int rssi_y = 104;
                     int title_w = display_text_width("LIVE SIGNAL");
@@ -759,23 +759,22 @@ static void fox_beep_task(void *arg)
                     int rssi_scaled_w = display_text_width(buf) * rssi_scale;
                     int dbm_w = display_text_width("dBm");
                     int pair_gap = 3;
-                    int pair_w = rssi_scaled_w + pair_gap + dbm_w;
+                    int dbm_x = right_col_right - dbm_w;
+                    int rssi_x = dbm_x - pair_gap - rssi_scaled_w;
 
-                    if (pair_w > right_col_w) {
+                    if (rssi_x < right_col_x) {
                         rssi_scale = 1;
                         rssi_y = 112;
                         rssi_scaled_w = display_text_width(buf) * rssi_scale;
-                        pair_w = rssi_scaled_w + pair_gap + dbm_w;
+                        rssi_x = dbm_x - pair_gap - rssi_scaled_w;
                     }
-                    if (pair_w > right_col_w) {
+                    if (rssi_x < right_col_x) {
                         pair_gap = 1;
-                        pair_w = rssi_scaled_w + pair_gap + dbm_w;
+                        rssi_x = dbm_x - pair_gap - rssi_scaled_w;
                     }
-
-                    int pair_x = right_col_x + ((right_col_w - pair_w) / 2);
-                    if (pair_x < right_col_x) pair_x = right_col_x;
-                    int rssi_x = pair_x;
-                    int dbm_x = rssi_x + rssi_scaled_w + pair_gap;
+                    if (rssi_x < right_col_x) {
+                        rssi_x = right_col_x;
+                    }
                     display_draw_text_scaled(rssi_x, rssi_y, buf, rssi_col, panel_bg, rssi_scale);
                     display_draw_text(dbm_x, 112, "dBm", text_dim, panel_bg);
 
