@@ -36,6 +36,34 @@ static storage_status_t classify_mount_error(esp_err_t err)
     }
 }
 
+static void mark_card_missing(void)
+{
+    if (s_card) {
+        esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+    }
+    s_sd_ready = false;
+    s_card = NULL;
+    s_sd_status = STORAGE_STATUS_NOT_FOUND;
+    refresh_storage_dependent_limits();
+}
+
+static void refresh_card_runtime_status(void)
+{
+    if (!s_sd_ready || !s_card) {
+        return;
+    }
+
+    /* CMD13 card-status check; if this fails the card was removed or bus is gone. */
+    esp_err_t err = sdmmc_get_status(s_card);
+    if (err == ESP_OK) {
+        s_sd_status = STORAGE_STATUS_AVAILABLE;
+        return;
+    }
+
+    ESP_LOGW(TAG, "microSD runtime status check failed: %s", esp_err_to_name(err));
+    mark_card_missing();
+}
+
 static void ensure_log_dir(void)
 {
     struct stat st = {0};
@@ -55,7 +83,7 @@ void storage_ext_init(void)
         .format_if_mount_failed = false,
         .max_files = 4,
         .allocation_unit_size = 16 * 1024,
-        .disk_status_check_enable = false,
+        .disk_status_check_enable = true,
         .use_one_fat = false,
     };
 
@@ -92,11 +120,13 @@ void storage_ext_init(void)
 
 bool storage_ext_is_available(void)
 {
+    refresh_card_runtime_status();
     return s_sd_ready;
 }
 
 storage_status_t storage_ext_get_status(void)
 {
+    refresh_card_runtime_status();
     return s_sd_status;
 }
 
@@ -130,6 +160,7 @@ uint32_t storage_ext_log_capacity_kb(void)
 esp_err_t storage_ext_append_log(const char *kind, const char *message)
 {
     if (!kind || !message) return ESP_ERR_INVALID_ARG;
+    refresh_card_runtime_status();
     if (!g_app.use_microsd_logs || !s_sd_ready) return ESP_ERR_INVALID_STATE;
 
     ensure_log_dir();
@@ -174,7 +205,7 @@ esp_err_t storage_ext_format(void)
         .format_if_mount_failed = true,  /* Format if FAT mount fails */
         .max_files = 4,
         .allocation_unit_size = 16 * 1024,
-        .disk_status_check_enable = false,
+        .disk_status_check_enable = true,
         .use_one_fat = false,
     };
 
