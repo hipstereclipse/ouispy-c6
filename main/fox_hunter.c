@@ -798,37 +798,37 @@ static void fox_beep_task(void *arg)
                     snprintf(buf, sizeof(buf), "Range %s", prox);
                     display_draw_text(10, 148, buf, text_main, panel_bg);
 
-                    display_draw_bordered_rect(4, 156, LCD_H_RES - 8, 42, border_col, panel_bg);
-                    display_draw_text(10, 160, "HOTTER SIGNAL = FASTER BEEPS", text_dim, panel_bg);
-                    display_draw_rect(8, 174, LCD_H_RES - 16, 10, rgb565(39, 39, 42));
+                    display_draw_bordered_rect(4, 160, LCD_H_RES - 8, 42, border_col, panel_bg);
+                    display_draw_text(10, 164, "HOTTER SIGNAL = FASTER BEEPS", text_dim, panel_bg);
+                    display_draw_rect(8, 178, LCD_H_RES - 16, 10, rgb565(39, 39, 42));
                     int bar_w = ((LCD_H_RES - 16) * pct) / 100;
-                    display_draw_rect(8, 174, bar_w, 10, rssi_col);
+                    display_draw_rect(8, 178, bar_w, 10, rssi_col);
 
                     for (int i = 1; i < 5; i++) {
                         int tx = 8 + ((LCD_H_RES - 16) * i) / 5;
-                        display_draw_rect(tx, 172, 1, 14, rgb565(63, 63, 70));
+                        display_draw_rect(tx, 176, 1, 14, rgb565(63, 63, 70));
                     }
 
                     snprintf(buf, sizeof(buf), "%d%%", pct);
-                    display_draw_text(10, 186, buf, text_main, panel_bg);
-                    display_draw_text(52, 186, "VERY FAR .. VERY CLOSE", text_dim, panel_bg);
+                    display_draw_text(10, 190, buf, text_main, panel_bg);
+                    display_draw_text(52, 190, "VERY FAR .. VERY CLOSE", text_dim, panel_bg);
 
                     for (int i = 0; i < 16; i++) {
                         int bar_h = 4 + i;
                         int bx = 8 + i * 10;
                         bool active = (i * 100 / 16) < pct;
                         uint16_t bar_col = active ? rssi_col : rgb565(39, 39, 42);
-                        display_draw_rect(bx, 208 + (18 - bar_h), 8, bar_h, bar_col);
+                        display_draw_rect(bx, 212 + (18 - bar_h), 8, bar_h, bar_col);
                     }
 
                     snprintf(buf, sizeof(buf), "Signal class: %s", prox);
-                    display_draw_text_centered(228, buf, text_main, bg);
+                    display_draw_text_centered(232, buf, text_main, bg);
 
-                    display_draw_bordered_rect(20, 248, LCD_H_RES - 40, 20, status_border, status_fill);
+                    display_draw_bordered_rect(20, 252, LCD_H_RES - 40, 20, status_border, status_fill);
                     if ((frame % 6) < 3) {
-                        display_draw_text(26, 254, "TRACKING LOCK", status_text, status_fill);
+                        display_draw_text(26, 258, "TRACKING LOCK", status_text, status_fill);
                     } else {
-                        display_draw_text(26, 254, "TRACKING LOCK .", status_text, status_fill);
+                        display_draw_text(26, 258, "TRACKING LOCK .", status_text, status_fill);
                     }
                 } else if (!show_lost_screen) {
                     char buf[36];
