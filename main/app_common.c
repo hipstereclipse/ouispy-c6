@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "app_common.h"
+#include "storage_ext.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +67,9 @@ void app_state_init(void)
     g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();
     g_app.drone_mutex     = xSemaphoreCreateMutex();
+    
+    /* Set drone capacity based on microSD availability */
+    g_app.max_drones_allowed = storage_ext_is_available() ? MAX_DRONES : MAX_DRONES_NO_SD;
 }
 
 uint32_t uptime_ms(void)

@@ -170,7 +170,7 @@ static drone_info_t *get_drone(const uint8_t *mac, int8_t rssi, uint8_t protocol
     }
 
     /* New drone */
-    if (g_app.drone_count < MAX_DRONES) {
+    if (g_app.drone_count < g_app.max_drones_allowed) {
         d = &g_app.drones[g_app.drone_count];
         memset(d, 0, sizeof(*d));
         memcpy(d->mac, mac, 6);

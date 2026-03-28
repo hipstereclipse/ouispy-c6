@@ -131,7 +131,8 @@ typedef struct {
 
 /* ── Drone Record ────────────────────────────────────────── */
 
-#define MAX_DRONES       16
+#define MAX_DRONES       64
+#define MAX_DRONES_NO_SD 16
 #define DRONE_ID_LEN     21
 #define WIFI_MAX_AP_CLIENTS  4
 #define FOX_NEARBY_MAX       40
@@ -214,6 +215,7 @@ typedef struct {
     /* Sky Spy drone list */
     drone_info_t    drones[MAX_DRONES];
     int             drone_count;
+    int             max_drones_allowed;    /* 16 without microSD, 64 with microSD */
     SemaphoreHandle_t drone_mutex;
 
     /* Currently tracked sky spy drone GPS (captured when selected with GPS enabled) */

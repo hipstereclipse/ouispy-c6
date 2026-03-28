@@ -107,7 +107,7 @@ static const char *menu_led_name(uint8_t idx)
     case MENU_LED_LIME: return "LIME";
     case MENU_LED_ICE: return "ICE";
     case MENU_LED_WHITE: return "WHITE";
-    case MENU_LED_DEEP_PURPLE: return "DEEP PURPLE";
+    case MENU_LED_DEEP_PURPLE: return "PURPLE";
     case MENU_LED_GOLD:
     default: return "GOLD";
     }
@@ -304,7 +304,7 @@ static void render_settings_screen(int cursor)
         "AP Broadcast",
         "Single AP Name",
         "Sleep Timeout",
-        "Menu LED Glow",
+        "Menu LED",
         "Sound: Flock",
         "Sound: Fox",
         "Sound: Sky",
@@ -375,7 +375,12 @@ static void render_settings_screen(int cursor)
             break;
         }
 
-        display_draw_text(LCD_H_RES - 84, y + 15, val, sel ? rgb565(196, 168, 255) : text_dim,
+        int value_x = LCD_H_RES - 10 - display_text_width(val);
+        if (value_x < 92) {
+            value_x = 92;
+        }
+        display_draw_text(value_x, y + 15, val,
+                          sel ? rgb565(196, 168, 255) : text_dim,
                           sel ? rgb565(32, 26, 44) : card);
     }
 
