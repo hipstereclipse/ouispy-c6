@@ -50,7 +50,8 @@ a:hover{color:#a5b4fc}
 .tab.t-sky.active{border-color:var(--skyblue);color:var(--skyblue);background:rgba(20,255,0,.08)}
 
 /* Content area */
-.content{padding:12px;transition:background .4s}
+.content{padding:12px;transition:background .4s,opacity .18s ease,transform .18s ease}
+.content.switching{opacity:.58;transform:translateY(4px);pointer-events:none}
 .content.mode-flock{background:linear-gradient(180deg,rgba(248,113,113,.07),transparent 50%)}
 .content.mode-fox{background:linear-gradient(180deg,rgba(251,146,60,.08),transparent 55%)}
 .content.mode-sky{background:linear-gradient(180deg,rgba(20,255,0,.08),transparent 50%)}
@@ -306,10 +307,52 @@ const $$ = s => document.querySelectorAll(s);
 let ws, state = {}, devices = [], drones = [];
 let wsRetryMs = 1500;
 let currentView = -1; // track which view is shown
+let uiFramePending = false;
+let pageSwitchPending = false;
+let modeSwitchInFlight = false;
+let foxLedToggleInFlight = false;
+let foxLedOptimistic = null;
 const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
 const GPS_TOGGLE_STORE_KEY = 'ouispy_gps_toggle_v1';
 let cameraLocations = loadCameraLocations();
 let gpsToggleEnabled = loadGpsToggleEnabled();
+
+function setMainSwitching(active) {
+  const main = $('#main');
+  if (main) main.classList.toggle('switching', !!active);
+}
+
+function scheduleUIUpdate(withPageTransition) {
+  if (withPageTransition) {
+    pageSwitchPending = true;
+    setMainSwitching(true);
+  }
+  if (uiFramePending) return;
+  uiFramePending = true;
+  requestAnimationFrame(() => {
+    uiFramePending = false;
+    updateUI();
+    if (pageSwitchPending) {
+      setTimeout(() => {
+        setMainSwitching(false);
+        pageSwitchPending = false;
+      }, 140);
+    }
+  });
+}
+
+function applyIncomingState(nextState) {
+  state = nextState || {};
+  if (foxLedOptimistic !== null) {
+    const serverLed = !!((state.fox || {}).ledMode);
+    if (serverLed === !!foxLedOptimistic) {
+      foxLedOptimistic = null;
+    } else {
+      state.fox = Object.assign({}, state.fox || {}, { ledMode: !!foxLedOptimistic });
+    }
+  }
+  scheduleUIUpdate(false);
+}
 
 function loadCameraLocations() {
   try {
@@ -541,7 +584,7 @@ function wsConnect() {
   };
   ws.onerror = () => ws.close();
   ws.onmessage = e => {
-    try { state = JSON.parse(e.data); updateUI(); } catch(ex) {}
+    try { applyIncomingState(JSON.parse(e.data)); } catch(ex) {}
   };
 }
 
@@ -561,6 +604,24 @@ async function api(path, body) {
   finally { clearTimeout(timer); }
 }
 
+async function apiPostOk(path, body) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const r = await fetch(path, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body || {}),
+      signal:controller.signal
+    });
+    return !!r.ok;
+  } catch(e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchDevices() { devices = await api('/api/devices') || []; }
 async function fetchDrones()  { drones  = await api('/api/drones') || []; }
 
@@ -570,7 +631,12 @@ function apInfoForMode(mode) {
 }
 
 async function setMode(m) {
+  m = Number(m);
+  if (modeSwitchInFlight) return;
+  if (Number(state.mode) === m && currentView === m) return;
   const modeName = ['Mode Select','Flock You','Fox Hunter','Sky Spy','Settings'][m] || 'Mode';
+  modeSwitchInFlight = true;
+  setMainSwitching(true);
   let r = await api('/api/mode', {mode: m});
   if (!r) {
     /* AP/webserver can briefly restart around mode transitions; retry once. */
@@ -579,11 +645,13 @@ async function setMode(m) {
   }
   if (r) {
     state.mode = m;
-    updateUI();
+    scheduleUIUpdate(true);
     toast(modeName + ' requested');
   } else {
+    setMainSwitching(false);
     toast('Mode request failed - retry');
   }
+  modeSwitchInFlight = false;
 }
 
 function goMainMenu() {
@@ -1095,7 +1163,7 @@ function renderFoxInner() {
               background:${f.ledMode?'rgba(56,189,248,.08)':'rgba(74,222,128,.08)'}">
             ${f.ledMode?'&#9889; STING':'&#9673; DETECTOR'}</button>
         </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--dim)">
+        <div id="foxLedHint" style="margin-top:6px;font-size:11px;color:var(--dim)">
           ${f.ledMode?'Blue LED brightness scales with signal strength':'Green standby &rarr; blinking red on detection (faster = closer)'}
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--dim)">
@@ -1190,6 +1258,7 @@ function renderFoxBars(rssi) {
 
 function updateFoxLive() {
   const f = state.fox || {};
+  updateFoxLedButton(!!f.ledMode, foxLedToggleInFlight);
   const el = $('#foxRssi'); if(el) { el.textContent = f.found ? f.rssi : '--'; el.style.color = rssiColor(f.rssi); }
   const best = $('#foxBest'); if(best) best.textContent = 'Best: ' + f.bestRssi + ' dBm';
   const seen = $('#foxLastSeen');
@@ -1235,8 +1304,54 @@ function updateFoxLive() {
   }
 }
 
-function toggleFoxLed() {
-  api('/api/fox/ledmode', {});
+function updateFoxLedButton(ledMode, pending) {
+  const btn = $('#foxLedBtn');
+  if (btn) {
+    btn.style.borderColor = ledMode ? 'var(--skyblue)' : 'var(--green)';
+    btn.style.color = ledMode ? 'var(--skyblue)' : 'var(--green)';
+    btn.style.background = ledMode ? 'rgba(56,189,248,.08)' : 'rgba(74,222,128,.08)';
+    btn.innerHTML = ledMode ? '&#9889; STING' : '&#9673; DETECTOR';
+    btn.disabled = !!pending;
+  }
+  const hint = $('#foxLedHint');
+  if (hint) {
+    const base = ledMode
+      ? 'Blue LED brightness scales with signal strength'
+      : 'Green standby &rarr; blinking red on detection (faster = closer)';
+    hint.innerHTML = pending ? (base + ' &middot; updating...') : base;
+  }
+}
+
+async function toggleFoxLed() {
+  if (foxLedToggleInFlight) return;
+  const current = !!((state.fox || {}).ledMode);
+  const next = !current;
+
+  foxLedToggleInFlight = true;
+  foxLedOptimistic = next;
+  state.fox = Object.assign({}, state.fox || {}, { ledMode: next });
+  updateFoxLedButton(next, true);
+
+  let ok = await apiPostOk('/api/fox/ledmode', { mode: next ? 1 : 0 });
+  if (!ok) {
+    await new Promise(resolve => setTimeout(resolve, 220));
+    ok = await apiPostOk('/api/fox/ledmode', { mode: next ? 1 : 0 });
+  }
+
+  if (!ok) {
+    foxLedOptimistic = null;
+    state.fox = Object.assign({}, state.fox || {}, { ledMode: current });
+    updateFoxLedButton(current, false);
+    toast('Detector mode toggle failed');
+    foxLedToggleInFlight = false;
+    return;
+  }
+
+  updateFoxLedButton(next, false);
+  setTimeout(() => {
+    if (foxLedOptimistic === next) foxLedOptimistic = null;
+  }, 1600);
+  foxLedToggleInFlight = false;
 }
 
 function setFoxTarget() {
@@ -1528,7 +1643,7 @@ setInterval(() => { if(ws && ws.readyState===1) ws.send('ping'); }, 3000);
 // Also poll state in case WS is slow
 setInterval(async () => {
   const s = await api('/api/state');
-  if(s) { state = s; updateUI(); }
+  if(s) applyIncomingState(s);
 }, 2000);
 </script>
 </body>
