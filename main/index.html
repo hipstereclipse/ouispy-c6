@@ -1752,7 +1752,7 @@ function renderSettings() {
         <div>Flock Devices: <strong>${state.deviceCount||0}</strong></div>
         <div>Drones Tracked: <strong>${state.droneCount||0}</strong></div>
         <div>Log Capacity: <strong>${state.logCapacityKb||768} kB</strong></div>
-        <div>microSD Status: <strong>${state.microsdAvailable ? 'Detected' : 'Not detected'}</strong></div>
+        <div>microSD Status: <strong>${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
       </div>
     </div>
     <div class="card">

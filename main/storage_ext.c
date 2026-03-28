@@ -14,8 +14,22 @@
 
 static const char *TAG = "storage_ext";
 static bool s_sd_ready = false;
-static bool s_sd_detected = false;  /* Card detected but may not be ready */
+static storage_status_t s_sd_status = STORAGE_STATUS_NOT_FOUND;
 static sdmmc_card_t *s_card = NULL;
+
+static storage_status_t classify_mount_error(esp_err_t err)
+{
+    switch (err) {
+    case ESP_OK:
+        return STORAGE_STATUS_AVAILABLE;
+    case ESP_ERR_TIMEOUT:
+    case ESP_ERR_NOT_FOUND:
+    case ESP_ERR_INVALID_RESPONSE:
+        return STORAGE_STATUS_NOT_FOUND;
+    default:
+        return STORAGE_STATUS_NEEDS_FORMAT;
+    }
+}
 
 static void ensure_log_dir(void)
 {
@@ -25,32 +39,11 @@ static void ensure_log_dir(void)
     }
 }
 
-static bool card_is_inserted(void)
-{
-    /* Try to detect the card without mounting */
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI2_HOST;
-    host.max_freq_khz = 1000;  /* Low frequency for detection */
-
-    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_cfg.host_id = SPI2_HOST;
-    slot_cfg.gpio_cs = PIN_SD_CS;
-    slot_cfg.gpio_cd = SDSPI_SLOT_NO_CD;
-    slot_cfg.gpio_wp = SDSPI_SLOT_NO_WP;
-
-    sdmmc_card_t card = {0};
-    esp_err_t err = sdmmc_card_init(&host, &card);
-    (void)slot_cfg;  /* Silence unused variable warning */
-    if (err == ESP_OK) {
-        return true;
-    }
-    return false;
-}
-
 void storage_ext_init(void)
 {
-    /* Check if card is physically inserted */
-    s_sd_detected = card_is_inserted();
+    s_sd_ready = false;
+    s_sd_status = STORAGE_STATUS_NOT_FOUND;
+    s_card = NULL;
 
     esp_vfs_fat_mount_config_t mount_cfg = {
         .format_if_mount_failed = false,
@@ -73,7 +66,7 @@ void storage_ext_init(void)
     esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_cfg, &mount_cfg, &s_card);
     if (err == ESP_OK) {
         s_sd_ready = true;
-        s_sd_detected = true;
+        s_sd_status = STORAGE_STATUS_AVAILABLE;
         ensure_log_dir();
         ESP_LOGI(TAG, "microSD mounted");
         return;
@@ -81,7 +74,8 @@ void storage_ext_init(void)
 
     s_sd_ready = false;
     s_card = NULL;
-    if (s_sd_detected) {
+    s_sd_status = classify_mount_error(err);
+    if (s_sd_status == STORAGE_STATUS_NEEDS_FORMAT) {
         ESP_LOGW(TAG, "microSD card detected but mount failed: %s", esp_err_to_name(err));
     } else {
         ESP_LOGW(TAG, "microSD card not found");
@@ -95,13 +89,7 @@ bool storage_ext_is_available(void)
 
 storage_status_t storage_ext_get_status(void)
 {
-    if (s_sd_ready) {
-        return STORAGE_STATUS_AVAILABLE;
-    }
-    if (s_sd_detected) {
-        return STORAGE_STATUS_NEEDS_FORMAT;
-    }
-    return STORAGE_STATUS_NOT_FOUND;
+    return s_sd_status;
 }
 
 const char *storage_ext_status_str(storage_status_t status)
@@ -116,6 +104,11 @@ const char *storage_ext_status_str(storage_status_t status)
     default:
         return "Unknown";
     }
+}
+
+bool storage_ext_status_is_present(storage_status_t status)
+{
+    return status == STORAGE_STATUS_AVAILABLE || status == STORAGE_STATUS_NEEDS_FORMAT;
 }
 
 uint32_t storage_ext_log_capacity_kb(void)
@@ -143,7 +136,7 @@ esp_err_t storage_ext_append_log(const char *kind, const char *message)
 
 esp_err_t storage_ext_format(void)
 {
-    if (!s_sd_detected) {
+    if (!storage_ext_status_is_present(s_sd_status)) {
         ESP_LOGE(TAG, "No card detected to format");
         return ESP_ERR_INVALID_STATE;
     }
@@ -179,7 +172,7 @@ esp_err_t storage_ext_format(void)
     esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_cfg, &mount_cfg, &s_card);
     if (err == ESP_OK) {
         s_sd_ready = true;
-        s_sd_detected = true;
+        s_sd_status = STORAGE_STATUS_AVAILABLE;
         ensure_log_dir();
         ESP_LOGI(TAG, "microSD formatted and mounted successfully");
         return ESP_OK;
@@ -187,6 +180,7 @@ esp_err_t storage_ext_format(void)
 
     s_sd_ready = false;
     s_card = NULL;
+    s_sd_status = classify_mount_error(err);
     ESP_LOGE(TAG, "microSD format failed: %s", esp_err_to_name(err));
     return err;
 }

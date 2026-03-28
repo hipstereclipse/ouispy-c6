@@ -272,9 +272,15 @@ static void render_mode_select_screen(int cursor)
     }
 
     /* microSD card status - bottom of display */
-    bool microsd_avail = storage_ext_is_available();
-    uint16_t microsd_color = microsd_avail ? rgb565(52, 211, 153) : rgb565(249, 115, 22);
-    const char *microsd_text = microsd_avail ? "microSD: Available" : "microSD: Not found";
+    storage_status_t microsd_status = storage_ext_get_status();
+    uint16_t microsd_color = microsd_status == STORAGE_STATUS_AVAILABLE
+                                 ? rgb565(52, 211, 153)
+                                 : (microsd_status == STORAGE_STATUS_NEEDS_FORMAT ? rgb565(251, 191, 36)
+                                                                                   : rgb565(249, 115, 22));
+    const char *microsd_text = microsd_status == STORAGE_STATUS_AVAILABLE
+                                   ? "microSD: Available"
+                                   : (microsd_status == STORAGE_STATUS_NEEDS_FORMAT ? "microSD: Needs format"
+                                                                                    : "microSD: Not found");
     display_draw_text_centered(240, microsd_text, microsd_color, bg);
 
     display_draw_hline(14, 252, LCD_H_RES - 28, purple_dim);

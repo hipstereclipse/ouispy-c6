@@ -72,7 +72,8 @@ Dual-protocol passive drone detection with a Naval CIC-inspired radar display.
 - Detected drones appear as amber blips on the radar, positioned by RSSI (distance) and MAC hash (angle) with a blinking animation
 - Contact list sidebar with protocol color bars (green = ASTM, red = DJI)
 - Green breathing LED while scanning, with orange flash on new drone ping
-- Tracks up to 16 simultaneous drones with 30-second automatic expiry
+- Tracks up to 16 simultaneous drones by default, and up to 64 when a usable microSD card is available
+- 30-second automatic expiry for stale drone contacts
 
 ---
 
@@ -89,9 +90,11 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - Fox Hunter target selection and LED mode toggle
 - Flock You GPS ON/OFF safety toggle; GPS marking only when enabled and secure (HTTPS)
 - GPS toggle is synchronized to firmware state (`gpsTagging`) so web + device stay in sync
-- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, and button shortcut mappings
+- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, button shortcut mappings, and microSD logging controls
+- microSD status is surfaced as `Available`, `Needs Format`, or `Not Found` in both the LCD UI and web UI
+- Unformatted but detected cards can be formatted directly from the on-device Settings menu
 - CSV data export for Flock You detections
-- Mobile-optimized responsive Tailwind CSS design
+- Mobile-optimized responsive embedded web UI
 
 ---
 
@@ -200,7 +203,7 @@ Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Web UI |
-| GET | `/api/state` | Full JSON state (mode, heap, uptime, settings, fox target, gpsTagging) |
+| GET | `/api/state` | Full JSON state (mode, heap, uptime, settings, fox target, gpsTagging, microSD status) |
 | GET | `/api/devices` | Flock You device list (JSON array) |
 | GET | `/api/drones` | Sky Spy drone list (JSON array) |
 | GET | `/api/export/csv` | Download Flock detections as CSV |
@@ -209,6 +212,8 @@ Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on
 | POST | `/api/fox/ledmode` | Set/toggle Fox Hunter LED mode (`{"mode":0|1}` sets explicitly; empty body toggles) |
 | POST | `/api/settings` | Update prefs: `{"brightness":200,"sound":true,"led":true,"gpsTagging":false}` |
 | WS | `/ws` | WebSocket for real-time push updates |
+
+`/api/state` now includes `microsdAvailable` and `microsdStatus` where `microsdStatus` is one of `Available`, `Needs Format`, or `Not Found`.
 
 ---
 

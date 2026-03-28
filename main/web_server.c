@@ -92,7 +92,9 @@ static char *build_state_json(void)
     bool gps_active = g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
     cJSON_AddBoolToObject(root, "gpsClientReady", gps_ready_fresh);
     cJSON_AddBoolToObject(root, "gpsTagActive", gps_active);
-    cJSON_AddBoolToObject(root, "microsdAvailable", storage_ext_is_available());
+    storage_status_t microsd_status = storage_ext_get_status();
+    cJSON_AddBoolToObject(root, "microsdAvailable", microsd_status == STORAGE_STATUS_AVAILABLE);
+    cJSON_AddStringToObject(root, "microsdStatus", storage_ext_status_str(microsd_status));
     cJSON_AddNumberToObject(root, "logCapacityKb", storage_ext_log_capacity_kb());
     cJSON_AddNumberToObject(root, "deviceCount", g_app.device_count);
     cJSON_AddNumberToObject(root, "droneCount", g_app.drone_count);
