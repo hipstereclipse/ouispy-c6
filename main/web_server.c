@@ -32,6 +32,8 @@
 #include <stdio.h>
 
 static const char *TAG = "websrv";
+static httpd_handle_t s_http_server = NULL;
+static httpd_handle_t s_https_server = NULL;
 
 /* Embedded index.html */
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -42,10 +44,19 @@ extern const uint8_t prvtkey_pem_start[]    asm("_binary_prvtkey_pem_start");
 extern const uint8_t prvtkey_pem_end[]      asm("_binary_prvtkey_pem_end");
 
 /* ── Serve main page ── */
+static void set_security_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
+    httpd_resp_set_hdr(req, "Permissions-Policy", "geolocation=(self)");
+}
+
 static esp_err_t get_index(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    set_security_headers(req);
     size_t len = index_html_end - index_html_start;
     return httpd_resp_send(req, (const char *)index_html_start, len);
 }
@@ -185,6 +196,7 @@ static esp_err_t get_state(httpd_req_t *req)
 {
     char *json = build_state_json();
     httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
     esp_err_t ret = httpd_resp_send(req, json, strlen(json));
     free(json);
     return ret;
@@ -194,6 +206,7 @@ static esp_err_t get_devices(httpd_req_t *req)
 {
     char *json = build_devices_json();
     httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
     esp_err_t ret = httpd_resp_send(req, json, strlen(json));
     free(json);
     return ret;
@@ -203,6 +216,7 @@ static esp_err_t get_drones(httpd_req_t *req)
 {
     char *json = build_drones_json();
     httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
     esp_err_t ret = httpd_resp_send(req, json, strlen(json));
     free(json);
     return ret;
@@ -610,31 +624,37 @@ static esp_err_t ws_handler(httpd_req_t *req)
 }
 
 /* ── Broadcast to all WS clients ── */
-void web_server_broadcast(const char *json)
+static void broadcast_on_server(httpd_handle_t server, const char *json)
 {
-    if (!g_app.http_server || !json) return;
+    if (!server || !json) return;
 
     size_t clients = 8;
     int fds[8];
-    if (httpd_get_client_list(g_app.http_server, &clients, fds) == ESP_OK) {
+    if (httpd_get_client_list(server, &clients, fds) == ESP_OK) {
         for (size_t i = 0; i < clients; i++) {
-            if (httpd_ws_get_fd_info(g_app.http_server, fds[i])
-                == HTTPD_WS_CLIENT_WEBSOCKET) {
+            if (httpd_ws_get_fd_info(server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
                 httpd_ws_frame_t pkt = {
                     .type = HTTPD_WS_TYPE_TEXT,
                     .payload = (uint8_t *)json,
                     .len = strlen(json),
                 };
-                httpd_ws_send_frame_async(g_app.http_server, fds[i], &pkt);
+                httpd_ws_send_frame_async(server, fds[i], &pkt);
             }
         }
     }
 }
 
+void web_server_broadcast(const char *json)
+{
+    if (!json) return;
+    broadcast_on_server(s_http_server, json);
+    broadcast_on_server(s_https_server, json);
+}
+
 /* ── Push task: sends state updates over WS every 500ms ── */
 static void ws_push_task(void *arg)
 {
-    while (g_app.http_server) {
+    while (s_http_server || s_https_server) {
         char *json = build_state_json();
         if (json) {
             web_server_broadcast(json);
@@ -675,6 +695,7 @@ static esp_err_t get_fox_nearby(httpd_req_t *req)
 {
     char *json = build_fox_nearby_json();
     httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
     esp_err_t ret = httpd_resp_send(req, json, strlen(json));
     free(json);
     return ret;
@@ -737,33 +758,48 @@ static void web_register_routes(httpd_handle_t srv)
 
 void web_server_start(void)
 {
+    bool started = false;
+
     httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
     ssl_config.httpd.max_uri_handlers = 20;
     ssl_config.httpd.stack_size = 8192;
     ssl_config.httpd.lru_purge_enable = true;
     ssl_config.httpd.server_port = 443;
-    ssl_config.httpd.ctrl_port = 32768;
+    ssl_config.httpd.ctrl_port = 32769;
     ssl_config.servercert = servercert_pem_start;
     ssl_config.servercert_len = servercert_pem_end - servercert_pem_start;
     ssl_config.prvtkey_pem = prvtkey_pem_start;
     ssl_config.prvtkey_len = prvtkey_pem_end - prvtkey_pem_start;
 
-    if (httpd_ssl_start(&g_app.http_server, &ssl_config) == ESP_OK) {
-        web_register_routes(g_app.http_server);
+    if (httpd_ssl_start(&s_https_server, &ssl_config) == ESP_OK) {
+        web_register_routes(s_https_server);
+        started = true;
         ESP_LOGI(TAG, "HTTPS web server started on port %d", ssl_config.httpd.server_port);
     } else {
-        httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-        config.max_uri_handlers = 20;
-        config.stack_size       = 8192;
-        config.lru_purge_enable = true;
-
-        if (httpd_start(&g_app.http_server, &config) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start HTTP/HTTPS server");
-            return;
-        }
-        web_register_routes(g_app.http_server);
-        ESP_LOGW(TAG, "HTTPS unavailable, HTTP server started on port %d", config.server_port);
+        ESP_LOGW(TAG, "HTTPS server failed to start; trying HTTP");
     }
+
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.max_uri_handlers = 20;
+    config.stack_size       = 8192;
+    config.lru_purge_enable = true;
+    config.server_port      = 80;
+    config.ctrl_port        = 32768;
+
+    if (httpd_start(&s_http_server, &config) == ESP_OK) {
+        web_register_routes(s_http_server);
+        started = true;
+        ESP_LOGI(TAG, "HTTP web server started on port %d", config.server_port);
+    } else {
+        ESP_LOGW(TAG, "HTTP server failed to start");
+    }
+
+    if (!started) {
+        ESP_LOGE(TAG, "Failed to start HTTP and HTTPS servers");
+        return;
+    }
+
+    g_app.http_server = s_https_server ? s_https_server : s_http_server;
 
     /* Start push task */
     if (xTaskCreate(ws_push_task, "ws_push", TASK_STACK_WS, NULL, 1, NULL) != pdPASS) {
@@ -773,8 +809,13 @@ void web_server_start(void)
 
 void web_server_stop(void)
 {
-    if (g_app.http_server) {
-        httpd_stop(g_app.http_server);
-        g_app.http_server = NULL;
+    if (s_https_server) {
+        httpd_ssl_stop(s_https_server);
+        s_https_server = NULL;
     }
+    if (s_http_server) {
+        httpd_stop(s_http_server);
+        s_http_server = NULL;
+    }
+    g_app.http_server = NULL;
 }

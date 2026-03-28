@@ -65,11 +65,13 @@ a:hover{color:#a5b4fc}
 .card h2{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:12px;font-weight:600}
 
 /* Stats row */
-.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .stat{text-align:center;padding:12px 6px;background:var(--card2);border-radius:10px;border:1px solid var(--border)}
 .stat .val{font-size:24px;font-weight:700;line-height:1.2}
 .stat .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
 .stat.highlight .val{color:var(--accent)}
+.stat.gps.on .val{color:var(--green)}
+.stat.gps.off .val{color:var(--rose)}
 
 /* Mode-specific card accents */
 .mode-flock .card{border-left:3px solid var(--flock)}
@@ -117,6 +119,8 @@ a:hover{color:#a5b4fc}
 .btn.danger{border-color:var(--rose);color:var(--rose)}
 .btn.danger:hover{background:rgba(240,113,139,.1)}
 .btn.sm{padding:5px 10px;font-size:11px}
+.btn[disabled]{opacity:.45;cursor:not-allowed;filter:saturate(.6)}
+.btn[disabled]:hover{border-color:var(--border);background:var(--card)}
 
 /* Proximity bar */
 .prox-wrap{position:relative;height:28px;background:var(--card2);border-radius:10px;overflow:hidden;border:1px solid var(--border)}
@@ -300,9 +304,12 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 let ws, state = {}, devices = [], drones = [];
+let wsRetryMs = 1500;
 let currentView = -1; // track which view is shown
 const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
+const GPS_TOGGLE_STORE_KEY = 'ouispy_gps_toggle_v1';
 let cameraLocations = loadCameraLocations();
+let gpsToggleEnabled = loadGpsToggleEnabled();
 
 function loadCameraLocations() {
   try {
@@ -318,12 +325,92 @@ function saveCameraLocations() {
   try { localStorage.setItem(CAM_LOC_STORE_KEY, JSON.stringify(cameraLocations)); } catch (e) {}
 }
 
+function loadGpsToggleEnabled() {
+  try {
+    return localStorage.getItem(GPS_TOGGLE_STORE_KEY) === 'on';
+  } catch (e) {
+    return false;
+  }
+}
+
+function saveGpsToggleEnabled() {
+  try { localStorage.setItem(GPS_TOGGLE_STORE_KEY, gpsToggleEnabled ? 'on' : 'off'); } catch (e) {}
+}
+
+function isIphoneFamily() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua);
+}
+
 function gpsCaps() {
   const secureHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   return {
     supported: !!navigator.geolocation,
-    secure: !!window.isSecureContext || secureHost
+    secure: !!window.isSecureContext || secureHost,
+    iphone: isIphoneFamily()
   };
+}
+
+function gpsSecureAvailable(caps) {
+  const c = caps || gpsCaps();
+  return c.supported && c.secure;
+}
+
+function gpsEffectiveEnabled() {
+  return gpsToggleEnabled && gpsSecureAvailable();
+}
+
+function setGpsToggle(enabled) {
+  const caps = gpsCaps();
+  if (enabled && !gpsSecureAvailable(caps)) {
+    gpsToggleEnabled = false;
+    saveGpsToggleEnabled();
+    if (!caps.supported) toast('GPS unavailable in this browser');
+    else if (caps.iphone && !caps.secure) toast('iPhone GPS requires HTTPS');
+    else toast('GPS requires HTTPS');
+    renderGpsStatus();
+    renderGpsToggleBlock();
+    if (Number(state.mode) === 1) renderDevList();
+    return;
+  }
+  gpsToggleEnabled = !!enabled;
+  saveGpsToggleEnabled();
+  renderGpsStatus();
+  renderGpsToggleBlock();
+  if (Number(state.mode) === 1) renderDevList();
+}
+
+function toggleGpsFeature() {
+  setGpsToggle(!gpsToggleEnabled);
+}
+
+function renderGpsToggleBlock() {
+  const block = $('#fGpsBlock');
+  const stateEl = $('#fGpsState');
+  const labelEl = $('#fGpsLabel');
+  const btn = $('#fGpsToggleBtn');
+  const caps = gpsCaps();
+  const allowed = gpsSecureAvailable(caps);
+  const on = gpsToggleEnabled && allowed;
+
+  if (block) block.className = 'stat gps ' + (on ? 'on' : 'off');
+  if (stateEl) stateEl.textContent = on ? 'ON' : 'OFF';
+
+  if (labelEl) {
+    if (!allowed && caps.iphone && !caps.secure) labelEl.textContent = 'GPS (HTTPS only)';
+    else if (!allowed) labelEl.textContent = 'GPS (Unavailable)';
+    else labelEl.textContent = 'GPS';
+  }
+
+  if (btn) {
+    btn.textContent = on ? 'GPS On' : 'GPS Off';
+    btn.style.borderColor = on ? 'var(--green)' : 'var(--rose)';
+    btn.style.color = on ? 'var(--green)' : 'var(--rose)';
+    btn.disabled = !allowed;
+    btn.title = !allowed
+      ? (caps.iphone && !caps.secure ? 'iPhone GPS requires HTTPS.' : 'GPS needs secure HTTPS context.')
+      : '';
+  }
 }
 
 function locKey(mac) {
@@ -361,8 +448,16 @@ function renderGpsStatus() {
     el.innerHTML = '<span class="gps-chip bad">GPS unavailable</span> Browser does not expose geolocation here. Use manual coordinates.';
     return;
   }
+  if (!gpsToggleEnabled && caps.secure) {
+    el.innerHTML = '<span class="gps-chip bad">GPS off</span> Enable GPS to allow location capture for camera pinning.';
+    return;
+  }
   if (!caps.secure) {
-    el.innerHTML = '<span class="gps-chip bad">HTTPS required</span> iPhone Safari needs HTTPS to share location. Use manual coordinates if needed.';
+    if (caps.iphone) {
+      el.innerHTML = '<span class="gps-chip bad">GPS off</span> iPhone Safari on HTTP cannot use geolocation. Open https://192.168.4.1 to enable GPS.';
+    } else {
+      el.innerHTML = '<span class="gps-chip bad">HTTPS required</span> Geolocation needs a secure context. Use https://192.168.4.1 or manual coordinates.';
+    }
     return;
   }
   el.innerHTML = '<span class="gps-chip">GPS ready</span> Secure context detected. You can save current phone position for each camera.';
@@ -404,12 +499,13 @@ function getCurrentPosition() {
 }
 
 async function markCameraLocation(mac) {
+  if (!gpsEffectiveEnabled()) {
+    toast('GPS is off or unavailable');
+    return;
+  }
   const caps = gpsCaps();
   if (!caps.supported || !caps.secure) {
-    if (promptManualLocation(mac)) {
-      toast('Location saved manually');
-      if (Number(state.mode) === 1) renderDevList();
-    }
+    toast('GPS unavailable in current context');
     return;
   }
   try {
@@ -437,8 +533,12 @@ function clearCameraLocation(mac) {
 function wsConnect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host + '/ws');
-  ws.onopen = () => { $('#wsDot').className = 'dot on'; ws.send('hi'); };
-  ws.onclose = () => { $('#wsDot').className = 'dot off'; setTimeout(wsConnect, 2000); };
+  ws.onopen = () => { $('#wsDot').className = 'dot on'; wsRetryMs = 1500; ws.send('hi'); };
+  ws.onclose = () => {
+    $('#wsDot').className = 'dot off';
+    setTimeout(wsConnect, wsRetryMs);
+    wsRetryMs = Math.min(Math.floor(wsRetryMs * 1.5), 8000);
+  };
   ws.onerror = () => ws.close();
   ws.onmessage = e => {
     try { state = JSON.parse(e.data); updateUI(); } catch(ex) {}
@@ -447,11 +547,18 @@ function wsConnect() {
 
 // ── API helpers ──
 async function api(path, body) {
-  const opts = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  const opts = body
+    ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:controller.signal}
+    : {signal:controller.signal};
   try {
     const r = await fetch(path, opts);
-    return await r.json();
+    const text = await r.text();
+    if (!text) return null;
+    return JSON.parse(text);
   } catch(e) { return null; }
+  finally { clearTimeout(timer); }
 }
 
 async function fetchDevices() { devices = await api('/api/devices') || []; }
@@ -612,12 +719,14 @@ function renderFlock() {
         <div class="stat highlight"><div class="val" id="fDevCount">${state.deviceCount||0}</div><div class="lbl">Detected</div></div>
         <div class="stat"><div class="val" id="fFlockCount" style="color:var(--flock)">--</div><div class="lbl">Flock</div></div>
         <div class="stat"><div class="val" id="fRavenCount" style="color:var(--fox)">--</div><div class="lbl">Raven</div></div>
+        <div class="stat gps off" id="fGpsBlock"><div class="val" id="fGpsState">OFF</div><div class="lbl" id="fGpsLabel">GPS</div></div>
       </div>
     </div>
     <div class="card">
       <h2>Detected Devices</h2>
       <div class="gps-toolbar">
         <div class="gps-status" id="gpsStatus"></div>
+        <button class="btn sm" id="fGpsToggleBtn" onclick="toggleGpsFeature()">GPS Off</button>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:10px">
         <button class="btn sm" style="border-color:var(--flock);color:var(--flock)" onclick="fetchDevices().then(()=>renderDevList())">Refresh</button>
@@ -626,6 +735,7 @@ function renderFlock() {
       <div id="devList" class="dev-list"></div>
     </div>`;
   renderGpsStatus();
+  renderGpsToggleBlock();
   renderDevList();
 }
 function renderDevList() {
@@ -642,8 +752,11 @@ function renderDevList() {
     const locHtml = loc
       ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank" onclick="event.stopPropagation()">map</a></div>`
       : '';
+    const gpsOn = gpsEffectiveEnabled();
+    const gpsDisabled = gpsOn ? '' : 'disabled';
+    const gpsTitle = gpsOn ? '' : 'title="GPS is off or unavailable in this context"';
     const gpsButtons = d.flock
-      ? `<button class="btn sm" onclick="event.stopPropagation();markCameraLocation('${htmlEsc(d.mac)}')">📍</button>
+      ? `<button class="btn sm" ${gpsDisabled} ${gpsTitle} onclick="event.stopPropagation();markCameraLocation('${htmlEsc(d.mac)}')">📍 GPS</button>
         <button class="btn sm" onclick="event.stopPropagation();if(promptManualLocation('${htmlEsc(d.mac)}')){toast('Manual location saved');renderDevList();}">Manual</button>
          ${loc ? `<button class="btn sm" onclick="event.stopPropagation();clearCameraLocation('${htmlEsc(d.mac)}')">✕</button>` : ''}`
       : '';
@@ -664,6 +777,8 @@ function renderDevList() {
 }
 function updateFlockLive() {
   const el = $('#fDevCount'); if(el) el.textContent = state.deviceCount || 0;
+  renderGpsStatus();
+  renderGpsToggleBlock();
   if (++flockRefresh % 6 === 0) fetchDevices().then(() => renderDevList());
 }
 function flagsStr(f) {

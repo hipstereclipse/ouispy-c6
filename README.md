@@ -80,11 +80,13 @@ Dual-protocol passive drone detection with a Naval CIC-inspired radar display.
 A modern single-page dark-themed web UI served directly from the device. Connect to the device's WiFi AP and open **https://192.168.4.1** (preferred) or **http://192.168.4.1** in any browser.
 
 For phone GPS features, use HTTPS. The device uses a local self-signed certificate, so your browser may show a one-time certificate warning before allowing secure-context APIs.
+If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS state OFF.
 
 - Real-time state updates via WebSocket (500ms push interval)
 - Mode switching with animated tab navigation
 - Per-mode device lists, proximity visualization, and drone cards
 - Fox Hunter target selection and LED mode toggle
+- Flock You GPS ON/OFF safety toggle; GPS marking only when enabled and secure (HTTPS)
 - Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, and button shortcut mappings
 - CSV data export for Flock You detections
 - Mobile-optimized responsive Tailwind CSS design
