@@ -4,6 +4,7 @@
  * Gestures detected per button:
  *   Single click  — navigate forward
  *   Double click  — navigate backward
+ *   Quintuple click — mode-specific quick action
  *   Hold  (~1 s)  — select / activate
  *   Long hold warning (5 s) — flash LED before reset
  *   Long hold (7 s) — return to mode selector
@@ -25,6 +26,7 @@ typedef enum {
     BTN_EVT_CLICK,          /* single click  */
     BTN_EVT_DOUBLE_CLICK,   /* double click   */
     BTN_EVT_TRIPLE_CLICK,   /* triple click   */
+    BTN_EVT_QUINTUPLE_CLICK,/* quintuple click */
     BTN_EVT_HOLD,           /* ~1 s hold      */
     BTN_EVT_LONG_HOLD_WARN, /* 5 s hold       */
     BTN_EVT_LONG_HOLD,      /* 7 s hold       */

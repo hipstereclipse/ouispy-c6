@@ -66,6 +66,11 @@ typedef enum {
     MENU_LED_SKY,
     MENU_LED_AMBER,
     MENU_LED_MAGENTA,
+    MENU_LED_RUBY,
+    MENU_LED_LIME,
+    MENU_LED_ICE,
+    MENU_LED_WHITE,
+    MENU_LED_DEEP_PURPLE,
     MENU_LED_COUNT,
 } menu_led_color_t;
 
@@ -213,6 +218,7 @@ typedef struct {
     bool            sound_enabled;
     bool            led_enabled;
     bool            ap_broadcast_enabled;
+    bool            single_ap_name_enabled; /* true = UniSpy-C6 for every mode */
     uint16_t        display_sleep_timeout_sec; /* 0 disables sleep */
     uint8_t         menu_led_color;
     uint8_t         sound_profile_flock;
@@ -245,6 +251,7 @@ extern app_state_t g_app;
 /* ── Utility Functions ───────────────────────────────────── */
 
 void     app_state_init(void);
+void     app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel);
 uint32_t uptime_ms(void);
 void     mac_to_str(const uint8_t mac[6], char *buf, size_t buf_len);
 bool     mac_equal(const uint8_t a[6], const uint8_t b[6]);

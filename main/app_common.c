@@ -9,6 +9,36 @@
 
 app_state_t g_app;
 
+void app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel)
+{
+    static const struct {
+        const char *ssid;
+        const char *pass;
+        uint8_t channel;
+    } mode_cfg[MODE_COUNT] = {
+        [MODE_SELECT]     = {"ouispy-c6",   "ouispy123",   6},
+        [MODE_FLOCK_YOU]  = {"flockyou-c6", "flockyou123", 6},
+        [MODE_FOX_HUNTER] = {"foxhunt-c6",  "foxhunt123",  6},
+        [MODE_SKY_SPY]    = {"skyspy-c6",   "skyspy1234",  6},
+        [MODE_SETTINGS]   = {"ouispy-c6",   "ouispy123",   6},
+    };
+
+    if (g_app.single_ap_name_enabled) {
+        if (ssid) *ssid = "UniSpy-C6";
+        if (pass) *pass = "ouispy123";
+        if (channel) *channel = 6;
+        return;
+    }
+
+    if (mode < 0 || mode >= MODE_COUNT) {
+        mode = MODE_SELECT;
+    }
+
+    if (ssid) *ssid = mode_cfg[mode].ssid;
+    if (pass) *pass = mode_cfg[mode].pass;
+    if (channel) *channel = mode_cfg[mode].channel;
+}
+
 void app_state_init(void)
 {
     memset(&g_app, 0, sizeof(g_app));
@@ -18,6 +48,7 @@ void app_state_init(void)
     g_app.sound_enabled   = true;
     g_app.led_enabled     = true;
     g_app.ap_broadcast_enabled = true;
+    g_app.single_ap_name_enabled = false;
     g_app.display_sleep_timeout_sec = 60;
     g_app.menu_led_color = MENU_LED_GOLD;
     g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;

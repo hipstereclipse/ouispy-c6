@@ -386,12 +386,15 @@ static void flock_display_task(void *arg)
         uint16_t text_soft = rgb565(113, 113, 122);
         uint16_t footer = rgb565(9, 9, 11);
         uint16_t border_col = rgb565(63, 63, 70);
+        const char *ap_ssid = NULL;
+        const char *ap_pass = NULL;
+        app_mode_ap_credentials(MODE_FLOCK_YOU, &ap_ssid, &ap_pass, NULL);
 
         /* Status bar */
         display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
         display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
         display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FLOCK YOU", text_main, dim_accent);
-        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "flockyou-c6", rgb565(228, 228, 231), dim_accent);
+        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, ap_ssid, rgb565(228, 228, 231), dim_accent);
 
         /* Content area */
         display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
@@ -467,7 +470,8 @@ static void flock_display_task(void *arg)
         /* Bottom bar with WiFi info */
         display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
         display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
-        snprintf(buf, sizeof(buf), "flockyou123  %dCli  %lukB",
+        snprintf(buf, sizeof(buf), "%s  %dCli  %lukB",
+             ap_pass,
                  g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
         display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer);
 

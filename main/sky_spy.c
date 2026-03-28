@@ -184,7 +184,7 @@ static drone_info_t *get_drone(const uint8_t *mac, int8_t rssi, uint8_t protocol
                  mac[3], mac[4], mac[5], protocol);
 
         buzzer_tone(1800, 100);
-        led_ctrl_set(0, 150, 255);
+        led_ctrl_set(255, 140, 0);
     }
 
     xSemaphoreGive(g_app.drone_mutex);
@@ -319,6 +319,9 @@ static void sky_display_task(void *arg)
         uint16_t panel_bg  = rgb565(2, 10, 0);
         uint16_t border_col= rgb565(0, 48, 0);
         uint16_t footer_bg = rgb565(2, 4, 2);
+        const char *ap_ssid = NULL;
+        const char *ap_pass = NULL;
+        app_mode_ap_credentials(MODE_SKY_SPY, &ap_ssid, &ap_pass, NULL);
 
         /* Static sections: status bar, content bg, footer — only on data change */
         /* Static header: only redraw on data change */
@@ -332,7 +335,7 @@ static void sky_display_task(void *arg)
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, rgb565(0, 12, 0));
             display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, phos_mid);
             display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", phosphor, rgb565(0, 12, 0));
-            display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "skyspy-c6", phos_mid, rgb565(0, 12, 0));
+            display_draw_text_centered(DISPLAY_STATUS_SUB_Y, ap_ssid, phos_mid, rgb565(0, 12, 0));
         }
 
         /* Radar area bg — always clear for sweep animation */
@@ -489,7 +492,8 @@ static void sky_display_task(void *arg)
             /* Footer — WiFi info */
             display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
             display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
-            snprintf(buf, sizeof(buf), "skyspy1234  %dCli  %lukB",
+            snprintf(buf, sizeof(buf), "%s  %dCli  %lukB",
+                     ap_pass,
                      g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
             display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer_bg);
         }
@@ -507,8 +511,8 @@ void sky_spy_start(void)
 
     g_app.drone_count = 0;
 
-    /* Breathing green LED like Flock You */
-    led_ctrl_breathe(8, 140, 30, 3000);
+    /* Breathing orange LED for Sky Spy scan state */
+    led_ctrl_breathe(255, 140, 0, 3000);
 
     /* Start WiFi sniffer (promiscuous on current AP channel) */
     sniffer_start(sky_wifi_cb);

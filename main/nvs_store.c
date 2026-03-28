@@ -87,6 +87,7 @@ void nvs_store_save_prefs(void)
         nvs_set_u8(h, "sound", g_app.sound_enabled ? 1 : 0);
         nvs_set_u8(h, "led", g_app.led_enabled ? 1 : 0);
         nvs_set_u8(h, "ap_bcast", g_app.ap_broadcast_enabled ? 1 : 0);
+        nvs_set_u8(h, "ap_single", g_app.single_ap_name_enabled ? 1 : 0);
         nvs_set_u16(h, "sleep_sec", g_app.display_sleep_timeout_sec);
         nvs_set_u8(h, "menu_led", g_app.menu_led_color);
         nvs_set_u8(h, "snd_flock", g_app.sound_profile_flock);
@@ -170,6 +171,7 @@ void nvs_store_load_prefs(void)
         if (nvs_get_u8(h, "sound", &tmp) == ESP_OK) g_app.sound_enabled = (tmp != 0);
         if (nvs_get_u8(h, "led", &tmp) == ESP_OK) g_app.led_enabled = (tmp != 0);
         if (nvs_get_u8(h, "ap_bcast", &tmp) == ESP_OK) g_app.ap_broadcast_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "ap_single", &tmp) == ESP_OK) g_app.single_ap_name_enabled = (tmp != 0);
         if (nvs_get_u16(h, "sleep_sec", &sleep_tmp) == ESP_OK) g_app.display_sleep_timeout_sec = sleep_tmp;
         if (nvs_get_u8(h, "menu_led", &tmp) == ESP_OK) g_app.menu_led_color = tmp;
         if (nvs_get_u8(h, "snd_flock", &tmp) == ESP_OK) g_app.sound_profile_flock = tmp;

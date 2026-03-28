@@ -19,7 +19,7 @@ Passively scans for Flock Safety ALPR cameras and ShotSpotter Raven acoustic sen
 - **5 detection heuristics**: OUI prefix matching (20 known prefixes), device name pattern matching, Manufacturer Company ID (0x09C8 / XUNTONG), Raven GATT service UUID fingerprinting, and firmware version estimation
 - Real-time scrollable device list on the LCD showing RSSI, hit count, and detection method
 - New detections trigger an orange LED warning flash, then transition to a breathing red/purple heartbeat whose intensity tracks signal strength
-- Green breathing LED when idle (no devices found), purple breathing when devices are present
+- Idle sweep alternates a dim amber/purple heartbeat so low activity remains visible
 - Tracks up to 200 unique devices with MAC deduplication
 - CSV export of all detections via web UI
 
@@ -43,7 +43,7 @@ Locks onto a single BLE MAC address and acts as a Geiger counter for Bluetooth �
   - LED off when no target is set or signal is lost
   - Solid **blue** glow when the target is detected, with brightness proportional to signal strength — dim blue when far, blazing bright blue at close range
 
-  Toggle between Detector and Sting with a button hold  while in Fox Hunter mode, or via the web UI toggle button.
+  Toggle between Detector and Sting with a double-click while in Fox Hunter mode, or via the web UI toggle button.
 
 ### Sky Spy — Drone Detector
 
@@ -57,7 +57,7 @@ Dual-protocol passive drone detection with a Naval CIC-inspired radar display.
 - Animated phosphor-green radar with rotating sweep, concentric range rings, cardinal labels, and fading trail
 - Detected drones appear as amber blips on the radar, positioned by RSSI (distance) and MAC hash (angle) with a blinking animation
 - Contact list sidebar with protocol color bars (green = ASTM, red = DJI)
-- Green breathing LED while scanning
+- Orange breathing LED while scanning, with orange flash on new drone ping
 - Tracks up to 16 simultaneous drones with 30-second automatic expiry
 
 ---
@@ -70,7 +70,7 @@ A modern single-page dark-themed web UI served directly from the device. Connect
 - Mode switching with animated tab navigation
 - Per-mode device lists, proximity visualization, and drone cards
 - Fox Hunter target selection and LED mode toggle
-- Settings panel: LCD brightness, sound enable/disable, LED enable/disable
+- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, and button shortcut mappings
 - CSV data export for Flock You detections
 - Mobile-optimized responsive Tailwind CSS design
 
@@ -84,25 +84,27 @@ A modern single-page dark-themed web UI served directly from the device. Connect
 |------|-----------|
 | Boot / Init | Phase-colored init sequence |
 | Mode Select | Solid green |
-| Flock You (idle) | Breathing green |
+| Flock You (idle) | Dim amber/purple heartbeat |
 | Flock You (devices found) | Breathing purple |
 | Fox Hunter — Detector (no target) | Solid orange |
 | Fox Hunter — Detector (target set, searching) | Solid green |
 | Fox Hunter — Detector (target detected) | Blinking red (speed = proximity) |
 | Fox Hunter — Sting (no target / searching) | Off |
 | Fox Hunter — Sting (target detected) | Solid blue (brightness = proximity) |
-| Sky Spy | Breathing green |
+| Sky Spy | Breathing orange |
 | Reset warning (hold 3.5s) | Triple orange flash |
 
 ### On-Device Controls
 
 - **Click**: Navigate to next item
 - **Double-click**: Navigate to previous item
+- **Triple-click**: Back/cancel (Fox main: clears target; Fox registry: exits registry)
+- **Quintuple-click**: In Flock You, lock selected/strongest Flock camera and jump to Fox Hunter
 - **Hold 0.5s**: Select / activate current item
 - **Hold 3.5s**: Orange LED warning flash (reset imminent)
 - **Hold 5s**: Return to mode selector
 
-In Fox Hunter mode, holding the button toggles between Detector and Sting LED modes.
+In operational modes, single-click can trigger per-button shortcuts (configurable in Settings). Default shortcuts are: BTN10 next mode, BTN11 Fox LED mode toggle (in Fox), BTN19 mode select.
 
 ### Hardware Requirements
 
@@ -114,7 +116,7 @@ In Fox Hunter mode, holding the button toggles between Detector and Sting LED mo
 
 ## WiFi Access Points
 
-Each mode runs its own dedicated WiFi AP:
+Each mode can run its own dedicated WiFi AP, or you can enable a unified AP name in Settings:
 
 | Mode | SSID | Password | Channel |
 |------|------|----------|---------|
@@ -122,6 +124,8 @@ Each mode runs its own dedicated WiFi AP:
 | Flock You | `flockyou-c6` | `flockyou123` | 6 |
 | Fox Hunter | `foxhunt-c6` | `foxhunt123` | 6 |
 | Sky Spy | `skyspy-c6` | `skyspy1234` | 6 |
+
+When `Single AP Name` is enabled, all modes use `UniSpy-C6` with password `ouispy123`.
 
 All modes use channel 6 for optimal alignment with Remote ID NAN detection.
 
@@ -148,7 +152,7 @@ idf.py build
 python flash.py --port COMx
 ```
 
-`flash.py` builds the firmware, flashes the board, starts a serial monitor, and saves timestamped crash logs under `logs/`.
+`flash.py` can first offer downloading the latest prebuilt firmware release (no local build required), or build from source, then flashes the board, starts a serial monitor, and saves timestamped crash logs under `logs/`.
 
 ### Manual Flash
 
@@ -163,7 +167,7 @@ Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on
 ### First Boot
 
 1. LCD shows the gold & purple OUI-SPY boot splash with startup melody
-2. Device starts a WiFi AP (`ouispy-c6` / `ouispy123`)
+2. Device starts a WiFi AP (`ouispy-c6` / `ouispy123` by default, or `UniSpy-C6` if unified AP naming is enabled)
 3. Connect your phone or laptop to the AP
 4. Open **http://192.168.4.1** in a browser
 5. Select a mode from the on-screen selector or web UI
@@ -195,7 +199,7 @@ app_common.c/h      — Shared types, global state, utility functions
 display.c/h         — ST7789V3 LCD driver (esp_lcd + LEDC backlight)
 led_ctrl.c/h        — WS2812 RGB LED with sine-wave breathing (RMT backend)
 buzzer.c/h          — Piezo buzzer via LEDC PWM
-button.c/h          — Multi-gesture button state machine (click, double-click, hold, long-hold)
+button.c/h          — Multi-gesture button state machine (click, double-click, triple-click, quintuple-click, hold, long-hold)
 nvs_store.c/h       — NVS persistent storage for mode + preferences
 wifi_manager.c/h    — SoftAP management with per-mode SSID
 ble_scanner.c/h     — NimBLE BLE scanner

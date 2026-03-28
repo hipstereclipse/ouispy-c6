@@ -31,6 +31,7 @@ static const char *TAG = "main";
 
 enum {
     SET_ITEM_AP_BROADCAST = 0,
+    SET_ITEM_SINGLE_AP_NAME,
     SET_ITEM_SLEEP_TIMEOUT,
     SET_ITEM_MENU_LED,
     SET_ITEM_SOUND_FLOCK,
@@ -65,6 +66,11 @@ static const mode_config_t MODE_CFG[MODE_COUNT] = {
     [MODE_SETTINGS]   = {"ouispy-c6",   "ouispy123",   6, RGB565_CONST(88, 28, 135)},
 };
 
+static void mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel)
+{
+    app_mode_ap_credentials(mode, ssid, pass, channel);
+}
+
 static const uint16_t SLEEP_OPTIONS[] = {0, 15, 30, 60, 120, 300};
 
 static void set_init_phase_led(uint8_t r, uint8_t g, uint8_t b)
@@ -79,6 +85,11 @@ static void get_menu_led_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b)
     case MENU_LED_SKY:     *r = 50;  *g = 140; *b = 255; break;
     case MENU_LED_AMBER:   *r = 250; *g = 145; *b = 10;  break;
     case MENU_LED_MAGENTA: *r = 220; *g = 70;  *b = 200; break;
+    case MENU_LED_RUBY:    *r = 255; *g = 45;  *b = 95;  break;
+    case MENU_LED_LIME:    *r = 115; *g = 255; *b = 25;  break;
+    case MENU_LED_ICE:     *r = 120; *g = 235; *b = 255; break;
+    case MENU_LED_WHITE:   *r = 245; *g = 245; *b = 245; break;
+    case MENU_LED_DEEP_PURPLE: *r = 150; *g = 70; *b = 255; break;
     case MENU_LED_GOLD:
     default:               *r = 255; *g = 190; *b = 36;  break;
     }
@@ -91,6 +102,11 @@ static const char *menu_led_name(uint8_t idx)
     case MENU_LED_SKY: return "SKY";
     case MENU_LED_AMBER: return "AMBER";
     case MENU_LED_MAGENTA: return "MAGENTA";
+    case MENU_LED_RUBY: return "RUBY";
+    case MENU_LED_LIME: return "LIME";
+    case MENU_LED_ICE: return "ICE";
+    case MENU_LED_WHITE: return "WHITE";
+    case MENU_LED_DEEP_PURPLE: return "DEEP PURPLE";
     case MENU_LED_GOLD:
     default: return "GOLD";
     }
@@ -144,6 +160,10 @@ static void wake_display_on_input(void)
 static void restart_ap_for_mode(app_mode_t mode)
 {
     if (mode < 0 || mode >= MODE_COUNT) return;
+    const char *ssid = NULL;
+    const char *pass = NULL;
+    uint8_t channel = 6;
+    mode_ap_credentials(mode, &ssid, &pass, &channel);
 
     esp_err_t err = wifi_manager_stop();
     if (err != ESP_OK) {
@@ -151,7 +171,7 @@ static void restart_ap_for_mode(app_mode_t mode)
     }
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    err = wifi_manager_start_ap(MODE_CFG[mode].ssid, MODE_CFG[mode].pass, MODE_CFG[mode].channel);
+    err = wifi_manager_start_ap(ssid, pass, channel);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start AP for mode %d: %s", mode, esp_err_to_name(err));
     }
@@ -220,9 +240,14 @@ static void render_mode_select_screen(int cursor)
 
     display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, card_bg);
     display_draw_text(14, 53, "WiFi:", text_dim, card_bg);
-    display_draw_text(44, 53, MODE_CFG[MODE_SELECT].ssid, text_main, card_bg);
+    const char *ap_ssid = MODE_CFG[MODE_SELECT].ssid;
+    const char *ap_pass = MODE_CFG[MODE_SELECT].pass;
+    uint8_t ap_channel = MODE_CFG[MODE_SELECT].channel;
+    mode_ap_credentials(g_app.current_mode, &ap_ssid, &ap_pass, &ap_channel);
+
+    display_draw_text(44, 53, ap_ssid, text_main, card_bg);
     display_draw_text(14, 67, "Pass:", text_dim, card_bg);
-    display_draw_text(44, 67, MODE_CFG[MODE_SELECT].pass, text_main, card_bg);
+    display_draw_text(44, 67, ap_pass, text_main, card_bg);
     display_draw_text(14, 81, g_app.ap_broadcast_enabled ? "AP:":"AP:", text_dim, card_bg);
     display_draw_text(44, 81, g_app.ap_broadcast_enabled ? "Broadcast" : "Hidden", text_link, card_bg);
 
@@ -270,6 +295,7 @@ static void render_settings_screen(int cursor)
 
     const char *labels[SET_ITEM_COUNT] = {
         "AP Broadcast",
+        "Single AP Name",
         "Sleep Timeout",
         "Menu LED Glow",
         "Sound: Flock",
@@ -304,6 +330,9 @@ static void render_settings_screen(int cursor)
             break;
         case SET_ITEM_SLEEP_TIMEOUT:
             snprintf(val, sizeof(val), "%s", g_app.display_sleep_timeout_sec == 0 ? "OFF" : "SECONDS");
+            break;
+        case SET_ITEM_SINGLE_AP_NAME:
+            snprintf(val, sizeof(val), "%s", g_app.single_ap_name_enabled ? "UNISPY" : "PER MODE");
             break;
         case SET_ITEM_MENU_LED:
             snprintf(val, sizeof(val), "%s", menu_led_name(g_app.menu_led_color));
@@ -557,6 +586,13 @@ static void apply_settings_item_action(void)
         log_msg = g_app.ap_broadcast_enabled ? "ap_broadcast_on" : "ap_broadcast_off";
         break;
 
+    case SET_ITEM_SINGLE_AP_NAME:
+        g_app.single_ap_name_enabled = !g_app.single_ap_name_enabled;
+        restart_ap_for_mode(g_app.current_mode);
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = g_app.single_ap_name_enabled ? "ap_name_unified" : "ap_name_per_mode";
+        break;
+
     case SET_ITEM_SLEEP_TIMEOUT: {
         int idx = 0;
         for (int i = 0; i < (int)(sizeof(SLEEP_OPTIONS) / sizeof(SLEEP_OPTIONS[0])); i++) {
@@ -649,6 +685,41 @@ static void on_button_event(button_id_t btn, button_event_t evt)
     }
 
     switch (evt) {
+    case BTN_EVT_QUINTUPLE_CLICK:
+        if (g_app.current_mode == MODE_FLOCK_YOU) {
+            int target_idx = -1;
+            if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                /* Prefer currently selected flock camera, else strongest visible camera. */
+                if (g_app.device_count > 0 && g_app.ui_cursor >= 0 && g_app.ui_cursor < g_app.device_count) {
+                    ble_device_t *sel = &g_app.devices[g_app.ui_cursor];
+                    if (sel->is_flock && !sel->is_raven) {
+                        target_idx = g_app.ui_cursor;
+                    }
+                }
+                if (target_idx < 0) {
+                    int best_rssi = -127;
+                    for (int i = 0; i < g_app.device_count; i++) {
+                        if (g_app.devices[i].is_flock && !g_app.devices[i].is_raven && g_app.devices[i].rssi >= best_rssi) {
+                            best_rssi = g_app.devices[i].rssi;
+                            target_idx = i;
+                        }
+                    }
+                }
+                xSemaphoreGive(g_app.device_mutex);
+            }
+
+            if (target_idx >= 0) {
+                fox_hunter_set_target_from_flock(target_idx);
+                g_app.requested_mode = MODE_FOX_HUNTER;
+                g_app.mode_change_pending = true;
+                storage_ext_append_log("flock", "quintuple_click_track_in_fox");
+                buzzer_tone(1500, 110);
+            } else {
+                buzzer_tone(520, 90);
+            }
+        }
+        break;
+
     case BTN_EVT_CLICK:
         if (g_app.ui_item_count > 0) {
             g_app.ui_cursor = (g_app.ui_cursor + 1) % g_app.ui_item_count;

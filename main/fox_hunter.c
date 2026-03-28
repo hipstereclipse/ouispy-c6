@@ -25,11 +25,327 @@
 #include "display.h"
 #include <string.h>
 #include <math.h>
+#include <limits.h>
 
 static const char *TAG = "fox";
 static TaskHandle_t s_beep_task = NULL;
 
 #define TARGET_LOST_MS  5000
+#define FOX_NEARBY_SECTION_MAX     4
+#define FOX_FOLLOWING_SECTION_MAX  4
+#define FOX_DETECTED_SECTION_MAX   6
+#define FOX_NEARBY_RECENT_MS       8000
+#define FOX_FOLLOWING_RECENT_MS    12000
+#define FOX_FOLLOWING_MIN_SEEN_MS  20000
+#define FOX_DETECTED_RECENT_MS     30000
+
+typedef struct {
+    int nearby_count;
+    int following_count;
+    int detected_count;
+    ble_device_t nearby[FOX_NEARBY_SECTION_MAX];
+    ble_device_t following[FOX_FOLLOWING_SECTION_MAX];
+    ble_device_t detected[FOX_DETECTED_SECTION_MAX];
+} fox_candidate_snapshot_t;
+
+static void fox_target_display_name(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+    if (!g_app.fox_target_set) return;
+
+    for (int i = 0; i < g_app.fox_registry_count; i++) {
+        fox_reg_entry_t *e = &g_app.fox_registry[i];
+        if (!mac_equal(e->mac, g_app.fox_target_mac)) continue;
+        if (e->nickname[0]) {
+            snprintf(out, out_len, "%s", e->nickname);
+            return;
+        }
+        if (e->label[0]) {
+            snprintf(out, out_len, "%s", e->label);
+            return;
+        }
+        if (e->original_name[0]) {
+            snprintf(out, out_len, "%s", e->original_name);
+            return;
+        }
+    }
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        for (int i = 0; i < g_app.fox_nearby_count; i++) {
+            ble_device_t *d = &g_app.fox_nearby[i];
+            if (mac_equal(d->mac, g_app.fox_target_mac) && d->name[0]) {
+                snprintf(out, out_len, "%s", d->name);
+                xSemaphoreGive(g_app.device_mutex);
+                return;
+            }
+        }
+
+        for (int i = 0; i < g_app.device_count; i++) {
+            ble_device_t *d = &g_app.devices[i];
+            if (mac_equal(d->mac, g_app.fox_target_mac) && d->name[0]) {
+                snprintf(out, out_len, "%s", d->name);
+                xSemaphoreGive(g_app.device_mutex);
+                return;
+            }
+        }
+        xSemaphoreGive(g_app.device_mutex);
+    }
+}
+
+static bool fox_idx_in_list(const int *list, int list_count, int value)
+{
+    for (int i = 0; i < list_count; i++) {
+        if (list[i] == value) return true;
+    }
+    return false;
+}
+
+/* Requires g_app.device_mutex held while g_app.fox_nearby is being examined. */
+static int fox_build_likely_nearby_locked(int *out_idx, int out_max, uint32_t now)
+{
+    int count = 0;
+
+    for (int i = 0; i < g_app.fox_nearby_count; i++) {
+        ble_device_t *d = &g_app.fox_nearby[i];
+        uint32_t age_ms = (now > d->last_seen) ? (now - d->last_seen) : 0;
+
+        if (age_ms > FOX_NEARBY_RECENT_MS) continue;
+        if (d->rssi < -95) continue;
+
+        if (count < out_max) {
+            out_idx[count++] = i;
+            continue;
+        }
+
+        int weakest_pos = 0;
+        for (int j = 1; j < count; j++) {
+            ble_device_t *a = &g_app.fox_nearby[out_idx[j]];
+            ble_device_t *b = &g_app.fox_nearby[out_idx[weakest_pos]];
+            if (a->rssi < b->rssi ||
+                (a->rssi == b->rssi && a->rssi_best < b->rssi_best)) {
+                weakest_pos = j;
+            }
+        }
+
+        ble_device_t *cur = &g_app.fox_nearby[i];
+        ble_device_t *weakest = &g_app.fox_nearby[out_idx[weakest_pos]];
+        if (cur->rssi > weakest->rssi ||
+            (cur->rssi == weakest->rssi && cur->rssi_best > weakest->rssi_best)) {
+            out_idx[weakest_pos] = i;
+        }
+    }
+
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            ble_device_t *a = &g_app.fox_nearby[out_idx[i]];
+            ble_device_t *b = &g_app.fox_nearby[out_idx[j]];
+            bool swap = false;
+            if (b->rssi > a->rssi) swap = true;
+            else if (b->rssi == a->rssi && b->rssi_best > a->rssi_best) swap = true;
+            else if (b->rssi == a->rssi && b->rssi_best == a->rssi_best && b->hit_count > a->hit_count) swap = true;
+            if (swap) {
+                int tmp = out_idx[i];
+                out_idx[i] = out_idx[j];
+                out_idx[j] = tmp;
+            }
+        }
+    }
+
+    return count;
+}
+
+static int32_t fox_follow_score(const ble_device_t *d, uint32_t now)
+{
+    uint32_t age_ms = (now > d->last_seen) ? (now - d->last_seen) : 0;
+    if (age_ms > FOX_FOLLOWING_RECENT_MS) return INT32_MIN;
+
+    uint32_t seen_ms = (d->last_seen > d->first_seen) ? (d->last_seen - d->first_seen) : 0;
+    if (seen_ms < FOX_FOLLOWING_MIN_SEEN_MS) return INT32_MIN;
+    if (d->hit_count < 4) return INT32_MIN;
+    if (d->rssi < -82 && d->rssi_best < -78) return INT32_MIN;
+
+    int32_t seen_score = (int32_t)(seen_ms / 1000U);
+    if (seen_score > 900) seen_score = 900;
+
+    int32_t rssi_score = d->rssi + 95;
+    if (rssi_score < 0) rssi_score = 0;
+    if (rssi_score > 80) rssi_score = 80;
+
+    int32_t best_score = d->rssi_best + 95;
+    if (best_score < 0) best_score = 0;
+    if (best_score > 80) best_score = 80;
+
+    int32_t hit_score = d->hit_count;
+    if (hit_score > 600) hit_score = 600;
+
+    int32_t age_penalty = (int32_t)(age_ms / 250U);
+    if (age_penalty > 120) age_penalty = 120;
+
+    return (seen_score * 4) + (rssi_score * 3) + (best_score * 2) + (hit_score / 4) - (age_penalty * 3);
+}
+
+static int32_t fox_detected_score(const ble_device_t *d, uint32_t now)
+{
+    uint32_t age_ms = (now > d->last_seen) ? (now - d->last_seen) : 0;
+    if (age_ms > FOX_DETECTED_RECENT_MS) return INT32_MIN;
+
+    int32_t recency = 300 - (int32_t)(age_ms / 100U);
+    if (recency < 0) recency = 0;
+
+    int32_t rssi_score = d->rssi + 100;
+    if (rssi_score < 0) rssi_score = 0;
+    if (rssi_score > 85) rssi_score = 85;
+
+    int32_t hit_score = d->hit_count;
+    if (hit_score > 200) hit_score = 200;
+
+    return (recency * 3) + (rssi_score * 2) + hit_score;
+}
+
+/* Requires g_app.device_mutex held while g_app.fox_nearby is being examined. */
+static int fox_build_likely_following_locked(int *out_idx, int out_max,
+                                             const int *exclude_idx, int exclude_count,
+                                             uint32_t now)
+{
+    int cand_idx[FOX_NEARBY_MAX] = {0};
+    int32_t cand_score[FOX_NEARBY_MAX] = {0};
+    int cand_count = 0;
+
+    for (int i = 0; i < g_app.fox_nearby_count; i++) {
+        if (fox_idx_in_list(exclude_idx, exclude_count, i)) continue;
+
+        int32_t score = fox_follow_score(&g_app.fox_nearby[i], now);
+        if (score == INT32_MIN) continue;
+
+        cand_idx[cand_count] = i;
+        cand_score[cand_count] = score;
+        cand_count++;
+    }
+
+    for (int i = 0; i < cand_count - 1; i++) {
+        int best = i;
+        for (int j = i + 1; j < cand_count; j++) {
+            if (cand_score[j] > cand_score[best]) {
+                best = j;
+            } else if (cand_score[j] == cand_score[best]) {
+                ble_device_t *dj = &g_app.fox_nearby[cand_idx[j]];
+                ble_device_t *db = &g_app.fox_nearby[cand_idx[best]];
+                if (dj->rssi > db->rssi ||
+                    (dj->rssi == db->rssi && dj->hit_count > db->hit_count)) {
+                    best = j;
+                }
+            }
+        }
+        if (best != i) {
+            int tmp_i = cand_idx[i];
+            cand_idx[i] = cand_idx[best];
+            cand_idx[best] = tmp_i;
+            int32_t tmp_s = cand_score[i];
+            cand_score[i] = cand_score[best];
+            cand_score[best] = tmp_s;
+        }
+    }
+
+    int out_count = (cand_count < out_max) ? cand_count : out_max;
+    for (int i = 0; i < out_count; i++) {
+        out_idx[i] = cand_idx[i];
+    }
+
+    return out_count;
+}
+
+/* Requires g_app.device_mutex held while g_app.fox_nearby is being examined. */
+static int fox_build_detected_locked(int *out_idx, int out_max,
+                                     const int *exclude_a, int exclude_a_count,
+                                     const int *exclude_b, int exclude_b_count,
+                                     uint32_t now)
+{
+    int cand_idx[FOX_NEARBY_MAX] = {0};
+    int32_t cand_score[FOX_NEARBY_MAX] = {0};
+    int cand_count = 0;
+
+    for (int i = 0; i < g_app.fox_nearby_count; i++) {
+        if (fox_idx_in_list(exclude_a, exclude_a_count, i)) continue;
+        if (fox_idx_in_list(exclude_b, exclude_b_count, i)) continue;
+
+        int32_t score = fox_detected_score(&g_app.fox_nearby[i], now);
+        if (score == INT32_MIN) continue;
+
+        cand_idx[cand_count] = i;
+        cand_score[cand_count] = score;
+        cand_count++;
+    }
+
+    for (int i = 0; i < cand_count - 1; i++) {
+        int best = i;
+        for (int j = i + 1; j < cand_count; j++) {
+            if (cand_score[j] > cand_score[best]) {
+                best = j;
+            } else if (cand_score[j] == cand_score[best]) {
+                ble_device_t *dj = &g_app.fox_nearby[cand_idx[j]];
+                ble_device_t *db = &g_app.fox_nearby[cand_idx[best]];
+                uint32_t age_j = (now > dj->last_seen) ? (now - dj->last_seen) : 0;
+                uint32_t age_b = (now > db->last_seen) ? (now - db->last_seen) : 0;
+                if (age_j < age_b || (age_j == age_b && dj->rssi > db->rssi)) {
+                    best = j;
+                }
+            }
+        }
+        if (best != i) {
+            int tmp_i = cand_idx[i];
+            cand_idx[i] = cand_idx[best];
+            cand_idx[best] = tmp_i;
+            int32_t tmp_s = cand_score[i];
+            cand_score[i] = cand_score[best];
+            cand_score[best] = tmp_s;
+        }
+    }
+
+    int out_count = (cand_count < out_max) ? cand_count : out_max;
+    for (int i = 0; i < out_count; i++) {
+        out_idx[i] = cand_idx[i];
+    }
+
+    return out_count;
+}
+
+/* Requires g_app.device_mutex held while g_app.fox_nearby is being examined. */
+static void fox_build_candidate_snapshot_locked(fox_candidate_snapshot_t *snap, uint32_t now)
+{
+    int nearby_idx[FOX_NEARBY_SECTION_MAX] = {0};
+    int following_idx[FOX_FOLLOWING_SECTION_MAX] = {0};
+    int detected_idx[FOX_DETECTED_SECTION_MAX] = {0};
+
+    memset(snap, 0, sizeof(*snap));
+    snap->nearby_count = fox_build_likely_nearby_locked(nearby_idx, FOX_NEARBY_SECTION_MAX, now);
+    snap->following_count = fox_build_likely_following_locked(
+        following_idx,
+        FOX_FOLLOWING_SECTION_MAX,
+        nearby_idx,
+        snap->nearby_count,
+        now
+    );
+    snap->detected_count = fox_build_detected_locked(
+        detected_idx,
+        FOX_DETECTED_SECTION_MAX,
+        nearby_idx,
+        snap->nearby_count,
+        following_idx,
+        snap->following_count,
+        now
+    );
+
+    for (int i = 0; i < snap->nearby_count; i++) {
+        snap->nearby[i] = g_app.fox_nearby[nearby_idx[i]];
+    }
+    for (int i = 0; i < snap->following_count; i++) {
+        snap->following[i] = g_app.fox_nearby[following_idx[i]];
+    }
+    for (int i = 0; i < snap->detected_count; i++) {
+        snap->detected[i] = g_app.fox_nearby[detected_idx[i]];
+    }
+}
 
 /* ── RSSI to beep interval (ms) ── */
 static int rssi_to_interval(int8_t rssi)
@@ -55,14 +371,23 @@ static void rssi_to_color(int8_t rssi, uint8_t *r, uint8_t *g, uint8_t *b)
     *b = (uint8_t)(48.0f - t * 36.0f);
 }
 
-/* ── Proximity bar for display ── */
-static int rssi_to_bar(int8_t rssi)
+static int rssi_to_percent(int8_t rssi)
 {
-    /* 0 bars at -100, full at -20 */
-    int bars = (rssi + 100) * LCD_H_RES / 80;
-    if (bars < 0) bars = 0;
-    if (bars > LCD_H_RES - 8) bars = LCD_H_RES - 8;
-    return bars;
+    int pct = (rssi + 100) * 100 / 80;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return pct;
+}
+
+static const char *rssi_to_cadence_label(int8_t rssi)
+{
+    int interval = rssi_to_interval(rssi);
+    if (interval <= 30) return "Machine";
+    if (interval <= 90) return "Rapid";
+    if (interval <= 200) return "Fast";
+    if (interval <= 380) return "Steady";
+    if (interval <= 600) return "Slow";
+    return "Faint";
 }
 
 static const char *rssi_to_proximity_label(int8_t rssi)
@@ -76,9 +401,38 @@ static const char *rssi_to_proximity_label(int8_t rssi)
 
 int fox_hunter_registry_view_count(void)
 {
-    int nearby = g_app.fox_nearby_count;
-    if (nearby < 0) nearby = 0;
-    return g_app.fox_registry_count + nearby;
+    int nearby = 0;
+    int following = 0;
+    int detected = 0;
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        uint32_t now = uptime_ms();
+        int nearby_idx[FOX_NEARBY_SECTION_MAX] = {0};
+        int following_idx[FOX_FOLLOWING_SECTION_MAX] = {0};
+        int detected_idx[FOX_DETECTED_SECTION_MAX] = {0};
+
+        nearby = fox_build_likely_nearby_locked(nearby_idx, FOX_NEARBY_SECTION_MAX, now);
+        following = fox_build_likely_following_locked(
+            following_idx,
+            FOX_FOLLOWING_SECTION_MAX,
+            nearby_idx,
+            nearby,
+            now
+        );
+        detected = fox_build_detected_locked(
+            detected_idx,
+            FOX_DETECTED_SECTION_MAX,
+            nearby_idx,
+            nearby,
+            following_idx,
+            following,
+            now
+        );
+
+        xSemaphoreGive(g_app.device_mutex);
+    }
+
+    return g_app.fox_registry_count + nearby + following + detected;
 }
 
 /* ── Scan callback ── */
@@ -145,6 +499,7 @@ static void fox_beep_task(void *arg)
     uint8_t last_led_mode = 0xFF;
     int last_wifi_clients = -1;
     bool last_registry_open = false;
+    char last_target_header[DEVICE_NAME_LEN] = {0};
     int last_reg_cursor = -1;
     int last_reg_count = -1;
     bool display_drawn = false;     /* force first draw */
@@ -154,6 +509,8 @@ static void fox_beep_task(void *arg)
         uint32_t now = uptime_ms();
         bool target_visible = g_app.fox_target_found &&
                               (now - g_app.fox_last_seen < TARGET_LOST_MS);
+        char target_header[DEVICE_NAME_LEN] = {0};
+        fox_target_display_name(target_header, sizeof(target_header));
 
         /* Coarse RSSI bucket (5 dBm steps) — avoid redrawing for tiny fluctuations */
         int8_t rssi_zone = target_visible ? (g_app.fox_rssi / 5) : -128;
@@ -165,8 +522,10 @@ static void fox_beep_task(void *arg)
                    || (g_app.fox_led_mode != last_led_mode)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || (g_app.fox_registry_open != last_registry_open)
+                   || (strcmp(target_header, last_target_header) != 0)
                    || (g_app.fox_registry_open && (g_app.ui_cursor != last_reg_cursor
-                       || g_app.fox_registry_count != last_reg_count));
+                       || g_app.fox_registry_count != last_reg_count
+                       || ((frame % 2) == 0)));
 
         /* ── Display: only redraw when visual state changed ── */
         if (dirty) {
@@ -176,6 +535,7 @@ static void fox_beep_task(void *arg)
             last_led_mode = g_app.fox_led_mode;
             last_wifi_clients = g_app.wifi_clients;
             last_registry_open = g_app.fox_registry_open;
+            snprintf(last_target_header, sizeof(last_target_header), "%s", target_header);
             last_reg_cursor = g_app.ui_cursor;
             last_reg_count = g_app.fox_registry_count;
             display_drawn = true;
@@ -192,25 +552,31 @@ static void fox_beep_task(void *arg)
             uint16_t status_fill = rgb565(30, 20, 8);
             uint16_t status_border = rgb565(251, 146, 60);
             uint16_t status_text = rgb565(253, 186, 116);
+            const char *ap_ssid = NULL;
+            const char *ap_pass = NULL;
+            app_mode_ap_credentials(MODE_FOX_HUNTER, &ap_ssid, &ap_pass, NULL);
 
             /* Status bar */
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
             display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
             display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FOX HUNTER", text_main, dim_accent);
-            display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "foxhunt-c6", rgb565(228, 228, 231), dim_accent);
+            display_draw_text_centered(DISPLAY_STATUS_SUB_Y,
+                                       target_header[0] ? target_header : ap_ssid,
+                                       rgb565(228, 228, 231), dim_accent);
 
             /* Content area */
             display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
 
             if (g_app.fox_registry_open) {
                 /* ── Registry view ── */
-                display_draw_text_centered(DISPLAY_CONTENT_TOP + 2, "TARGET REGISTRY (ALL)", accent, bg);
+                display_draw_text_centered(DISPLAY_CONTENT_TOP + 2, "TARGET REGISTRY + TRACK PICKS", accent, bg);
                 display_draw_hline(4, DISPLAY_CONTENT_TOP + 14, LCD_H_RES - 8, dim_accent);
 
                 int total_count = fox_hunter_registry_view_count();
                 if (total_count == 0) {
+                    g_app.ui_item_count = 0;
                     display_draw_text_centered(100, "No saved targets", text_dim, bg);
-                    display_draw_text_centered(114, "No nearby devices", text_dim, bg);
+                    display_draw_text_centered(114, "No smart candidates yet", text_dim, bg);
                 } else {
                     g_app.ui_item_count = total_count;
                     if (g_app.ui_cursor >= total_count)
@@ -220,20 +586,47 @@ static void fox_beep_task(void *arg)
                     int start = 0;
                     if (g_app.ui_cursor >= max_show) start = g_app.ui_cursor - max_show + 1;
 
-                    int nearby_count = 0;
-                    bool have_nearby_lock = false;
+                    fox_candidate_snapshot_t snap;
+                    memset(&snap, 0, sizeof(snap));
                     if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-                        nearby_count = g_app.fox_nearby_count;
-                        have_nearby_lock = true;
+                        fox_build_candidate_snapshot_locked(&snap, now);
+                        xSemaphoreGive(g_app.device_mutex);
                     }
 
-                    for (int idx = start, row = 0; idx < total_count && row < max_show; idx++, row++) {
-                        bool is_saved = (idx < g_app.fox_registry_count);
+                    int saved_count = g_app.fox_registry_count;
+                    int nearby_count = snap.nearby_count;
+                    int following_count = snap.following_count;
+                    int detected_count = snap.detected_count;
+
+                    int y = DISPLAY_CONTENT_TOP + 20;
+                    int row = 0;
+                    int last_group = -1;
+                    for (int idx = start; idx < total_count && row < max_show; idx++) {
+                        int group = 0; /* 0=saved, 1=nearby, 2=following, 3=detected */
+                        if (idx >= saved_count + nearby_count + following_count) group = 3;
+                        else if (idx >= saved_count + nearby_count) group = 2;
+                        else if (idx >= saved_count) group = 1;
+
+                        if (group != last_group) {
+                            const char *title = (group == 0) ? "SAVED TARGETS" :
+                                                (group == 1) ? "LIKELY NEARBY" :
+                                                (group == 2) ? "LIKELY FOLLOWING" : "DETECTED";
+                            uint16_t title_col = (group == 0) ? rgb565(74, 222, 128) :
+                                                 (group == 1) ? rgb565(56, 189, 248) :
+                                                 (group == 2) ? rgb565(251, 191, 36) : rgb565(163, 163, 163);
+                            display_draw_text(6, y, title, title_col, bg);
+                            y += 10;
+                            last_group = group;
+                        }
+
                         char mac_str[18];
                         char line1[FOX_REG_NICK_LEN + 8] = {0};
                         char line2[DEVICE_NAME_LEN + 20] = {0};
+                        const char *badge = "";
+                        uint16_t badge_col = text_dim;
+                        bool is_saved = (group == 0);
 
-                        if (is_saved) {
+                        if (group == 0) {
                             fox_reg_entry_t *e = &g_app.fox_registry[idx];
                             mac_to_str(e->mac, mac_str, sizeof(mac_str));
                             if (e->nickname[0]) {
@@ -244,10 +637,12 @@ static void fox_beep_task(void *arg)
                                 snprintf(line1, sizeof(line1), "Saved target");
                             }
                             snprintf(line2, sizeof(line2), "%s", mac_str);
-                        } else {
-                            int nidx = idx - g_app.fox_registry_count;
-                            if (have_nearby_lock && nidx >= 0 && nidx < nearby_count) {
-                                ble_device_t *d = &g_app.fox_nearby[nidx];
+                            badge = "SAVED";
+                            badge_col = rgb565(74, 222, 128);
+                        } else if (group == 1) {
+                            int nidx = idx - saved_count;
+                            if (nidx >= 0 && nidx < nearby_count) {
+                                ble_device_t *d = &snap.nearby[nidx];
                                 mac_to_str(d->mac, mac_str, sizeof(mac_str));
                                 if (d->name[0]) {
                                     snprintf(line1, sizeof(line1), "%s", d->name);
@@ -255,31 +650,60 @@ static void fox_beep_task(void *arg)
                                     snprintf(line1, sizeof(line1), "Nearby BLE");
                                 }
                                 snprintf(line2, sizeof(line2), "%s  %d dBm", mac_str, d->rssi);
-                            } else {
-                                snprintf(line1, sizeof(line1), "Nearby BLE");
-                                snprintf(line2, sizeof(line2), "Unavailable");
+                                badge = "NEAR";
+                                badge_col = rgb565(56, 189, 248);
+                            }
+                        } else if (group == 2) {
+                            int fidx = idx - saved_count - nearby_count;
+                            if (fidx >= 0 && fidx < following_count) {
+                                ble_device_t *d = &snap.following[fidx];
+                                uint32_t dwell_sec = (d->last_seen > d->first_seen) ?
+                                    (d->last_seen - d->first_seen) / 1000U : 0;
+                                mac_to_str(d->mac, mac_str, sizeof(mac_str));
+                                if (d->name[0]) {
+                                    snprintf(line1, sizeof(line1), "%s", d->name);
+                                } else {
+                                    snprintf(line1, sizeof(line1), "Persistent BLE");
+                                }
+                                snprintf(line2, sizeof(line2), "%s  %d dBm  %lus", mac_str, d->rssi, (unsigned long)dwell_sec);
+                                badge = "FOLLOW";
+                                badge_col = rgb565(251, 191, 36);
+                            }
+                        } else {
+                            int didx = idx - saved_count - nearby_count - following_count;
+                            if (didx >= 0 && didx < detected_count) {
+                                ble_device_t *d = &snap.detected[didx];
+                                uint32_t age_sec = (now > d->last_seen) ? (now - d->last_seen) / 1000U : 0;
+                                mac_to_str(d->mac, mac_str, sizeof(mac_str));
+                                if (d->name[0]) {
+                                    snprintf(line1, sizeof(line1), "%s", d->name);
+                                } else {
+                                    snprintf(line1, sizeof(line1), "Detected BLE");
+                                }
+                                snprintf(line2, sizeof(line2), "%s  %d dBm  %lus ago", mac_str, d->rssi, (unsigned long)age_sec);
+                                badge = "SEEN";
+                                badge_col = rgb565(163, 163, 163);
                             }
                         }
 
-                        int y_base = DISPLAY_CONTENT_TOP + 20 + row * 34;
+                        int y_base = y;
                         bool selected = (idx == g_app.ui_cursor);
                         uint16_t row_bg = selected ? rgb565(30, 20, 8) : panel_bg;
-                        uint16_t row_border = selected ? accent : (is_saved ? border_col : rgb565(45, 58, 76));
+                        uint16_t row_border = selected ? accent : (is_saved ? border_col :
+                                            (group == 1 ? rgb565(45, 58, 76) :
+                                            (group == 2 ? rgb565(92, 63, 14) : rgb565(63, 63, 70))));
 
                         display_draw_bordered_rect(4, y_base, LCD_H_RES - 8, 30, row_border, row_bg);
                         display_draw_text(10, y_base + 3, line1, selected ? accent : text_main, row_bg);
                         display_draw_text(10, y_base + 15, line2, text_dim, row_bg);
-                        if (is_saved) {
-                            display_draw_text(LCD_H_RES - 60, y_base + 3, "SAVED", rgb565(74, 222, 128), row_bg);
-                        } else {
-                            display_draw_text(LCD_H_RES - 66, y_base + 3, "NEARBY", rgb565(56, 189, 248), row_bg);
-                        }
+                        display_draw_text(LCD_H_RES - 68, y_base + 3, badge, badge_col, row_bg);
                         if (selected) {
                             display_draw_text(LCD_H_RES - 24, y_base + 10, "GO", accent, row_bg);
                         }
-                    }
 
-                    if (have_nearby_lock) xSemaphoreGive(g_app.device_mutex);
+                        y += 34;
+                        row++;
+                    }
                 }
 
                 display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 24, "DblClk=Prev Hold=Select 3xClk=Back", text_dim, bg);
@@ -309,42 +733,87 @@ static void fox_beep_task(void *arg)
                     uint8_t cr, cg, cb;
                     rssi_to_color(g_app.fox_rssi, &cr, &cg, &cb);
                     uint16_t rssi_col = rgb565(cr, cg, cb);
+                    int interval_ms = rssi_to_interval(g_app.fox_rssi);
+                    int pct = rssi_to_percent(g_app.fox_rssi);
+                    const char *prox = rssi_to_proximity_label(g_app.fox_rssi);
+                    const char *cadence = rssi_to_cadence_label(g_app.fox_rssi);
 
+                    display_draw_bordered_rect(4, 88, LCD_H_RES - 8, 64, border_col, panel_bg);
+                    display_draw_text(10, 92, "BEST / PULSE", text_dim, panel_bg);
+                    snprintf(buf, sizeof(buf), "Best %d", g_app.fox_rssi_best);
+                    display_draw_text(10, 106, buf, text_main, panel_bg);
+                    snprintf(buf, sizeof(buf), "Beat %dms", interval_ms);
+                    display_draw_text(10, 120, buf, text_main, panel_bg);
+                    snprintf(buf, sizeof(buf), "Pulse %s", cadence);
+                    display_draw_text(10, 134, buf, text_main, panel_bg);
+
+                    const int right_col_x = 100;
+                    const int right_col_w = (LCD_H_RES - 8) - right_col_x;
+                    int rssi_scale = 2;
+                    int rssi_y = 104;
+                    int title_w = display_text_width("LIVE SIGNAL");
+                    int title_x = right_col_x + ((right_col_w - title_w) / 2);
+                    if (title_x < right_col_x) title_x = right_col_x;
+                    display_draw_text(title_x, 92, "LIVE SIGNAL", text_dim, panel_bg);
                     snprintf(buf, sizeof(buf), "%d", g_app.fox_rssi);
-                    display_draw_text_scaled(20, 92, buf, rssi_col, bg, 3);
-                    display_draw_text(LCD_H_RES - 40, 102, "dBm", text_dim, bg);
+                    int rssi_scaled_w = display_text_width(buf) * rssi_scale;
+                    int dbm_w = display_text_width("dBm");
+                    int pair_gap = 3;
+                    int pair_w = rssi_scaled_w + pair_gap + dbm_w;
 
-                    snprintf(buf, sizeof(buf), "Best: %d dBm", g_app.fox_rssi_best);
-                    display_draw_text(8, 124, buf, text_main, bg);
+                    if (pair_w > right_col_w) {
+                        rssi_scale = 1;
+                        rssi_y = 112;
+                        rssi_scaled_w = display_text_width(buf) * rssi_scale;
+                        pair_w = rssi_scaled_w + pair_gap + dbm_w;
+                    }
+                    if (pair_w > right_col_w) {
+                        pair_gap = 1;
+                        pair_w = rssi_scaled_w + pair_gap + dbm_w;
+                    }
 
-                    snprintf(buf, sizeof(buf), "Seen: now");
-                    display_draw_text(8, 136, buf, text_dim, bg);
+                    int pair_x = right_col_x + ((right_col_w - pair_w) / 2);
+                    if (pair_x < right_col_x) pair_x = right_col_x;
+                    int rssi_x = pair_x;
+                    int dbm_x = rssi_x + rssi_scaled_w + pair_gap;
+                    display_draw_text_scaled(rssi_x, rssi_y, buf, rssi_col, panel_bg, rssi_scale);
+                    display_draw_text(dbm_x, 112, "dBm", text_dim, panel_bg);
 
-                    display_draw_rect(4, 146, 2, 6, accent);
-                    display_draw_rect(LCD_H_RES - 6, 146, 2, 6, accent);
-                    int bar_w = rssi_to_bar(g_app.fox_rssi);
-                    display_draw_rect(8, 148, bar_w, 16, rssi_col);
-                    display_draw_rect(8 + bar_w, 148, LCD_H_RES - 16 - bar_w, 16, rgb565(39, 39, 42));
+                    snprintf(buf, sizeof(buf), "Range %s", prox);
+                    display_draw_text(10, 148, buf, text_main, panel_bg);
 
-                    int pct = (g_app.fox_rssi + 100) * 100 / 80;
-                    if (pct < 0) pct = 0;
-                    if (pct > 100) pct = 100;
-                    for (int i = 0; i < 20; i++) {
-                        int bar_h = 4 + i;
-                        int bx = 8 + i * 8;
-                        bool active = (i * 5) < pct;
-                        uint16_t bar_col = active ? rssi_col : rgb565(39, 39, 42);
-                        display_draw_rect(bx, 176 + (24 - bar_h), 6, bar_h, bar_col);
+                    display_draw_bordered_rect(4, 156, LCD_H_RES - 8, 42, border_col, panel_bg);
+                    display_draw_text(10, 160, "HOTTER SIGNAL = FASTER BEEPS", text_dim, panel_bg);
+                    display_draw_rect(8, 174, LCD_H_RES - 16, 10, rgb565(39, 39, 42));
+                    int bar_w = ((LCD_H_RES - 16) * pct) / 100;
+                    display_draw_rect(8, 174, bar_w, 10, rssi_col);
+
+                    for (int i = 1; i < 5; i++) {
+                        int tx = 8 + ((LCD_H_RES - 16) * i) / 5;
+                        display_draw_rect(tx, 172, 1, 14, rgb565(63, 63, 70));
                     }
 
                     snprintf(buf, sizeof(buf), "%d%%", pct);
-                    display_draw_text(72, 208, buf, text_main, bg);
+                    display_draw_text(10, 186, buf, text_main, panel_bg);
+                    display_draw_text(52, 186, "VERY FAR .. VERY CLOSE", text_dim, panel_bg);
 
-                    snprintf(buf, sizeof(buf), "Prox: %s", rssi_to_proximity_label(g_app.fox_rssi));
-                    display_draw_text_centered(220, buf, text_main, bg);
+                    for (int i = 0; i < 16; i++) {
+                        int bar_h = 4 + i;
+                        int bx = 8 + i * 10;
+                        bool active = (i * 100 / 16) < pct;
+                        uint16_t bar_col = active ? rssi_col : rgb565(39, 39, 42);
+                        display_draw_rect(bx, 208 + (18 - bar_h), 8, bar_h, bar_col);
+                    }
 
-                    display_draw_bordered_rect(20, 236, LCD_H_RES - 40, 24, status_border, status_fill);
-                    display_draw_text(40, 244, "TRACKING", status_text, status_fill);
+                    snprintf(buf, sizeof(buf), "Signal class: %s", prox);
+                    display_draw_text_centered(228, buf, text_main, bg);
+
+                    display_draw_bordered_rect(20, 248, LCD_H_RES - 40, 20, status_border, status_fill);
+                    if ((frame % 6) < 3) {
+                        display_draw_text(26, 254, "TRACKING LOCK", status_text, status_fill);
+                    } else {
+                        display_draw_text(26, 254, "TRACKING LOCK .", status_text, status_fill);
+                    }
                 } else {
                     char buf[36];
                     uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now > g_app.fox_last_seen)
@@ -379,7 +848,8 @@ static void fox_beep_task(void *arg)
             display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
             display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
             char info[64];
-            snprintf(info, sizeof(info), "foxhunt123  %dCli  %lukB",
+            snprintf(info, sizeof(info), "%s  %dCli  %lukB",
+                     ap_pass,
                      g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
             display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, info, text_dim, footer_bg);
         } /* end if (dirty) */
@@ -406,7 +876,7 @@ static void fox_beep_task(void *arg)
                 float str = (g_app.fox_rssi + 100.0f) / 80.0f;
                 if (str < 0.0f) str = 0.0f;
                 if (str > 1.0f) str = 1.0f;
-                uint8_t br = (uint8_t)(30 + str * 225);
+                uint8_t br = (uint8_t)(2 + (str * str) * 253.0f);
                 led_ctrl_set(0, (uint8_t)(br / 4), br);
                 vTaskDelay(pdMS_TO_TICKS(interval));
             }
@@ -601,12 +1071,29 @@ void fox_hunter_registry_select_view_index(int index)
         return;
     }
 
-    int nearby_index = index - g_app.fox_registry_count;
+    int local_index = index - g_app.fox_registry_count;
     if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(30)) == pdTRUE) {
-        if (nearby_index >= 0 && nearby_index < g_app.fox_nearby_count) {
-            fox_hunter_set_target(g_app.fox_nearby[nearby_index].mac);
+        fox_candidate_snapshot_t snap;
+        uint32_t now = uptime_ms();
+        fox_build_candidate_snapshot_locked(&snap, now);
+
+        if (local_index >= 0 && local_index < snap.nearby_count) {
+            fox_hunter_set_target(snap.nearby[local_index].mac);
             g_app.fox_registry_open = false;
+        } else {
+            int follow_index = local_index - snap.nearby_count;
+            if (follow_index >= 0 && follow_index < snap.following_count) {
+                fox_hunter_set_target(snap.following[follow_index].mac);
+                g_app.fox_registry_open = false;
+            } else {
+                int detected_index = follow_index - snap.following_count;
+                if (detected_index >= 0 && detected_index < snap.detected_count) {
+                    fox_hunter_set_target(snap.detected[detected_index].mac);
+                    g_app.fox_registry_open = false;
+                }
+            }
         }
+
         xSemaphoreGive(g_app.device_mutex);
     }
 }

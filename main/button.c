@@ -6,7 +6,7 @@
  *   PRESSED → fires HOLD at 1 s, WARN at 5 s, LONG_HOLD at 7 s while held
  *   PRESSED → WAIT_SECOND on release (< hold threshold)
  *   WAIT_SECOND → PRESSED on second press within 300 ms window
- *   WAIT_SECOND → fires CLICK (count==1) or DOUBLE_CLICK (count>=2)
+ *   WAIT_SECOND → fires CLICK/DOUBLE/TRIPLE/QUINTUPLE by click count
  *
  * SPDX-License-Identifier: MIT
  */
@@ -107,7 +107,9 @@ static void button_poll_task(void *arg)
                 } else if ((now - s_state[i].release_time) >= DOUBLE_CLICK_MS) {
                     /* Timeout — dispatch accumulated clicks */
                     if (s_event_cb) {
-                        if (s_state[i].click_count >= 3)
+                        if (s_state[i].click_count >= 5)
+                            s_event_cb((button_id_t)i, BTN_EVT_QUINTUPLE_CLICK);
+                        else if (s_state[i].click_count >= 3)
                             s_event_cb((button_id_t)i, BTN_EVT_TRIPLE_CLICK);
                         else if (s_state[i].click_count >= 2)
                             s_event_cb((button_id_t)i, BTN_EVT_DOUBLE_CLICK);

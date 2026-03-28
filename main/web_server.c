@@ -58,6 +58,7 @@ static char *build_state_json(void)
     cJSON_AddBoolToObject(root, "sound", g_app.sound_enabled);
     cJSON_AddBoolToObject(root, "led", g_app.led_enabled);
     cJSON_AddBoolToObject(root, "apBroadcast", g_app.ap_broadcast_enabled);
+    cJSON_AddBoolToObject(root, "singleApName", g_app.single_ap_name_enabled);
     cJSON_AddNumberToObject(root, "displaySleepSec", g_app.display_sleep_timeout_sec);
     cJSON_AddNumberToObject(root, "menuLedColor", g_app.menu_led_color);
     cJSON_AddNumberToObject(root, "soundProfileFlock", g_app.sound_profile_flock);
@@ -457,8 +458,11 @@ static esp_err_t post_settings(httpd_req_t *req)
     if (led) g_app.led_enabled = cJSON_IsTrue(led);
 
     bool old_ap_broadcast = g_app.ap_broadcast_enabled;
+    bool old_single_ap_name = g_app.single_ap_name_enabled;
     cJSON *ap_bcast = cJSON_GetObjectItem(root, "apBroadcast");
     if (ap_bcast) g_app.ap_broadcast_enabled = cJSON_IsTrue(ap_bcast);
+    cJSON *single_ap = cJSON_GetObjectItem(root, "singleApName");
+    if (single_ap) g_app.single_ap_name_enabled = cJSON_IsTrue(single_ap);
 
     cJSON *sleep_sec = cJSON_GetObjectItem(root, "displaySleepSec");
     if (sleep_sec && cJSON_IsNumber(sleep_sec)) {
@@ -527,31 +531,15 @@ static esp_err_t post_settings(httpd_req_t *req)
     cJSON *sd_logs = cJSON_GetObjectItem(root, "useMicrosdLogs");
     if (sd_logs) g_app.use_microsd_logs = cJSON_IsTrue(sd_logs);
 
-    if (old_ap_broadcast != g_app.ap_broadcast_enabled) {
-        const char *ssid = "ouispy-c6";
-        const char *pass = "ouispy123";
-        switch (g_app.current_mode) {
-        case MODE_FLOCK_YOU:
-            ssid = "flockyou-c6";
-            pass = "flockyou123";
-            break;
-        case MODE_FOX_HUNTER:
-            ssid = "foxhunt-c6";
-            pass = "foxhunt123";
-            break;
-        case MODE_SKY_SPY:
-            ssid = "skyspy-c6";
-            pass = "skyspy1234";
-            break;
-        case MODE_SETTINGS:
-        case MODE_SELECT:
-        case MODE_COUNT:
-        default:
-            break;
-        }
+    if (old_ap_broadcast != g_app.ap_broadcast_enabled ||
+        old_single_ap_name != g_app.single_ap_name_enabled) {
+        const char *ssid = NULL;
+        const char *pass = NULL;
+        uint8_t channel = 6;
+        app_mode_ap_credentials(g_app.current_mode, &ssid, &pass, &channel);
         wifi_manager_stop();
         vTaskDelay(pdMS_TO_TICKS(50));
-        wifi_manager_start_ap(ssid, pass, 6);
+        wifi_manager_start_ap(ssid, pass, channel);
     }
 
     nvs_store_save_prefs();

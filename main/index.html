@@ -7,13 +7,15 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#09090b;--card:#18181b;--card2:#27272a;--border:#3f3f46;
-  --text:#fafafa;--dim:#a1a1aa;--accent:#818cf8;
-  --rose:#fb7185;--green:#4ade80;--amber:#fbbf24;--sky:#38bdf8;
-  --cyan:#22d3ee;--flock:#f87171;--fox:#fb923c;--skyblue:#38bdf8;
-  --mode-accent:var(--accent);--mode-accent-rgb:129,140,248;
+  --bg:#09090b;--card:#18181b;--card2:#1f1f23;--border:#3f3f46;
+  --text:#fafafa;--dim:#a1a1aa;--accent:#fbbf24;
+  --rose:#f87171;--green:#4ade80;--amber:#fbbf24;--sky:#14ff00;
+  --cyan:#22d3ee;--flock:#f87171;--fox:#fb923c;--skyblue:#14ff00;--blue:#14ff00;
+  --mode-accent:var(--accent);--mode-accent-rgb:251,191,36;
 }
-body{background:var(--bg);color:var(--text);font-family:-apple-system,'Inter','Segoe UI',system-ui,sans-serif;
+body{background:radial-gradient(1000px 420px at 12% -10%,rgba(248,113,113,.14),transparent 60%),
+  radial-gradient(800px 380px at 88% -20%,rgba(251,146,60,.12),transparent 55%),var(--bg);
+  color:var(--text);font-family:'Segoe UI','Aptos',Tahoma,sans-serif;
   font-size:14px;min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 a{color:var(--accent);text-decoration:none}
 a:hover{color:#a5b4fc}
@@ -22,20 +24,22 @@ a:hover{color:#a5b4fc}
 .hdr{border-bottom:1px solid var(--border);
   padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;
   transition:background .4s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.hdr.mode-flock{background:rgba(248,113,113,.05)}
-.hdr.mode-fox{background:rgba(251,146,60,.05)}
-.hdr.mode-sky{background:rgba(56,189,248,.05)}
-.hdr.mode-settings{background:rgba(129,140,248,.05)}
-.hdr.mode-select{background:linear-gradient(90deg,rgba(251,191,36,.08),rgba(168,85,247,.08))}
+.hdr.mode-flock{background:rgba(248,113,113,.10)}
+.hdr.mode-fox{background:rgba(251,146,60,.14)}
+.hdr.mode-sky{background:rgba(20,255,0,.10)}
+.hdr.mode-settings{background:rgba(251,191,36,.08)}
+.hdr.mode-select{background:linear-gradient(90deg,rgba(251,191,36,.12),rgba(251,146,60,.10))}
 .hdr h1{font-size:17px;font-weight:700;letter-spacing:.5px}
 .hdr h1 span{color:var(--accent)}
+.hdr h1.logo-btn{cursor:pointer;user-select:none}
+.hdr h1.logo-btn:hover{filter:brightness(1.08)}
 .hdr .status{display:flex;gap:10px;font-size:11px;color:var(--dim)}
 .hdr .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
 .dot.on{background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.5)}
 .dot.off{background:var(--rose);opacity:.7}
 
 /* Mode tabs */
-.tabs{display:flex;gap:4px;padding:8px 12px;background:rgba(17,17,19,.9)}
+.tabs{display:flex;gap:4px;padding:8px 12px;background:rgba(9,18,34,.95);border-bottom:1px solid var(--border)}
 .tab{flex:1;padding:10px 6px;text-align:center;border-radius:10px;cursor:pointer;
   font-weight:600;font-size:11px;transition:all .2s;border:1px solid transparent;
   text-transform:uppercase;letter-spacing:.8px;color:var(--dim)}
@@ -43,21 +47,21 @@ a:hover{color:#a5b4fc}
 .tab.active{border-color:var(--mode-accent);background:rgba(var(--mode-accent-rgb),.12);color:var(--mode-accent)}
 .tab.t-flock.active{border-color:var(--flock);color:var(--flock);background:rgba(248,113,113,.08)}
 .tab.t-fox.active{border-color:var(--fox);color:var(--fox);background:rgba(251,146,60,.08)}
-.tab.t-sky.active{border-color:var(--skyblue);color:var(--skyblue);background:rgba(56,189,248,.08)}
+.tab.t-sky.active{border-color:var(--skyblue);color:var(--skyblue);background:rgba(20,255,0,.08)}
 
 /* Content area */
 .content{padding:12px;transition:background .4s}
-.content.mode-flock{background:linear-gradient(180deg,rgba(248,113,113,.03),transparent 50%)}
-.content.mode-fox{background:linear-gradient(180deg,rgba(251,146,60,.03),transparent 50%)}
-.content.mode-sky{background:linear-gradient(180deg,rgba(56,189,248,.03),transparent 50%)}
-.content.mode-settings{background:linear-gradient(180deg,rgba(129,140,248,.03),transparent 50%)}
-.content.mode-select{background:linear-gradient(180deg,rgba(251,191,36,.04),rgba(168,85,247,.04) 50%,transparent 100%)}
+.content.mode-flock{background:linear-gradient(180deg,rgba(248,113,113,.07),transparent 50%)}
+.content.mode-fox{background:linear-gradient(180deg,rgba(251,146,60,.08),transparent 55%)}
+.content.mode-sky{background:linear-gradient(180deg,rgba(20,255,0,.08),transparent 50%)}
+.content.mode-settings{background:linear-gradient(180deg,rgba(251,191,36,.05),transparent 50%)}
+.content.mode-select{background:linear-gradient(180deg,rgba(251,191,36,.08),rgba(251,146,60,.05) 50%,transparent 100%)}
 .mode-flock{--mode-accent:var(--flock);--mode-accent-rgb:248,113,113}
 .mode-fox{--mode-accent:var(--fox);--mode-accent-rgb:251,146,60}
-.mode-sky{--mode-accent:var(--skyblue);--mode-accent-rgb:56,189,248}
-.mode-settings,.mode-select{--mode-accent:var(--accent);--mode-accent-rgb:129,140,248}
+.mode-sky{--mode-accent:var(--skyblue);--mode-accent-rgb:20,255,0}
+.mode-settings,.mode-select{--mode-accent:var(--accent);--mode-accent-rgb:251,191,36}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;
-  padding:16px;margin-bottom:10px}
+  padding:16px;margin-bottom:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 8px 22px rgba(0,0,0,.20)}
 .card h2{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:12px;font-weight:600}
 
 /* Stats row */
@@ -106,7 +110,7 @@ a:hover{color:#a5b4fc}
 .btn{padding:8px 16px;border:1px solid var(--border);border-radius:10px;background:var(--card);
   color:var(--text);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;
   text-transform:uppercase;letter-spacing:.5px}
-.btn:hover{border-color:var(--mode-accent);background:rgba(var(--mode-accent-rgb),.12)}
+.btn:hover{border-color:var(--mode-accent);background:rgba(var(--mode-accent-rgb),.16)}
 .btn:active{transform:scale(.97)}
 .btn.primary{background:var(--mode-accent);border-color:var(--mode-accent);color:#111}
 .btn.primary:hover{filter:brightness(1.08)}
@@ -192,6 +196,29 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 .mode-fox .dev-item{padding:12px 10px;margin:6px 0}
 .fox-section-list{max-height:40vh;overflow-y:auto;padding-right:2px}
 
+/* Unified blue + contact-list presentation for Fox Hunter sources */
+.fox-source-group{border-left:3px solid var(--mode-accent)}
+.fox-group-kicker{font-size:10px;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+.fox-contact-list{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow-y:auto;padding-right:2px}
+.fox-contact{display:flex;gap:10px;align-items:flex-start;background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:11px 12px}
+.fox-contact:hover{background:rgba(var(--mode-accent-rgb),.10)}
+.fox-contact-avatar{width:34px;height:34px;border-radius:10px;background:rgba(78,163,255,.16);border:1px solid rgba(94,199,255,.35);
+  display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--skyblue);flex-shrink:0}
+.fox-contact-main{flex:1;min-width:0}
+.fox-contact-name{font-size:12px;font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fox-contact-sub{font-size:11px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fox-contact-meta{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.fox-chip{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border);background:rgba(78,163,255,.08);color:var(--text)}
+.fox-chip.near{border-color:rgba(66,211,146,.5);color:var(--green)}
+.fox-chip.follow{border-color:rgba(247,194,77,.55);color:var(--amber)}
+.fox-chip.detected{border-color:rgba(155,176,209,.45);color:var(--dim)}
+.fox-contact-actions{display:flex;gap:4px;flex-shrink:0}
+
+.fox-smart-grid{display:grid;grid-template-columns:1fr;gap:10px}
+@media(min-width:900px){
+  .fox-smart-grid{grid-template-columns:1fr 1fr}
+}
+
 /* Footer */
 .ftr{text-align:center;padding:16px;font-size:11px;color:var(--dim);border-top:1px solid var(--border)}
 
@@ -212,6 +239,16 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 .wifi-bar .wifi-detail{display:flex;flex-wrap:wrap;gap:4px 14px;flex:1}
 .wifi-bar .wifi-lbl{font-weight:700;color:var(--text);letter-spacing:.3px}
 .wifi-bar code{font-family:'SF Mono','Consolas','Courier New',monospace;color:var(--mode-accent);font-size:11px}
+
+/* Flock GPS tagging */
+.gps-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
+  margin-bottom:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--card2)}
+.gps-status{font-size:11px;color:var(--dim);line-height:1.4}
+.gps-status strong{color:var(--text)}
+.gps-chip{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border);background:rgba(34,211,238,.08);color:var(--cyan)}
+.gps-chip.bad{border-color:rgba(248,113,113,.6);color:var(--rose);background:rgba(248,113,113,.08)}
+.dev-loc{font-size:10px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dev-loc a{color:var(--cyan)}
 
 /* Animations */
 @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -234,7 +271,7 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 <body>
 
 <div class="hdr">
-  <h1>OUI<span>-SPY</span> <small style="font-size:11px;color:var(--dim)">C6</small></h1>
+  <h1 class="logo-btn" onclick="goMainMenu()">OUI<span>-SPY</span> <small style="font-size:11px;color:var(--dim)">C6</small></h1>
   <div class="status">
     <span><span class="dot on" id="wsDot"></span>WS</span>
     <span id="heapInfo">--</span>
@@ -264,6 +301,137 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 let ws, state = {}, devices = [], drones = [];
 let currentView = -1; // track which view is shown
+const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
+let cameraLocations = loadCameraLocations();
+
+function loadCameraLocations() {
+  try {
+    const raw = localStorage.getItem(CAM_LOC_STORE_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCameraLocations() {
+  try { localStorage.setItem(CAM_LOC_STORE_KEY, JSON.stringify(cameraLocations)); } catch (e) {}
+}
+
+function gpsCaps() {
+  const secureHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  return {
+    supported: !!navigator.geolocation,
+    secure: !!window.isSecureContext || secureHost
+  };
+}
+
+function locKey(mac) {
+  return String(mac || '').toUpperCase();
+}
+
+function getStoredLocation(mac) {
+  return cameraLocations[locKey(mac)] || null;
+}
+
+function formatCoord(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(6) : '?';
+}
+
+function formatLocAge(ts) {
+  const ageSec = Math.max(0, Math.floor((Date.now() - Number(ts || 0)) / 1000));
+  if (ageSec < 60) return ageSec + 's ago';
+  const min = Math.floor(ageSec / 60);
+  if (min < 60) return min + 'm ago';
+  const hr = Math.floor(min / 60);
+  return hr + 'h ' + (min % 60) + 'm ago';
+}
+
+function mapHrefForLocation(loc) {
+  if (!loc) return '#';
+  return 'https://maps.apple.com/?ll=' + encodeURIComponent(loc.lat + ',' + loc.lon);
+}
+
+function renderGpsStatus() {
+  const caps = gpsCaps();
+  const el = $('#gpsStatus');
+  if (!el) return;
+  if (!caps.supported) {
+    el.innerHTML = '<span class="gps-chip bad">GPS unavailable</span> Browser does not expose geolocation here. Use manual coordinates.';
+    return;
+  }
+  if (!caps.secure) {
+    el.innerHTML = '<span class="gps-chip bad">HTTPS required</span> iPhone Safari needs HTTPS to share location. Use manual coordinates if needed.';
+    return;
+  }
+  el.innerHTML = '<span class="gps-chip">GPS ready</span> Secure context detected. You can save current phone position for each camera.';
+}
+
+function saveCameraLocation(mac, lat, lon, source) {
+  cameraLocations[locKey(mac)] = {
+    lat: Number(lat),
+    lon: Number(lon),
+    source: source || 'gps',
+    ts: Date.now()
+  };
+  saveCameraLocations();
+}
+
+function promptManualLocation(mac) {
+  const current = getStoredLocation(mac);
+  const lat = prompt('Latitude (example 37.774900):', current ? String(current.lat) : '');
+  if (lat === null) return false;
+  const lon = prompt('Longitude (example -122.419400):', current ? String(current.lon) : '');
+  if (lon === null) return false;
+  const latN = Number(lat), lonN = Number(lon);
+  if (!Number.isFinite(latN) || !Number.isFinite(lonN) || latN < -90 || latN > 90 || lonN < -180 || lonN > 180) {
+    toast('Invalid coordinates');
+    return false;
+  }
+  saveCameraLocation(mac, latN, lonN, 'manual');
+  return true;
+}
+
+function getCurrentPosition() {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 2000
+    });
+  });
+}
+
+async function markCameraLocation(mac) {
+  const caps = gpsCaps();
+  if (!caps.supported || !caps.secure) {
+    if (promptManualLocation(mac)) {
+      toast('Location saved manually');
+      if (Number(state.mode) === 1) renderDevList();
+    }
+    return;
+  }
+  try {
+    const pos = await getCurrentPosition();
+    saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps');
+    toast('GPS location saved');
+    if (Number(state.mode) === 1) renderDevList();
+  } catch (e) {
+    if (promptManualLocation(mac)) {
+      toast('GPS blocked; saved manual location');
+      if (Number(state.mode) === 1) renderDevList();
+    } else {
+      toast('GPS blocked/unavailable; use manual entry');
+    }
+  }
+}
+
+function clearCameraLocation(mac) {
+  delete cameraLocations[locKey(mac)];
+  saveCameraLocations();
+  if (Number(state.mode) === 1) renderDevList();
+}
 
 // ── WebSocket ──
 function wsConnect() {
@@ -289,9 +457,30 @@ async function api(path, body) {
 async function fetchDevices() { devices = await api('/api/devices') || []; }
 async function fetchDrones()  { drones  = await api('/api/drones') || []; }
 
-function setMode(m) {
-  api('/api/mode', {mode: m});
-  toast(['Mode Select','Flock You','Fox Hunter','Sky Spy','Settings'][m] + ' requested');
+function apInfoForMode(mode) {
+  if (state.singleApName) return {ssid:'UniSpy-C6', pass:'ouispy123'};
+  return WIFI_CFG[Number(mode)] || WIFI_CFG[0];
+}
+
+async function setMode(m) {
+  const modeName = ['Mode Select','Flock You','Fox Hunter','Sky Spy','Settings'][m] || 'Mode';
+  let r = await api('/api/mode', {mode: m});
+  if (!r) {
+    /* AP/webserver can briefly restart around mode transitions; retry once. */
+    await new Promise(resolve => setTimeout(resolve, 350));
+    r = await api('/api/mode', {mode: m});
+  }
+  if (r) {
+    state.mode = m;
+    updateUI();
+    toast(modeName + ' requested');
+  } else {
+    toast('Mode request failed - retry');
+  }
+}
+
+function goMainMenu() {
+  setMode(0);
 }
 
 function toast(msg) {
@@ -308,7 +497,7 @@ const WIFI_CFG = [
   {ssid:'ouispy-c6',   pass:'ouispy123'}
 ];
 function wifiInfoHtml() {
-  const w = WIFI_CFG[Number(state.mode)] || WIFI_CFG[0];
+  const w = apInfoForMode(state.mode);
   return `<div class="wifi-bar">
     <span class="wifi-icon">&#128246;</span>
     <div class="wifi-detail">
@@ -343,9 +532,9 @@ function updateTabs() {
   const themes = {
     1: ['var(--flock)', '248,113,113'],
     2: ['var(--fox)', '251,146,60'],
-    3: ['var(--skyblue)', '56,189,248'],
-    4: ['var(--accent)', '129,140,248'],
-    0: ['var(--accent)', '129,140,248']
+    3: ['var(--skyblue)', '20,255,0'],
+    4: ['var(--accent)', '251,191,36'],
+    0: ['var(--accent)', '251,191,36']
   };
   const t = themes[mode] || themes[0];
   document.documentElement.style.setProperty('--mode-accent', t[0]);
@@ -387,9 +576,19 @@ function renderModeSelectInfo() {
     <div class="card">
       <h2>Main Menu Active</h2>
       <p style="font-size:12px;color:var(--dim);line-height:1.6">
-        Device is in the hardware main menu. Use the on-device button to select an applet,
+        Device is in the hardware main menu. Use the on-device buttons to select an applet,
         or jump directly from this page using quick actions below.
       </p>
+    </div>
+    <div class="card">
+      <h2>On-Device Controls</h2>
+      <div style="font-size:12px;color:var(--dim);line-height:1.7">
+        <div><strong style="color:var(--text)">Click:</strong> next item / next mode</div>
+        <div><strong style="color:var(--text)">Double-click:</strong> previous item (Fox main screen: toggles Detector/Sting LED mode)</div>
+        <div><strong style="color:var(--text)">Hold:</strong> select/confirm (Fox: open registry, then select target)</div>
+        <div><strong style="color:var(--text)">Triple-click:</strong> back/cancel (Fox main screen: clear current target)</div>
+        <div><strong style="color:var(--text)">Long-hold:</strong> return to main menu</div>
+      </div>
     </div>
     <div class="card">
       <h2>Quick Launch</h2>
@@ -417,12 +616,16 @@ function renderFlock() {
     </div>
     <div class="card">
       <h2>Detected Devices</h2>
+      <div class="gps-toolbar">
+        <div class="gps-status" id="gpsStatus"></div>
+      </div>
       <div style="display:flex;gap:6px;margin-bottom:10px">
         <button class="btn sm" style="border-color:var(--flock);color:var(--flock)" onclick="fetchDevices().then(()=>renderDevList())">Refresh</button>
         <a class="btn sm" href="/api/export/csv" target="_blank">Export CSV</a>
       </div>
       <div id="devList" class="dev-list"></div>
     </div>`;
+  renderGpsStatus();
   renderDevList();
 }
 function renderDevList() {
@@ -435,14 +638,24 @@ function renderDevList() {
     if(d.raven) raven++;
     const ic = d.raven ? 'raven' : 'flock';
     const sym = d.raven ? '🔊' : '📷';
+    const loc = getStoredLocation(d.mac);
+    const locHtml = loc
+      ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank" onclick="event.stopPropagation()">map</a></div>`
+      : '';
+    const gpsButtons = d.flock
+      ? `<button class="btn sm" onclick="event.stopPropagation();markCameraLocation('${htmlEsc(d.mac)}')">📍</button>
+        <button class="btn sm" onclick="event.stopPropagation();if(promptManualLocation('${htmlEsc(d.mac)}')){toast('Manual location saved');renderDevList();}">Manual</button>
+         ${loc ? `<button class="btn sm" onclick="event.stopPropagation();clearCameraLocation('${htmlEsc(d.mac)}')">✕</button>` : ''}`
+      : '';
     html += `<div class="dev-item" onclick="trackDevice(${i})">
       <div class="dev-icon ${ic}">${sym}</div>
       <div class="dev-info">
         <div class="dev-mac">${d.mac}</div>
         <div class="dev-name">${d.name || 'Unknown'} &middot; ${d.hits} hits &middot; ${d.raven ? 'Raven FW '+d.ravenFw+'.x' : flagsStr(d.flags)}</div>
+        ${locHtml}
       </div>
       <div class="dev-rssi ${rssiClass(d.rssi)}">${d.rssi}</div>
-      <div class="dev-actions"><button class="btn sm" onclick="event.stopPropagation();trackDevice(${i})">🎯</button></div>
+      <div class="dev-actions">${gpsButtons}<button class="btn sm" onclick="event.stopPropagation();trackDevice(${i})">🎯</button></div>
     </div>`;
   });
   el.innerHTML = html;
@@ -524,6 +737,118 @@ async function saveRegistryFromSource(mac, label, originalName, section, encoded
   }
 }
 
+function foxSeenAgeSec(d) {
+  const now = state.uptime || 0;
+  const last = d.lastSeen || now;
+  const age = now - last;
+  return age > 0 ? age : 0;
+}
+
+function foxSeenDurationSec(d) {
+  const first = d.firstSeen || 0;
+  const last = d.lastSeen || first;
+  const dur = last - first;
+  return dur > 0 ? dur : 0;
+}
+
+function foxGroupNearbyDevices(list) {
+  const nearby = [];
+  const following = [];
+  const detected = [];
+
+  (list || []).forEach(d => {
+    const age = foxSeenAgeSec(d);
+    const seen = foxSeenDurationSec(d);
+    const rssi = Number(d.rssi || -100);
+    const best = Number(d.bestRssi || rssi);
+    const hits = Number(d.hits || 0);
+
+    const isNearby = age <= 8 && rssi >= -80;
+    const isFollowing = !isNearby && age <= 12 && seen >= 20 && hits >= 4 && (rssi >= -82 || best >= -78);
+
+    if (isNearby) nearby.push(d);
+    else if (isFollowing) following.push(d);
+    else detected.push(d);
+  });
+
+  nearby.sort((a,b) => (b.rssi - a.rssi) || (b.bestRssi - a.bestRssi) || ((b.hits||0) - (a.hits||0)));
+  following.sort((a,b) => (foxSeenDurationSec(b) - foxSeenDurationSec(a)) || (b.rssi - a.rssi) || ((b.hits||0) - (a.hits||0)));
+  detected.sort((a,b) => (foxSeenAgeSec(a) - foxSeenAgeSec(b)) || (b.rssi - a.rssi) || ((b.hits||0) - (a.hits||0)));
+
+  return { nearby, following, detected };
+}
+
+function renderFoxContactRow(d, opts) {
+  const title = htmlEsc(d.name || opts.fallbackName || d.mac || 'Device');
+  const subtitle = htmlEsc(opts.subtitle || d.mac || 'Unknown MAC');
+  const section = opts.section || 'detected';
+  const tag = section === 'nearby' ? 'LIKELY NEARBY' : section === 'following' ? 'LIKELY FOLLOWING' : 'DETECTED';
+  const sectionClass = section === 'nearby' ? 'near' : section === 'following' ? 'follow' : 'detected';
+  const ageSec = foxSeenAgeSec(d);
+  const seenSec = foxSeenDurationSec(d);
+  const hits = Number(d.hits || 0);
+  const best = Number(d.bestRssi || d.rssi || -100);
+
+  return `
+    <div class="fox-contact">
+      <div class="fox-contact-avatar">${opts.icon || '&#128225;'}</div>
+      <div class="fox-contact-main">
+        <div class="fox-contact-name">${title}</div>
+        <div class="fox-contact-sub">${subtitle}</div>
+        <div class="fox-contact-meta">
+          <span class="fox-chip ${sectionClass}">${tag}</span>
+          <span class="fox-chip">${Number(d.rssi || -100)} dBm</span>
+          <span class="fox-chip">best ${best} dBm</span>
+          <span class="fox-chip">hits ${hits}</span>
+          <span class="fox-chip">seen ${seenSec}s</span>
+          <span class="fox-chip">${ageSec}s ago</span>
+        </div>
+      </div>
+      <div class="fox-contact-actions">
+        <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
+          onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
+        <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
+          onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'BLE Advertiser')}','${encodeURIComponent(d.name||'BLE Advertiser')}','ble',1)">+ Save</button>
+      </div>
+    </div>`;
+}
+
+function renderFoxBleSmartSections() {
+  const grouped = foxGroupNearbyDevices(foxNearby);
+  const nearby = grouped.nearby;
+  const following = grouped.following;
+  const detected = grouped.detected;
+
+  const block = (title, desc, items, id, section, icon) => `
+    <div class="card fox-source-group" style="border-left-color:${section==='nearby'?'var(--green)':section==='following'?'var(--amber)':'var(--dim)'}">
+      <div class="src-hdr" style="color:${section==='nearby'?'var(--green)':section==='following'?'var(--amber)':'var(--dim)'}">
+        ${icon} ${title} <span class="src-count" id="${id}Count">${items.length} entries</span>
+      </div>
+      <div class="fox-group-kicker">${desc}</div>
+      <div class="fox-contact-list" id="${id}">
+        ${items.length
+          ? items.map(d => renderFoxContactRow(d, { section, icon: '&#128225;', fallbackName: 'BLE Advertiser', subtitle: d.mac || '' })).join('')
+          : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">${icon}</div>No devices in this section</div>`}
+      </div>
+    </div>`;
+
+  return `
+    <div class="fox-smart-grid full-row" id="foxBleSmartSections">
+      ${block('Likely Nearby','Strong recent RSSI, likely close to you.', nearby, 'foxNearbySection','nearby','&#128161;')}
+      ${block('Likely Following','Seen consistently for longer with solid RSSI.', following, 'foxFollowingSection','following','&#128694;')}
+      ${block('Detected','Seen during scan but not categorized as nearby/following.', detected, 'foxDetectedSection','detected','&#128270;')}
+      <div class="card fox-source-group" style="border-left-color:var(--accent)">
+        <div class="src-hdr" style="color:var(--accent)">&#128225; All Discovered Devices <span class="src-count" id="foxBleCount">${foxNearby.length} visible</span></div>
+        <div class="discovering-line">Live scan list for this Fox Hunter session.</div>
+        <div class="fox-contact-list" id="foxBleSection">
+          ${foxNearby.length
+            ? foxNearby.map(d => renderFoxContactRow(d, { section: 'detected', icon: '&#128225;', fallbackName: 'BLE Advertiser', subtitle: d.mac || '' })).join('')
+            : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128225;</div>Scanning&hellip;</div>`}
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderFox() {
   Promise.all([fetchFoxRegistry(), fetchDevices(), fetchDrones(), fetchFoxNearby()])
     .then(() => renderFoxInner());
@@ -532,6 +857,7 @@ function renderFoxInner() {
   const f = state.fox || {};
   const wifiMacs  = state.wifiClientMacs || [];
   const flockDevs = devices.filter(d => d.flock);
+  const foxAp = apInfoForMode(2);
   const c = $('#main');
   const lastSeenLabel = f.found ? 'just now' : ((f.lastSeenSec||0) > 0 ? (f.lastSeenSec + 's ago') : 'unknown');
   const proxLabel = f.proximity || 'very far';
@@ -568,57 +894,48 @@ function renderFoxInner() {
   // ── WiFi Clients ──
   const wifiHtml = wifiMacs.length
     ? wifiMacs.map(mac => `
-        <div class="prof-card" style="border-color:rgba(251,146,60,.35)">
-          <div class="prof-hdr">
-            <div class="dev-icon" style="background:rgba(251,146,60,.15);color:var(--fox)">&#128247;</div>
-            <div class="prof-info">
-              <div class="dev-mac">${htmlEsc(mac)}</div>
-              <div class="dev-name">Connected via foxhunt-c6 AP &middot; WiFi client</div>
-            </div>
-            <div style="display:flex;gap:4px;flex-shrink:0">
-              <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-                onclick="lockFox('${htmlEsc(mac)}')">&#127919; Track</button>
-              <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-                onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
+        <div class="fox-contact">
+          <div class="fox-contact-avatar">&#128246;</div>
+          <div class="fox-contact-main">
+            <div class="fox-contact-name">${htmlEsc(mac)}</div>
+            <div class="fox-contact-sub">${htmlEsc(foxAp.ssid)} AP client</div>
+            <div class="fox-contact-meta">
+              <span class="fox-chip near">CONNECTED</span>
+              <span class="fox-chip">802.11 Wi-Fi</span>
+              <span class="fox-chip">source wifi</span>
             </div>
           </div>
-          <dl class="drone-fields" style="margin-top:8px;grid-template-columns:70px 1fr">
-            <dt>Source</dt><dd>WiFi Client</dd>
-            <dt>Protocol</dt><dd>802.11 / Wi-Fi</dd>
-            <dt>Status</dt><dd style="color:var(--green)">&#9679; Connected</dd>
-          </dl>
+          <div class="fox-contact-actions">
+            <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
+              onclick="lockFox('${htmlEsc(mac)}')">&#127919; Track</button>
+            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
+              onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
+          </div>
         </div>`).join('')
-    : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No clients connected to foxhunt-c6</div>`;
+    : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No clients connected to ${htmlEsc(foxAp.ssid)}</div>`;
 
   // ── Flock Cameras ──
   const flockHtml = flockDevs.length
     ? flockDevs.map(d => `
-        <div class="prof-card" style="border-color:rgba(248,113,113,.35)">
-          <div class="prof-hdr">
-            <div class="dev-icon ${d.raven?'raven':'flock'}">${d.raven?'&#128266;':'&#128247;'}</div>
-            <div class="prof-info">
-              <div class="dev-mac">${htmlEsc(d.mac)}</div>
-              <div class="dev-name">${htmlEsc(d.name||'Flock Device')}</div>
-            </div>
-            <div style="text-align:right;flex-shrink:0">
-              <div class="dev-rssi ${rssiClass(d.rssi)}" style="font-size:13px;font-weight:700">${d.rssi}</div>
-              <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-                <button class="btn sm" style="border-color:var(--flock);color:var(--flock)"
-                  onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
-                <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-                  onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'Flock Device')}','${encodeURIComponent(d.name||'Flock Device')}','flock',1)">+ Save</button>
-              </div>
+        <div class="fox-contact">
+          <div class="fox-contact-avatar">${d.raven?'&#128266;':'&#128247;'}</div>
+          <div class="fox-contact-main">
+            <div class="fox-contact-name">${htmlEsc(d.name||'Flock Device')}</div>
+            <div class="fox-contact-sub">${htmlEsc(d.mac)}</div>
+            <div class="fox-contact-meta">
+              <span class="fox-chip">${d.raven?'Raven Sensor':'Flock Camera'}</span>
+              <span class="fox-chip">${d.rssi} dBm</span>
+              <span class="fox-chip">best ${d.bestRssi} dBm</span>
+              <span class="fox-chip">hits ${d.hits}</span>
+              <span class="fox-chip">${agoStr(d.lastSeen)}</span>
             </div>
           </div>
-          <dl class="drone-fields" style="margin-top:8px;grid-template-columns:70px 1fr">
-            <dt>Type</dt><dd style="color:var(--flock)">${d.raven?'Raven Sensor':'Flock Camera'}</dd>
-            ${d.raven?`<dt>Firmware</dt><dd>${d.ravenFw}.x</dd>`:''}
-            <dt>Detection</dt><dd>${flagsStr(d.flags)||'OUI match'}</dd>
-            <dt>Hits</dt><dd>${d.hits}</dd>
-            <dt>Best RSSI</dt><dd>${d.bestRssi} dBm</dd>
-            <dt>First Seen</dt><dd>${agoStr(d.firstSeen)}</dd>
-            <dt>Last Seen</dt><dd>${agoStr(d.lastSeen)}</dd>
-          </dl>
+          <div class="fox-contact-actions">
+            <button class="btn sm" style="border-color:var(--flock);color:var(--flock)"
+              onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
+            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
+              onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'Flock Device')}','${encodeURIComponent(d.name||'Flock Device')}','flock',1)">+ Save</button>
+          </div>
         </div>`).join('')
     : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No Flock devices found &mdash; run Flock You mode to populate</div>`;
 
@@ -627,52 +944,27 @@ function renderFoxInner() {
     'Free Balloon','Captive Balloon','Airship','Rocket','Tethered','Ground Obstacle','Other'];
   const dronesHtml = drones.length
     ? drones.map(d => `
-        <div class="prof-card" style="border-color:rgba(56,189,248,.35)">
-          <div class="prof-hdr">
-            <div class="dev-icon drone">&#128641;</div>
-            <div class="prof-info">
-              <div class="dev-mac">${htmlEsc(d.id||d.mac)}</div>
-              <div class="dev-name"><span class="drone-proto ${htmlEsc(d.proto)}">${htmlEsc(d.proto)}</span>
-                <span style="margin-left:6px;color:var(--dim)">${d.rssi} dBm</span></div>
-            </div>
-            <div style="display:flex;gap:4px;flex-shrink:0">
-              <button class="btn sm" style="border-color:var(--skyblue);color:var(--skyblue)"
-                onclick="lockFox('${htmlEsc(d.mac)}')">&#127919; Track</button>
-              <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-                onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.id||'Drone')}','${encodeURIComponent(d.id||'Drone')}','drone',1)">+ Save</button>
+        <div class="fox-contact">
+          <div class="fox-contact-avatar">&#128641;</div>
+          <div class="fox-contact-main">
+            <div class="fox-contact-name">${htmlEsc(d.id||'Drone')}</div>
+            <div class="fox-contact-sub">${htmlEsc(d.mac)}</div>
+            <div class="fox-contact-meta">
+              <span class="fox-chip">${htmlEsc(d.proto||'unknown')}</span>
+              <span class="fox-chip">${d.rssi} dBm</span>
+              ${d.uaType?`<span class="fox-chip">${uaNames[d.uaType]||('Type '+d.uaType)}</span>`:''}
+              ${d.hasLoc?`<span class="fox-chip">RID loc</span>`:''}
+              ${d.hasPilot?`<span class="fox-chip">pilot loc</span>`:''}
             </div>
           </div>
-          <dl class="drone-fields" style="margin-top:8px;grid-template-columns:70px 1fr">
-            <dt>MAC</dt><dd>${htmlEsc(d.mac)}</dd>
-            ${d.uaType?`<dt>UA Type</dt><dd>${uaNames[d.uaType]||'Type '+d.uaType}</dd>`:''}
-            ${d.hasLoc?`<dt>Position</dt><dd>${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}</dd>`:''}
-            ${d.alt?`<dt>Altitude</dt><dd>${d.alt.toFixed(1)} m AGL</dd>`:''}
-            ${d.speed?`<dt>Speed</dt><dd>${d.speed.toFixed(1)} m/s &mdash; ${d.dir.toFixed(0)}&deg;</dd>`:''}
-            ${d.hasPilot?`<dt>Pilot</dt><dd>${d.pilotLat.toFixed(5)}, ${d.pilotLon.toFixed(5)}</dd>`:''}
-            ${d.opId?`<dt>Operator</dt><dd>${htmlEsc(d.opId)}</dd>`:''}
-          </dl>
+          <div class="fox-contact-actions">
+            <button class="btn sm" style="border-color:var(--skyblue);color:var(--skyblue)"
+              onclick="lockFox('${htmlEsc(d.mac)}')">&#127919; Track</button>
+            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
+              onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.id||'Drone')}','${encodeURIComponent(d.id||'Drone')}','drone',1)">+ Save</button>
+          </div>
         </div>`).join('')
     : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128641;</div>No drones in registry &mdash; run Sky Spy mode to detect</div>`;
-
-  // ── Nearby BLE ──
-  const bleHtml = foxNearby.length
-    ? foxNearby.map(d => `
-        <div class="dev-item">
-          <div class="dev-icon" style="background:rgba(129,140,248,.12);color:var(--accent)">&#128225;</div>
-          <div class="dev-info">
-            <div class="dev-mac">${htmlEsc(d.mac)}</div>
-            <div class="dev-name">${htmlEsc(d.name||'BLE Advertiser')} &middot; ${d.hits} hits &middot; best ${d.bestRssi} dBm</div>
-            <div class="dev-name" style="margin-top:1px;color:var(--dim)">${agoStr(d.firstSeen)}</div>
-          </div>
-          <div class="dev-rssi ${rssiClass(d.rssi)}">${d.rssi}</div>
-          <div class="dev-actions">
-            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-              onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
-            <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-              onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'BLE Advertiser')}','${encodeURIComponent(d.name||'BLE Advertiser')}','ble',1)">+ Save</button>
-          </div>
-        </div>`).join('')
-    : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128225;</div>Scanning&hellip; BLE devices will appear here as they are detected</div>`;
 
   c.innerHTML = `
     <div class="content-grid">
@@ -690,6 +982,9 @@ function renderFoxInner() {
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--dim)">
           ${f.ledMode?'Blue LED brightness scales with signal strength':'Green standby &rarr; blinking red on detection (faster = closer)'}
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--dim)">
+          Controls: Click=Next, Double-click=Toggle STING/DETECTOR, Hold=Open/Select Registry, Triple-click=Back/Clear Target
         </div>
       </div>
     </div>
@@ -710,10 +1005,10 @@ function renderFoxInner() {
 
     <div class="card full-row" style="border-left:3px solid var(--fox)">
       <div class="src-hdr" style="color:var(--fox)">
-        &#128247; WiFi Clients <span class="src-count">${wifiMacs.length} connected to foxhunt-c6</span>
+        &#128247; WiFi Clients <span class="src-count">${wifiMacs.length} connected to ${htmlEsc(foxAp.ssid)}</span>
       </div>
       <p style="font-size:11px;color:var(--dim);margin-bottom:10px">
-        Devices currently associated with the foxhunt-c6 access point. MACs are tracked on connect/disconnect.
+        Devices currently associated with the ${htmlEsc(foxAp.ssid)} access point. MACs are tracked on connect/disconnect.
       </p>
       <div class="fox-section-list" id="foxWifiSection">${wifiHtml}</div>
     </div>
@@ -740,13 +1035,13 @@ function renderFoxInner() {
 
     <div class="card full-row" style="border-left:3px solid var(--accent)">
       <div class="src-hdr" style="color:var(--accent)">
-        &#128225; Discovered Devices <span id="foxBleCount" class="src-count">${foxNearby.length} visible</span>
+        &#128225; BLE Contact Intelligence <span class="src-count">${foxNearby.length} visible</span>
       </div>
       <div class="discovering-line">Discovering...</div>
       <p style="font-size:11px;color:var(--dim);margin-bottom:10px">
-        All BLE advertisers detected during this Fox Hunter session. Clears on mode restart.
+        Grouped by likely nearby, likely following, and detected for faster triage.
       </p>
-      <div class="dev-list fox-section-list" id="foxBleSection">${bleHtml}</div>
+      ${renderFoxBleSmartSections()}
       <button class="btn sm" style="margin-top:8px;border-color:var(--accent);color:var(--accent)"
         onclick="Promise.all([fetchDevices(),fetchDrones(),fetchFoxNearby()]).then(()=>renderFoxInner())">
         &#8635; Refresh Sources</button>
@@ -792,47 +1087,35 @@ function updateFoxLive() {
   // Update WiFi client count live (comes from state)
   const wm = state.wifiClientMacs || [];
   const ws = $('#foxWifiSection');
-  if(ws && wm.length !== (ws.querySelectorAll('.prof-card').length || 0)) {
+  const foxAp = apInfoForMode(2);
+  if(ws && wm.length !== (ws.querySelectorAll('.fox-contact').length || 0)) {
     ws.innerHTML = wm.length
-      ? wm.map(mac => `<div class="prof-card" style="border-color:rgba(251,146,60,.35)">
-          <div class="prof-hdr">
-            <div class="dev-icon" style="background:rgba(251,146,60,.15);color:var(--fox)">&#128247;</div>
-            <div class="prof-info"><div class="dev-mac">${htmlEsc(mac)}</div>
-              <div class="dev-name">Connected via foxhunt-c6 AP &middot; WiFi client</div></div>
-            <div style="display:flex;gap:4px;flex-shrink:0">
-              <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-                onclick="lockFox('${htmlEsc(mac)}')">&#127919; Track</button>
-              <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-                onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
+      ? wm.map(mac => `<div class="fox-contact">
+          <div class="fox-contact-avatar">&#128246;</div>
+          <div class="fox-contact-main">
+            <div class="fox-contact-name">${htmlEsc(mac)}</div>
+            <div class="fox-contact-sub">${htmlEsc(foxAp.ssid)} AP client</div>
+            <div class="fox-contact-meta">
+              <span class="fox-chip near">CONNECTED</span>
+              <span class="fox-chip">802.11 Wi-Fi</span>
+              <span class="fox-chip">source wifi</span>
             </div>
           </div>
-          <dl class="drone-fields" style="margin-top:8px;grid-template-columns:70px 1fr">
-            <dt>Source</dt><dd>WiFi Client</dd><dt>Protocol</dt><dd>802.11 / Wi-Fi</dd>
-            <dt>Status</dt><dd style="color:var(--green)">&#9679; Connected</dd>
-          </dl></div>`).join('')
-      : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No clients connected to foxhunt-c6</div>`;
+          <div class="fox-contact-actions">
+            <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
+              onclick="lockFox('${htmlEsc(mac)}')">&#127919; Track</button>
+            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
+              onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
+          </div>
+        </div>`).join('')
+        : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No clients connected to ${htmlEsc(foxAp.ssid)}</div>`;
   }
   // Refresh nearby BLE + flock/drone counts periodically
   if (++foxLiveCounter % 20 === 0) {
     fetchFoxNearby().then(() => {
       const bc = $('#foxBleCount'); if(bc) bc.textContent = foxNearby.length + ' visible';
-      const bl = $('#foxBleSection');
-      if(bl) bl.innerHTML = foxNearby.length
-        ? foxNearby.map(d => `<div class="dev-item">
-            <div class="dev-icon" style="background:rgba(129,140,248,.12);color:var(--accent)">&#128225;</div>
-            <div class="dev-info">
-              <div class="dev-mac">${htmlEsc(d.mac)}</div>
-              <div class="dev-name">${htmlEsc(d.name||'BLE Advertiser')} &middot; ${d.hits} hits &middot; best ${d.bestRssi} dBm</div>
-              <div class="dev-name" style="color:var(--dim)">${agoStr(d.firstSeen)}</div>
-            </div>
-            <div class="dev-rssi ${rssiClass(d.rssi)}">${d.rssi}</div>
-            <div class="dev-actions">
-              <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-                onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
-              <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-                onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'BLE Advertiser')}','${encodeURIComponent(d.name||'BLE Advertiser')}','ble',1)">+ Save</button>
-            </div></div>`).join('')
-        : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128225;</div>Scanning&hellip;</div>`;
+      const smart = $('#foxBleSmartSections');
+      if (smart) smart.outerHTML = renderFoxBleSmartSections();
     });
   }
 }
@@ -1016,6 +1299,10 @@ function renderSettings() {
           <label class="toggle"><input type="checkbox" ${state.apBroadcast?'checked':''} onchange="updateSetting('apBroadcast',this.checked)"><span class="slider"></span></label>
         </div>
         <div class="setting-row">
+          <label>Single AP Name (UniSpy-C6)</label>
+          <label class="toggle"><input type="checkbox" ${state.singleApName?'checked':''} onchange="updateSetting('singleApName',this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
           <label>Display Sleep Timeout</label>
           <select class="sel-sm" style="width:140px" onchange="updateSetting('displaySleepSec',parseInt(this.value))">
             ${[0,15,30,60,120,300].map(v => `<option value="${v}" ${Number(state.displaySleepSec||0)===v?'selected':''}>${v===0?'Off':v+' sec'}</option>`).join('')}
@@ -1024,7 +1311,7 @@ function renderSettings() {
         <div class="setting-row">
           <label>Main Menu LED Glow</label>
           <select class="sel-sm" style="width:140px" onchange="updateSetting('menuLedColor',parseInt(this.value))">
-            ${['Gold','Mint','Sky','Amber','Magenta'].map((n,i) => `<option value="${i}" ${Number(state.menuLedColor||0)===i?'selected':''}>${n}</option>`).join('')}
+            ${['Gold','Mint','Sky','Amber','Magenta','Ruby','Lime','Ice','White','Deep Purple'].map((n,i) => `<option value="${i}" ${Number(state.menuLedColor||0)===i?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
         <div class="setting-row">
@@ -1107,6 +1394,7 @@ function updateSetting(key, val) {
   else if(key==='sound') body.sound = val;
   else if(key==='led') body.led = val;
   else if(key==='apBroadcast') body.apBroadcast = !!val;
+  else if(key==='singleApName') body.singleApName = !!val;
   else if(key==='displaySleepSec') body.displaySleepSec = parseInt(val);
   else if(key==='menuLedColor') body.menuLedColor = parseInt(val);
   else if(key==='soundProfileFlock') body.soundProfileFlock = parseInt(val);

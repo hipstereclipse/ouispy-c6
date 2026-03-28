@@ -70,24 +70,26 @@ Each button needs only **two wires**: one to the GPIO pin and one to **GND**.
 
 ### How It Works
 
-The firmware enables the **internal pull-up resistor** on each GPIO pin, so the pin reads HIGH (3.3V) when the button is not pressed. Pressing the button connects the pin to GND, pulling it LOW. The firmware detects this transition.
+The firmware enables the **internal pull-up resistor** on each GPIO pin, so the pin reads HIGH (3.3V) when the button is not pressed. Pressing the button connects the pin to GND, pulling it LOW. The firmware detects this transition and recognizes multi-click plus hold gestures.
 
-- **Short press** (< 2 seconds): Triggers the primary action
-- **Long press** (≥ 2 seconds): Triggers the secondary action
+- **Single click**: Navigate next / run configured shortcut
+- **Double-click**: Navigate previous (or toggle Fox LED mode on Fox main screen)
+- **Triple-click**: Back/cancel (or clear Fox target on Fox main screen)
+- **Quintuple-click**: In Flock You, jump to Fox Hunter tracking a detected Flock camera
+- **Hold (~0.5s)**: Select / confirm
+- **Long-hold warning (~3.5s)**: Orange warning flash
+- **Long-hold (~5s)**: Return to mode select
 
 ### Button Functions
 
-| Button | Short Press | Long Press |
-|--------|------------|------------|
-| **Mode** (GPIO 10) | Cycle to next mode | — |
-| **Action** (GPIO 11) | Mode-specific action | — |
-| **Back** (GPIO 19) | Return to mode select | Return to mode select |
-| **Boot** (GPIO 9, built-in) | Cycle to next mode | Return to mode select |
+| Button | Default single-click shortcut | Notes |
+|--------|-------------------------------|-------|
+| **Mode** (GPIO 10) | Next mode | Shortcut is configurable in Settings |
+| **Action** (GPIO 11) | Fox LED mode toggle (Fox only) | Shortcut is configurable in Settings |
+| **Back** (GPIO 19) | Mode select | Shortcut is configurable in Settings |
+| **Boot** (GPIO 9, built-in) | Input button (same gesture rules) | Can navigate/select without external buttons |
 
-**Action button behaviors per mode:**
-- **Flock You**: Reserved for future use
-- **Fox Hunter**: Buzzer confirmation beep if target is visible
-- **Sky Spy**: Reserved for future use
+Shortcuts are configurable on-device under Settings (`Shortcut BTN10/11/19`).
 
 ---
 

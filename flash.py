@@ -704,17 +704,16 @@ def ensure_firmware():
     """Make sure firmware binaries exist. Returns build dir."""
     bd = get_build_dir()
 
-    if firmware_ready():
-        color_print("  Firmware is already built.", C.GREEN)
+    local_ready = firmware_ready()
+
+    if local_ready:
+        color_print("  Firmware is already available locally.", C.GREEN)
         for _, name, rel in FLASH_MAP:
             sz = os.path.getsize(os.path.join(bd, rel)) / 1024
             color_print(f"    {name:28s}  {sz:>7.1f} kB", C.CYAN)
         print()
-        if ask_yes("  Rebuild firmware from source code?", default_yes=False):
-            return _find_idf_and_build()
-        return bd
-
-    color_print("  Firmware has not been built yet.\n", C.YELLOW)
+    else:
+        color_print("  Firmware has not been built yet.\n", C.YELLOW)
 
     # CLI flags can skip the interactive prompt
     if os.environ.get("OUISPY_FORCE_BUILD"):
@@ -726,9 +725,29 @@ def ensure_firmware():
         color_print("\n  Download failed — falling back to local build.", C.YELLOW)
         return _find_idf_and_build()
 
-    color_print("  How would you like to get the firmware?\n", C.BOLD)
-    color_print("    [1] Download latest prebuilt release (fast, no tools needed)", C.CYAN)
-    color_print("    [2] Build from source (requires ESP-IDF, use if you modified code)\n", C.CYAN)
+    color_print("  Firmware source options:\n", C.BOLD)
+    if local_ready:
+        color_print("    [1] Use local firmware already in ./build", C.CYAN)
+        color_print("    [2] Download latest prebuilt release from GitHub", C.CYAN)
+        color_print("    [3] Build from local source code (ESP-IDF)\n", C.CYAN)
+        choice = input(f"  {C.BOLD}Select [1/2/3] (default: 2): {C.RESET}").strip()
+
+        if choice == "1":
+            return bd
+        if choice == "3":
+            return _find_idf_and_build()
+
+        result = _download_release_binaries()
+        if result and firmware_ready():
+            return result
+
+        color_print("\n  Download failed — keeping local firmware.", C.YELLOW)
+        if ask_yes("  Build from source instead?", default_yes=False):
+            return _find_idf_and_build()
+        return bd
+
+    color_print("    [1] Download latest prebuilt release from GitHub (fast, no tools needed)", C.CYAN)
+    color_print("    [2] Build from local source code (requires ESP-IDF)\n", C.CYAN)
 
     choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
     if choice == "2":
@@ -945,15 +964,20 @@ def main():
     section("Done!")
     print()
     color_print("  Next steps:", C.BOLD)
-    color_print("    1. Connect to WiFi:  ouispy-c6  /  ouispy123", C.CYAN)
+    color_print("    1. Connect to WiFi shown on device/web:", C.CYAN)
+    color_print("       - UniSpy-C6 / ouispy123 (if Single AP Name is ON)", C.CYAN)
+    color_print("       - or mode AP (flockyou-c6 / foxhunt-c6 / skyspy-c6)", C.CYAN)
     color_print("    2. Open in browser:  http://192.168.4.1", C.CYAN)
     color_print("    3. If it still crashes, check the latest file in ./logs/", C.CYAN)
     print()
     color_print("  Button controls:", C.BOLD)
     color_print("    Single click  = next item", C.CYAN)
     color_print("    Double click  = previous item", C.CYAN)
-    color_print("    Hold 2 sec    = select", C.CYAN)
-    color_print("    Hold 15 sec   = back to mode select", C.CYAN)
+    color_print("    Triple click  = back / cancel (mode-specific)", C.CYAN)
+    color_print("    Hold ~0.5 sec = select / activate", C.CYAN)
+    color_print("    Hold ~3.5 sec = warning flash", C.CYAN)
+    color_print("    Hold ~5 sec   = back to mode select", C.CYAN)
+    color_print("    Flock mode: 5 rapid clicks = jump to Fox Hunter and track detected camera", C.CYAN)
     input(f"\n{C.DIM}  Press Enter to exit...{C.RESET}")
 
 
