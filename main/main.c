@@ -41,6 +41,7 @@ enum {
     SET_ITEM_SHORTCUT_ACTION,
     SET_ITEM_SHORTCUT_BACK,
     SET_ITEM_SD_LOGS,
+    SET_ITEM_SD_FORMAT,
     SET_ITEM_BACK,
     SET_ITEM_COUNT,
 };
@@ -250,12 +251,6 @@ static void render_mode_select_screen(int cursor)
     display_draw_text(44, 67, ap_pass, text_main, card_bg);
     display_draw_text(14, 81, g_app.ap_broadcast_enabled ? "AP:":"AP:", text_dim, card_bg);
     display_draw_text(44, 81, g_app.ap_broadcast_enabled ? "Broadcast" : "Hidden", text_link, card_bg);
-    
-    /* microSD card status */
-    bool microsd_avail = storage_ext_is_available();
-    uint16_t microsd_color = microsd_avail ? rgb565(52, 211, 153) : rgb565(249, 115, 22);
-    const char *microsd_text = microsd_avail ? "microSD: Available" : "microSD: Not found";
-    display_draw_text(14, 95, microsd_text, microsd_color, card_bg);
 
     display_draw_text_centered(116, "Select a mode", text_dim, bg);
 
@@ -275,6 +270,12 @@ static void render_mode_select_screen(int cursor)
         display_draw_text(24, y + 4, entries[i].label, row_fg, row_bg);
         display_draw_text(24, y + 14, entries[i].desc, row_desc, row_bg);
     }
+
+    /* microSD card status - bottom of display */
+    bool microsd_avail = storage_ext_is_available();
+    uint16_t microsd_color = microsd_avail ? rgb565(52, 211, 153) : rgb565(249, 115, 22);
+    const char *microsd_text = microsd_avail ? "microSD: Available" : "microSD: Not found";
+    display_draw_text_centered(240, microsd_text, microsd_color, bg);
 
     display_draw_hline(14, 252, LCD_H_RES - 28, purple_dim);
     display_draw_text_centered(262, "Click next   DblClk prev", text_dim, bg);
@@ -311,6 +312,7 @@ static void render_settings_screen(int cursor)
         "Shortcut BTN11",
         "Shortcut BTN19",
         "microSD Logs",
+        "Format microSD",
         "Back to Menu",
     };
 
@@ -363,6 +365,9 @@ static void render_settings_screen(int cursor)
             break;
         case SET_ITEM_SD_LOGS:
             snprintf(val, sizeof(val), "%s", g_app.use_microsd_logs ? "PREFER SD" : "INTERNAL");
+            break;
+        case SET_ITEM_SD_FORMAT:
+            snprintf(val, sizeof(val), "%s", storage_ext_status_str(storage_ext_get_status()));
             break;
         case SET_ITEM_BACK:
         default:
@@ -661,6 +666,28 @@ static void apply_settings_item_action(void)
         buzzer_play_profile(SOUND_PROFILE_RETRO);
         log_msg = g_app.use_microsd_logs ? "sd_logs_enabled" : "sd_logs_disabled";
         break;
+
+    case SET_ITEM_SD_FORMAT: {
+        storage_status_t status = storage_ext_get_status();
+        if (status == STORAGE_STATUS_NOT_FOUND) {
+            buzzer_tone(400, 100);  /* Error tone */
+            log_msg = "sd_format_failed_no_card";
+        } else if (status == STORAGE_STATUS_AVAILABLE) {
+            buzzer_tone(400, 100);  /* Error tone */
+            log_msg = "sd_already_formatted";
+        } else {
+            /* Format the card */
+            esp_err_t err = storage_ext_format();
+            if (err == ESP_OK) {
+                buzzer_play_profile(SOUND_PROFILE_SONAR);
+                log_msg = "sd_format_success";
+            } else {
+                buzzer_tone(300, 150);  /* Error tone */
+                log_msg = "sd_format_failed";
+            }
+        }
+        break;
+    }
 
     case SET_ITEM_BACK:
         g_app.requested_mode = MODE_SELECT;
