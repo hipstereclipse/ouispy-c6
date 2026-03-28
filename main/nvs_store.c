@@ -186,7 +186,7 @@ void nvs_store_load_prefs(void)
         nvs_close(h);
     }
 
-    if (g_app.menu_led_color >= MENU_LED_COUNT) g_app.menu_led_color = MENU_LED_GOLD;
+    if (g_app.menu_led_color >= MENU_LED_COUNT) g_app.menu_led_color = MENU_LED_TOPAZ;
     if (g_app.sound_profile_flock >= SOUND_PROFILE_COUNT) g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
     if (g_app.sound_profile_fox >= SOUND_PROFILE_COUNT) g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
     if (g_app.sound_profile_sky >= SOUND_PROFILE_COUNT) g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;

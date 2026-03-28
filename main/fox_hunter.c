@@ -23,6 +23,7 @@
 #include "led_ctrl.h"
 #include "nvs_store.h"
 #include "display.h"
+#include "storage_ext.h"
 #include <string.h>
 #include <math.h>
 #include <limits.h>
@@ -56,6 +57,19 @@ static inline bool fox_gps_tag_active(uint32_t now_ms)
                         && (now_ms > g_app.gps_client_ready_ms)
                         && ((now_ms - g_app.gps_client_ready_ms) <= FOX_GPS_READY_TIMEOUT_MS);
     return g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+}
+
+static void fox_draw_logging_badge(uint16_t bg)
+{
+    bool logging_active = storage_ext_logging_active();
+    uint16_t fg = logging_active ? rgb565(74, 222, 128) : rgb565(239, 68, 68);
+    display_draw_rect(LCD_H_RES - 14, DISPLAY_STATUS_TEXT_Y, 6, 8, bg);
+    display_draw_text(LCD_H_RES - 14, DISPLAY_STATUS_TEXT_Y, "l", fg, bg);
+}
+
+int fox_hunter_registry_capacity(void)
+{
+    return storage_ext_is_available() ? FOX_REGISTRY_MAX : FOX_REGISTRY_BASE_MAX;
 }
 
 static void fox_target_display_name(char *out, size_t out_len)
@@ -510,6 +524,8 @@ static void fox_beep_task(void *arg)
     int last_wifi_clients = -1;
     bool last_registry_open = false;
     int last_gps_active = -1;
+    int last_logging_active = -1;
+    int last_logging_blocked = -1;
     char last_target_header[DEVICE_NAME_LEN] = {0};
     int last_reg_cursor = -1;
     int last_reg_count = -1;
@@ -526,6 +542,8 @@ static void fox_beep_task(void *arg)
         char target_header[DEVICE_NAME_LEN] = {0};
         fox_target_display_name(target_header, sizeof(target_header));
         bool gps_tag_active = fox_gps_tag_active(now);
+        bool logging_active = storage_ext_logging_active();
+        bool logging_blocked = storage_ext_logging_blocked();
 
         int8_t live_rssi = target_visible ? g_app.fox_rssi : -128;
 
@@ -537,6 +555,8 @@ static void fox_beep_task(void *arg)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || (g_app.fox_registry_open != last_registry_open)
                    || ((int)gps_tag_active != last_gps_active)
+                   || ((int)logging_active != last_logging_active)
+                   || ((int)logging_blocked != last_logging_blocked)
                    || (strcmp(target_header, last_target_header) != 0)
                    || (g_app.fox_registry_open && (g_app.ui_cursor != last_reg_cursor
                        || g_app.fox_registry_count != last_reg_count
@@ -551,6 +571,8 @@ static void fox_beep_task(void *arg)
             last_wifi_clients = g_app.wifi_clients;
             last_registry_open = g_app.fox_registry_open;
             last_gps_active = (int)gps_tag_active;
+            last_logging_active = (int)logging_active;
+            last_logging_blocked = (int)logging_blocked;
             snprintf(last_target_header, sizeof(last_target_header), "%s", target_header);
             last_reg_cursor = g_app.ui_cursor;
             last_reg_count = g_app.fox_registry_count;
@@ -579,6 +601,7 @@ static void fox_beep_task(void *arg)
             display_draw_text_centered(DISPLAY_STATUS_SUB_Y,
                                        target_header[0] ? target_header : ap_ssid,
                                        rgb565(228, 228, 231), dim_accent);
+            fox_draw_logging_badge(dim_accent);
 
             /* Content area */
             display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
@@ -1005,6 +1028,9 @@ void fox_hunter_clear_target(void)
     g_app.fox_last_seen = 0;
     g_app.fox_rssi = -100;
     g_app.fox_rssi_best = -100;
+    g_app.fox_registry_open = false;
+    g_app.ui_cursor = 0;
+    g_app.ui_item_count = 0;
     nvs_store_clear_fox_target();
     ESP_LOGI(TAG, "Target cleared");
 }
@@ -1047,7 +1073,7 @@ int fox_hunter_registry_add(const uint8_t mac[6], const char *label,
             return i; /* already exists */
         }
     }
-    if (g_app.fox_registry_count >= FOX_REGISTRY_MAX) return -1; /* full */
+    if (g_app.fox_registry_count >= fox_hunter_registry_capacity()) return -1; /* full */
 
     fox_reg_entry_t *e = &g_app.fox_registry[g_app.fox_registry_count];
     memset(e, 0, sizeof(*e));

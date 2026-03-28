@@ -41,6 +41,7 @@ enum {
     SET_ITEM_SHORTCUT_MODE,
     SET_ITEM_SHORTCUT_ACTION,
     SET_ITEM_SHORTCUT_BACK,
+    SET_ITEM_GPS_TAGGING,
     SET_ITEM_SD_LOGS,
     SET_ITEM_SD_FORMAT,
     SET_ITEM_BACK,
@@ -84,6 +85,14 @@ static bool ui_gps_tag_active(void)
     return g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
 }
 
+static void ui_draw_logging_badge(uint16_t bg)
+{
+    bool logging_active = storage_ext_logging_active();
+    uint16_t fg = logging_active ? rgb565(74, 222, 128) : rgb565(239, 68, 68);
+    display_draw_rect(LCD_H_RES - 14, DISPLAY_STATUS_TEXT_Y, 6, 8, bg);
+    display_draw_text(LCD_H_RES - 14, DISPLAY_STATUS_TEXT_Y, "l", fg, bg);
+}
+
 static void set_init_phase_led(uint8_t r, uint8_t g, uint8_t b)
 {
     led_ctrl_set_forced(r, g, b);
@@ -92,34 +101,50 @@ static void set_init_phase_led(uint8_t r, uint8_t g, uint8_t b)
 static void get_menu_led_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b)
 {
     switch (idx) {
-    case MENU_LED_MINT:    *r = 35;  *g = 220; *b = 160; break;
-    case MENU_LED_SKY:     *r = 50;  *g = 140; *b = 255; break;
-    case MENU_LED_AMBER:   *r = 250; *g = 145; *b = 10;  break;
-    case MENU_LED_MAGENTA: *r = 220; *g = 70;  *b = 200; break;
-    case MENU_LED_RUBY:    *r = 255; *g = 45;  *b = 95;  break;
-    case MENU_LED_LIME:    *r = 115; *g = 255; *b = 25;  break;
-    case MENU_LED_ICE:     *r = 120; *g = 235; *b = 255; break;
-    case MENU_LED_WHITE:   *r = 245; *g = 245; *b = 245; break;
-    case MENU_LED_DEEP_PURPLE: *r = 150; *g = 70; *b = 255; break;
-    case MENU_LED_GOLD:
-    default:               *r = 255; *g = 190; *b = 36;  break;
+    case MENU_LED_AQUAMARINE:   *r = 35;  *g = 218; *b = 168; break; /* teal-cyan         */
+    case MENU_LED_SAPPHIRE:     *r = 45;  *g = 120; *b = 255; break; /* vivid blue        */
+    case MENU_LED_AMBER:        *r = 255; *g = 148; *b = 12;  break; /* warm orange       */
+    case MENU_LED_ALEXANDRITE:  *r = 195; *g = 55;  *b = 165; break; /* purple-crimson    */
+    case MENU_LED_RUBY:         *r = 255; *g = 38;  *b = 75;  break; /* deep red          */
+    case MENU_LED_PERIDOT:      *r = 135; *g = 220; *b = 55;  break; /* yellow-green      */
+    case MENU_LED_MOONSTONE:    *r = 175; *g = 215; *b = 255; break; /* ice blue-white    */
+    case MENU_LED_DIAMOND:      *r = 248; *g = 248; *b = 255; break; /* pure bright white */
+    case MENU_LED_AMETHYST:     *r = 175; *g = 75;  *b = 255; break; /* violet-purple     */
+    case MENU_LED_EMERALD:      *r = 25;  *g = 195; *b = 95;  break; /* vivid green       */
+    case MENU_LED_CITRINE:      *r = 255; *g = 215; *b = 35;  break; /* warm yellow       */
+    case MENU_LED_CARNELIAN:    *r = 255; *g = 85;  *b = 28;  break; /* orange-red        */
+    case MENU_LED_ROSE_QUARTZ:  *r = 255; *g = 130; *b = 175; break; /* soft pink         */
+    case MENU_LED_TANZANITE:    *r = 75;  *g = 65;  *b = 225; break; /* indigo-blue       */
+    case MENU_LED_LABRADORITE:  *r = 65;  *g = 175; *b = 215; break; /* aurora blue-teal  */
+    case MENU_LED_CHALCOPYRITE: *r = 195; *g = 200; *b = 55;  break; /* iridescent gold-green */
+    case MENU_LED_MALACHITE:    *r = 0;   *g = 200; *b = 130; break; /* bright teal-green */
+    case MENU_LED_TOPAZ:
+    default:                    *r = 255; *g = 190; *b = 36;  break; /* golden-orange     */
     }
 }
 
 static const char *menu_led_name(uint8_t idx)
 {
     switch (idx) {
-    case MENU_LED_MINT: return "MINT";
-    case MENU_LED_SKY: return "SKY";
-    case MENU_LED_AMBER: return "AMBER";
-    case MENU_LED_MAGENTA: return "MAGENTA";
-    case MENU_LED_RUBY: return "RUBY";
-    case MENU_LED_LIME: return "LIME";
-    case MENU_LED_ICE: return "ICE";
-    case MENU_LED_WHITE: return "WHITE";
-    case MENU_LED_DEEP_PURPLE: return "PURPLE";
-    case MENU_LED_GOLD:
-    default: return "GOLD";
+    case MENU_LED_AQUAMARINE:   return "AQUAMARINE";
+    case MENU_LED_SAPPHIRE:     return "SAPPHIRE";
+    case MENU_LED_AMBER:        return "AMBER";
+    case MENU_LED_ALEXANDRITE:  return "ALEXANDRITE";
+    case MENU_LED_RUBY:         return "RUBY";
+    case MENU_LED_PERIDOT:      return "PERIDOT";
+    case MENU_LED_MOONSTONE:    return "MOONSTONE";
+    case MENU_LED_DIAMOND:      return "DIAMOND";
+    case MENU_LED_AMETHYST:     return "AMETHYST";
+    case MENU_LED_EMERALD:      return "EMERALD";
+    case MENU_LED_CITRINE:      return "CITRINE";
+    case MENU_LED_CARNELIAN:    return "CARNELIAN";
+    case MENU_LED_ROSE_QUARTZ:  return "ROSE QUARTZ";
+    case MENU_LED_TANZANITE:    return "TANZANITE";
+    case MENU_LED_LABRADORITE:  return "LABRADORITE";
+    case MENU_LED_CHALCOPYRITE: return "CHALCOPYRITE";
+    case MENU_LED_MALACHITE:    return "MALACHITE";
+    case MENU_LED_TOPAZ:
+    default:                    return "TOPAZ";
     }
 }
 
@@ -238,10 +263,12 @@ static void render_mode_select_screen(int cursor)
         {"2: FOX HUNTER", "BLE tracker",    rgb565(251, 146, 60)},
         {"3: SKY SPY",    "Drone detector", rgb565(56, 189, 248)},
         {"4: SETTINGS",   "Customize unit", rgb565(168, 85, 247)},
+        {"5: VIEW LOGS",  "SD card logs",   rgb565(74, 222, 128)},
     };
+    const int entry_count = 5;
 
     if (cursor < 0) cursor = 0;
-    if (cursor > 3) cursor = 3;
+    if (cursor >= entry_count) cursor = entry_count - 1;
 
     display_fill(bg);
 
@@ -249,6 +276,7 @@ static void render_mode_select_screen(int cursor)
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y + 30, LCD_H_RES, 2, gold);
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 7, "OUI-SPY C6", gold, purple_dim);
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "MAIN MENU", rgb565(216, 180, 254), purple_dim);
+    ui_draw_logging_badge(purple_dim);
 
     display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, card_bg);
     display_draw_text(14, 53, "WiFi:", text_dim, card_bg);
@@ -270,7 +298,7 @@ static void render_mode_select_screen(int cursor)
 
     display_draw_text_centered(116, "Select a mode", text_dim, bg);
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < entry_count; i++) {
         int y = 132 + i * 28;
         bool selected = (i == cursor);
         uint16_t row_bg = selected ? selected_bg : card_alt;
@@ -310,8 +338,8 @@ static void render_mode_select_screen(int cursor)
     }
     display_draw_text_centered(246, microsd_text, microsd_color, bg);
 
-    display_draw_text_centered(258, "Click next   DblClk prev", text_dim, bg);
-    display_draw_text_centered(270, "Hold select  Hold 5s reset", text_dim, bg);
+    display_draw_text_centered(270, "Click next   DblClk prev", text_dim, bg);
+    display_draw_text_centered(282, "Hold select  Hold 5s reset", text_dim, bg);
 }
 
 static void render_settings_screen(int cursor)
@@ -337,6 +365,7 @@ static void render_settings_screen(int cursor)
                       gps_tag_active ? "ON" : "OFF",
                       gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
                       rgb565(38, 24, 54));
+    ui_draw_logging_badge(rgb565(38, 24, 54));
 
     const char *labels[SET_ITEM_COUNT] = {
         "AP Broadcast",
@@ -349,6 +378,7 @@ static void render_settings_screen(int cursor)
         "Shortcut BTN10",
         "Shortcut BTN11",
         "Shortcut BTN19",
+        "GPS Tagging",
         "microSD Logs",
         "Format microSD",
         "Back to Menu",
@@ -401,6 +431,9 @@ static void render_settings_screen(int cursor)
         case SET_ITEM_SHORTCUT_BACK:
             snprintf(val, sizeof(val), "%s", shortcut_name(g_app.shortcut_back_btn));
             break;
+        case SET_ITEM_GPS_TAGGING:
+            snprintf(val, sizeof(val), "%s", g_app.gps_tagging_enabled ? "ON" : "OFF");
+            break;
         case SET_ITEM_SD_LOGS:
             snprintf(val, sizeof(val), "%s", g_app.use_microsd_logs ? "PREFER SD" : "INTERNAL");
             break;
@@ -409,7 +442,7 @@ static void render_settings_screen(int cursor)
             break;
         case SET_ITEM_BACK:
         default:
-            snprintf(val, sizeof(val), "%s", "HOLD");
+            snprintf(val, sizeof(val), "%s", "> EXIT");
             break;
         }
 
@@ -459,17 +492,41 @@ static void render_boot_splash(void)
 static void mode_select_task(void *arg)
 {
     int last_cursor = -1;
+    int last_gps_active = -1;
+    int last_sd_status = -1;
+    int last_sd_free_bucket = -1;
+    int last_logging_active = -1;
+    int last_logging_blocked = -1;
     uint8_t r, g, b;
     get_menu_led_rgb(g_app.menu_led_color, &r, &g, &b);
     led_ctrl_breathe(r, g, b, 2200);
 
     while (g_app.current_mode == MODE_SELECT) {
+        bool gps_tag_active = ui_gps_tag_active();
+        storage_status_t sd_status = storage_ext_get_status();
+        bool logging_active = storage_ext_logging_active();
+        bool logging_blocked = storage_ext_logging_blocked();
+        int sd_free_bucket = 0;
+        if (sd_status == STORAGE_STATUS_AVAILABLE) {
+            sd_free_bucket = (int)(storage_ext_free_kb() / 1024U);
+        }
+
         if (g_app.ui_cursor >= 4) g_app.ui_cursor = 3;
         if (g_app.ui_cursor < 0) g_app.ui_cursor = 0;
 
-        if (g_app.ui_cursor != last_cursor) {
+        if (g_app.ui_cursor != last_cursor
+                || last_gps_active != (int)gps_tag_active
+                || last_sd_status != (int)sd_status
+                || last_sd_free_bucket != sd_free_bucket
+                || last_logging_active != (int)logging_active
+                || last_logging_blocked != (int)logging_blocked) {
             render_mode_select_screen(g_app.ui_cursor);
             last_cursor = g_app.ui_cursor;
+            last_gps_active = (int)gps_tag_active;
+            last_sd_status = (int)sd_status;
+            last_sd_free_bucket = sd_free_bucket;
+            last_logging_active = (int)logging_active;
+            last_logging_blocked = (int)logging_blocked;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -483,14 +540,58 @@ static void mode_select_task(void *arg)
 static void settings_task(void *arg)
 {
     int last_cursor = -1;
+    int last_gps_active = -1;
+    int last_gps_enabled = -1;
+    int last_sd_status = -1;
+    int last_sd_logs = -1;
+    int last_logging_active = -1;
+    int last_logging_blocked = -1;
+    bool led_preview_active = false;
+    uint8_t led_preview_color = 0xFF;
     while (g_app.current_mode == MODE_SETTINGS) {
+        bool gps_tag_active = ui_gps_tag_active();
+        storage_status_t sd_status = storage_ext_get_status();
+        bool logging_active = storage_ext_logging_active();
+        bool logging_blocked = storage_ext_logging_blocked();
+
         if (g_app.ui_cursor >= SET_ITEM_COUNT) g_app.ui_cursor = SET_ITEM_COUNT - 1;
         if (g_app.ui_cursor < 0) g_app.ui_cursor = 0;
-        if (g_app.ui_cursor != last_cursor) {
+
+        bool wants_led_preview = g_app.led_enabled && (g_app.ui_cursor == SET_ITEM_MENU_LED);
+        if (wants_led_preview) {
+            if (!led_preview_active || led_preview_color != g_app.menu_led_color) {
+                uint8_t r = 0, g = 0, b = 0;
+                get_menu_led_rgb(g_app.menu_led_color, &r, &g, &b);
+                led_ctrl_set_forced(r, g, b);
+                led_preview_active = true;
+                led_preview_color = g_app.menu_led_color;
+            }
+        } else if (led_preview_active) {
+            led_ctrl_off();
+            led_preview_active = false;
+            led_preview_color = 0xFF;
+        }
+
+        if (g_app.ui_cursor != last_cursor
+                || last_gps_active != (int)gps_tag_active
+                || last_gps_enabled != (int)g_app.gps_tagging_enabled
+                || last_sd_status != (int)sd_status
+                || last_sd_logs != (int)g_app.use_microsd_logs
+                || last_logging_active != (int)logging_active
+                || last_logging_blocked != (int)logging_blocked) {
             render_settings_screen(g_app.ui_cursor);
             last_cursor = g_app.ui_cursor;
+            last_gps_active = (int)gps_tag_active;
+            last_gps_enabled = (int)g_app.gps_tagging_enabled;
+            last_sd_status = (int)sd_status;
+            last_sd_logs = (int)g_app.use_microsd_logs;
+            last_logging_active = (int)logging_active;
+            last_logging_blocked = (int)logging_blocked;
         }
         vTaskDelay(pdMS_TO_TICKS(90));
+    }
+    if (led_preview_active) {
+        led_ctrl_off();
     }
     s_settings_task = NULL;
     vTaskDelete(NULL);
@@ -501,16 +602,30 @@ static void start_mode(app_mode_t mode)
     const char *names[] = {"SELECT", "FLOCK YOU", "FOX HUNTER", "SKY SPY", "SETTINGS"};
 
     ESP_LOGI(TAG, "Starting mode %d", mode);
+
+    /* Check if WiFi AP config actually changes for this mode */
+    const char *old_ssid = NULL, *old_pass = NULL;
+    const char *new_ssid = NULL, *new_pass = NULL;
+    uint8_t old_ch = 0, new_ch = 0;
+    app_mode_ap_credentials(g_app.current_mode, &old_ssid, &old_pass, &old_ch);
+    app_mode_ap_credentials(mode, &new_ssid, &new_pass, &new_ch);
+
+    bool ap_changed = !g_app.http_server
+                   || (strcmp(old_ssid, new_ssid) != 0)
+                   || (strcmp(old_pass, new_pass) != 0)
+                   || (old_ch != new_ch);
+
     g_app.current_mode = mode;
     g_app.last_input_ms = uptime_ms();
     g_app.display_sleeping = false;
     display_set_brightness(g_app.lcd_brightness);
 
-    restart_ap_for_mode(mode);
-
-    web_server_stop();
-    vTaskDelay(pdMS_TO_TICKS(50));
-    web_server_start();
+    if (ap_changed) {
+        restart_ap_for_mode(mode);
+        web_server_stop();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        web_server_start();
+    }
 
     nvs_store_save_mode(mode);
     storage_ext_append_log("mode", names[mode]);
@@ -704,6 +819,16 @@ static void apply_settings_item_action(void)
         log_msg = "shortcut_btn19_updated";
         break;
 
+    case SET_ITEM_GPS_TAGGING:
+        g_app.gps_tagging_enabled = !g_app.gps_tagging_enabled;
+        if (!g_app.gps_tagging_enabled) {
+            g_app.gps_client_ready = false;
+            g_app.gps_client_ready_ms = 0;
+        }
+        buzzer_play_profile(SOUND_PROFILE_STANDARD);
+        log_msg = g_app.gps_tagging_enabled ? "gps_tagging_enabled" : "gps_tagging_disabled";
+        break;
+
     case SET_ITEM_SD_LOGS:
         g_app.use_microsd_logs = !g_app.use_microsd_logs;
         buzzer_play_profile(SOUND_PROFILE_RETRO);
@@ -839,6 +964,10 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_CLICK:
+        if (g_app.current_mode == MODE_SETTINGS && g_app.ui_cursor == SET_ITEM_BACK) {
+            apply_settings_item_action();
+            return;
+        }
         if (g_app.ui_item_count > 0) {
             g_app.ui_cursor = (g_app.ui_cursor + 1) % g_app.ui_item_count;
         }

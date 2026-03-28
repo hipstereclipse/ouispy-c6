@@ -12,6 +12,7 @@ void fox_hunter_set_target(const uint8_t mac[6]);
 void fox_hunter_set_target_from_flock(int device_index);
 void fox_hunter_clear_target(void);
 bool fox_hunter_has_target(void);
+int  fox_hunter_registry_capacity(void);
 int  fox_hunter_registry_add(const uint8_t mac[6], const char *label,
 							 const char *original_name, const char *section);
 int  fox_hunter_registry_update(int index, const char *nickname,

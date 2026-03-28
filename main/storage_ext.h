@@ -22,5 +22,8 @@ const char *storage_ext_status_str(storage_status_t status);
 bool storage_ext_status_is_present(storage_status_t status);
 uint32_t storage_ext_log_capacity_kb(void);
 uint32_t storage_ext_free_kb(void);
+bool storage_ext_logging_active(void);
+bool storage_ext_logging_blocked(void);
 esp_err_t storage_ext_append_log(const char *kind, const char *message);
 esp_err_t storage_ext_format(void);
+int  storage_ext_read_recent_lines(char lines[][64], int max_lines);

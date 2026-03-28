@@ -30,11 +30,15 @@
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 static const char *TAG = "websrv";
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
 #define GPS_READY_TIMEOUT_MS 8000
+#define LOG_RECENT_LIMIT 16
+#define LOG_LINE_MAX 224
 
 /* Embedded index.html */
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -43,6 +47,234 @@ extern const uint8_t servercert_pem_start[] asm("_binary_servercert_pem_start");
 extern const uint8_t servercert_pem_end[]   asm("_binary_servercert_pem_end");
 extern const uint8_t prvtkey_pem_start[]    asm("_binary_prvtkey_pem_start");
 extern const uint8_t prvtkey_pem_end[]      asm("_binary_prvtkey_pem_end");
+
+typedef struct {
+    uint32_t ts;
+    char source[16];
+    char kind[24];
+    char message[LOG_LINE_MAX];
+} log_entry_t;
+
+static const char *EVENT_LOG_PATH = "/sdcard/ouispy_logs/events.log";
+static const char *IDENTITY_LOG_PATH = "/sdcard/ouispy_logs/identity.log";
+
+static const char *logging_status_label(void)
+{
+    if (storage_ext_logging_active()) return "Active";
+    if (storage_ext_logging_blocked()) return "Waiting for microSD";
+    return "Off";
+}
+
+static int log_entry_cmp_desc(const void *lhs, const void *rhs)
+{
+    const log_entry_t *a = (const log_entry_t *)lhs;
+    const log_entry_t *b = (const log_entry_t *)rhs;
+    if (a->ts < b->ts) return 1;
+    if (a->ts > b->ts) return -1;
+    return strcmp(a->source, b->source);
+}
+
+static float clampf(float v, float lo, float hi)
+{
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+static float rssi_weight_from_dbm(int rssi)
+{
+    float norm = ((float)rssi + 95.0f) / 50.0f;  /* -95..-45 -> 0..1 */
+    norm = clampf(norm, 0.0f, 1.0f);
+    return 0.35f + (norm * 1.65f);
+}
+
+static float assumed_radius_from_rssi(int rssi, bool drone_mode)
+{
+    float norm = ((float)rssi + 95.0f) / 50.0f;
+    norm = clampf(norm, 0.0f, 1.0f);
+    if (drone_mode) {
+        return 55.0f + ((1.0f - norm) * 245.0f);  /* 55m..300m */
+    }
+    return 6.0f + ((1.0f - norm) * 64.0f);       /* 6m..70m */
+}
+
+static float approx_distance_m(double lat1, double lon1, double lat2, double lon2)
+{
+    double dlat = (lat2 - lat1) * (M_PI / 180.0);
+    double dlon = (lon2 - lon1) * (M_PI / 180.0);
+    double mean_lat = ((lat1 + lat2) * 0.5) * (M_PI / 180.0);
+    double x = dlon * cos(mean_lat);
+    double y = dlat;
+    return (float)(sqrt((x * x) + (y * y)) * 6371000.0);
+}
+
+static void update_fox_fused_pin(double sample_lat, double sample_lon, int rssi)
+{
+    float w = rssi_weight_from_dbm(rssi);
+    if (g_app.fox_target_gps_samples == 0 || g_app.fox_target_weight_sum <= 0.0f) {
+        g_app.fox_target_lat = sample_lat;
+        g_app.fox_target_lon = sample_lon;
+        g_app.fox_target_weight_sum = w;
+        g_app.fox_target_gps_samples = 1;
+        g_app.fox_target_radius_m = clampf(assumed_radius_from_rssi(rssi, false), 6.0f, 90.0f);
+        return;
+    }
+
+    double prev_lat = g_app.fox_target_lat;
+    double prev_lon = g_app.fox_target_lon;
+    float prev_w = g_app.fox_target_weight_sum;
+    float next_w = prev_w + w;
+
+    g_app.fox_target_lat = ((prev_lat * prev_w) + (sample_lat * w)) / next_w;
+    g_app.fox_target_lon = ((prev_lon * prev_w) + (sample_lon * w)) / next_w;
+    g_app.fox_target_weight_sum = next_w;
+    if (g_app.fox_target_gps_samples < 65535U) g_app.fox_target_gps_samples++;
+
+    float d_m = approx_distance_m(prev_lat, prev_lon, sample_lat, sample_lon);
+    float instant_radius = assumed_radius_from_rssi(rssi, false) + (d_m * 0.42f);
+    g_app.fox_target_radius_m = clampf((g_app.fox_target_radius_m * 0.78f) + (instant_radius * 0.22f), 6.0f, 110.0f);
+}
+
+static void update_sky_fused_pin(double sample_lat, double sample_lon, int rssi)
+{
+    if (g_app.sky_tracked_gps_samples == 0) {
+        g_app.sky_tracked_lat = sample_lat;
+        g_app.sky_tracked_lon = sample_lon;
+        g_app.sky_tracked_gps_samples = 1;
+        g_app.sky_tracked_radius_m = clampf(assumed_radius_from_rssi(rssi, true), 40.0f, 320.0f);
+        return;
+    }
+
+    double prev_lat = g_app.sky_tracked_lat;
+    double prev_lon = g_app.sky_tracked_lon;
+    float w = rssi_weight_from_dbm(rssi);
+    float alpha = clampf(0.62f + (w * 0.16f), 0.62f, 0.90f);  /* prioritize newest known point */
+
+    g_app.sky_tracked_lat = (prev_lat * (1.0 - alpha)) + (sample_lat * alpha);
+    g_app.sky_tracked_lon = (prev_lon * (1.0 - alpha)) + (sample_lon * alpha);
+    if (g_app.sky_tracked_gps_samples < 65535U) g_app.sky_tracked_gps_samples++;
+
+    float d_m = approx_distance_m(prev_lat, prev_lon, sample_lat, sample_lon);
+    float instant_radius = assumed_radius_from_rssi(rssi, true) + (d_m * 0.90f);
+    g_app.sky_tracked_radius_m = clampf((g_app.sky_tracked_radius_m * 0.72f) + (instant_radius * 0.28f), 40.0f, 500.0f);
+}
+
+static int read_recent_log_file(const char *path, const char *source, log_entry_t *entries, int max_entries)
+{
+    if (!path || !source || !entries || max_entries <= 0) return 0;
+
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+
+    size_t line_buf_sz = (size_t)(LOG_LINE_MAX + 48);
+    char (*lines)[LOG_LINE_MAX + 48] = calloc((size_t)max_entries, line_buf_sz);
+    if (!lines) { fclose(f); return 0; }
+
+    int total = 0;
+    char line[LOG_LINE_MAX + 48];
+    while (fgets(line, (int)sizeof(line), f)) {
+        snprintf(lines[total % max_entries], line_buf_sz, "%s", line);
+        total++;
+    }
+    fclose(f);
+
+    int count = (total < max_entries) ? total : max_entries;
+    int start = (total > max_entries) ? (total - max_entries) : 0;
+    int parsed = 0;
+
+    for (int i = 0; i < count; i++) {
+        int src_idx = (start + i) % max_entries;
+        char *cur = lines[src_idx];
+        char *newline = strchr(cur, '\n');
+        if (newline) *newline = '\0';
+
+        char *comma1 = strchr(cur, ',');
+        if (!comma1) continue;
+        *comma1 = '\0';
+        char *comma2 = strchr(comma1 + 1, ',');
+        if (!comma2) continue;
+        *comma2 = '\0';
+
+        char *ts = cur;
+        char *kind = comma1 + 1;
+        char *message = comma2 + 1;
+        if (!ts[0] || !kind[0] || !message[0]) continue;
+
+        log_entry_t *entry = &entries[parsed++];
+        memset(entry, 0, sizeof(*entry));
+        entry->ts = (uint32_t)strtoul(ts, NULL, 10);
+        snprintf(entry->source, sizeof(entry->source), "%s", source);
+        snprintf(entry->kind, sizeof(entry->kind), "%s", kind);
+        snprintf(entry->message, sizeof(entry->message), "%s", message);
+    }
+
+    free(lines);
+    return parsed;
+}
+
+static char *build_logs_json(void)
+{
+    log_entry_t *events   = calloc(LOG_RECENT_LIMIT, sizeof(log_entry_t));
+    log_entry_t *identity = calloc(LOG_RECENT_LIMIT, sizeof(log_entry_t));
+    log_entry_t *merged   = calloc(LOG_RECENT_LIMIT * 2, sizeof(log_entry_t));
+    if (!events || !identity || !merged) {
+        free(events); free(identity); free(merged);
+        return NULL;
+    }
+    int event_count = read_recent_log_file(EVENT_LOG_PATH, "events", events, LOG_RECENT_LIMIT);
+    int identity_count = read_recent_log_file(IDENTITY_LOG_PATH, "identity", identity, LOG_RECENT_LIMIT);
+    int merged_count = 0;
+
+    for (int i = 0; i < event_count; i++) merged[merged_count++] = events[i];
+    for (int i = 0; i < identity_count; i++) merged[merged_count++] = identity[i];
+    if (merged_count > 1) {
+        qsort(merged, (size_t)merged_count, sizeof(merged[0]), log_entry_cmp_desc);
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "loggingEnabled", g_app.use_microsd_logs);
+    cJSON_AddBoolToObject(root, "loggingActive", storage_ext_logging_active());
+    cJSON_AddBoolToObject(root, "loggingBlocked", storage_ext_logging_blocked());
+    cJSON_AddStringToObject(root, "status", logging_status_label());
+    cJSON_AddStringToObject(root, "microsdStatus", storage_ext_status_str(storage_ext_get_status()));
+
+    cJSON *all_arr = cJSON_AddArrayToObject(root, "all");
+    for (int i = 0; i < merged_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "ts", merged[i].ts);
+        cJSON_AddStringToObject(item, "source", merged[i].source);
+        cJSON_AddStringToObject(item, "kind", merged[i].kind);
+        cJSON_AddStringToObject(item, "message", merged[i].message);
+        cJSON_AddItemToArray(all_arr, item);
+    }
+
+    cJSON *events_arr = cJSON_AddArrayToObject(root, "events");
+    for (int i = 0; i < event_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "ts", events[i].ts);
+        cJSON_AddStringToObject(item, "source", events[i].source);
+        cJSON_AddStringToObject(item, "kind", events[i].kind);
+        cJSON_AddStringToObject(item, "message", events[i].message);
+        cJSON_AddItemToArray(events_arr, item);
+    }
+
+    cJSON *identity_arr = cJSON_AddArrayToObject(root, "identity");
+    for (int i = 0; i < identity_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "ts", identity[i].ts);
+        cJSON_AddStringToObject(item, "source", identity[i].source);
+        cJSON_AddStringToObject(item, "kind", identity[i].kind);
+        cJSON_AddStringToObject(item, "message", identity[i].message);
+        cJSON_AddItemToArray(identity_arr, item);
+    }
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    free(events);
+    free(identity);
+    free(merged);
+    return json;
+}
 
 /* ── Serve main page ── */
 static void set_security_headers(httpd_req_t *req)
@@ -62,149 +294,144 @@ static esp_err_t get_index(httpd_req_t *req)
     return httpd_resp_send(req, (const char *)index_html_start, len);
 }
 
+/* ── JSON helper: escape a C string for safe JSON embedding ── */
+static void json_escape_str(const char *src, char *dst, size_t dstsz)
+{
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j + 2 < dstsz; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"' || c == '\\') {
+            dst[j++] = '\\';
+            if (j < dstsz) dst[j++] = (char)c;
+        } else if (c < 0x20) {
+            /* skip control chars */
+        } else {
+            dst[j++] = (char)c;
+        }
+    }
+    dst[j] = '\0';
+}
+
 /* ── JSON builders ── */
+/*
+ * Build the full state JSON with a single snprintf + one malloc.
+ * Replaces the previous cJSON implementation which performed ~60 small
+ * allocations per call, fragmenting the heap every 500 ms.
+ */
+#define STATE_JSON_BUF 1536
 static char *build_state_json(void)
 {
     uint32_t now_ms = uptime_ms();
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "mode", g_app.current_mode);
-    cJSON_AddNumberToObject(root, "uptime", g_app.uptime_sec);
-    cJSON_AddNumberToObject(root, "heap", esp_get_free_heap_size());
-    cJSON_AddNumberToObject(root, "clients", g_app.wifi_clients);
-    cJSON_AddNumberToObject(root, "brightness", g_app.lcd_brightness);
-    cJSON_AddBoolToObject(root, "sound", g_app.sound_enabled);
-    cJSON_AddBoolToObject(root, "led", g_app.led_enabled);
-    cJSON_AddBoolToObject(root, "apBroadcast", g_app.ap_broadcast_enabled);
-    cJSON_AddBoolToObject(root, "singleApName", g_app.single_ap_name_enabled);
-    cJSON_AddNumberToObject(root, "displaySleepSec", g_app.display_sleep_timeout_sec);
-    cJSON_AddNumberToObject(root, "menuLedColor", g_app.menu_led_color);
-    cJSON_AddNumberToObject(root, "soundProfileFlock", g_app.sound_profile_flock);
-    cJSON_AddNumberToObject(root, "soundProfileFox", g_app.sound_profile_fox);
-    cJSON_AddNumberToObject(root, "soundProfileSky", g_app.sound_profile_sky);
-    cJSON_AddNumberToObject(root, "shortcutModeBtn", g_app.shortcut_mode_btn);
-    cJSON_AddNumberToObject(root, "shortcutActionBtn", g_app.shortcut_action_btn);
-    cJSON_AddNumberToObject(root, "shortcutBackBtn", g_app.shortcut_back_btn);
-    cJSON_AddBoolToObject(root, "useMicrosdLogs", g_app.use_microsd_logs);
-    cJSON_AddBoolToObject(root, "gpsTagging", g_app.gps_tagging_enabled);
     bool gps_ready_fresh = g_app.gps_client_ready &&
                            (now_ms > g_app.gps_client_ready_ms) &&
                            ((now_ms - g_app.gps_client_ready_ms) <= GPS_READY_TIMEOUT_MS);
     bool gps_active = g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
-    cJSON_AddBoolToObject(root, "gpsClientReady", gps_ready_fresh);
-    cJSON_AddBoolToObject(root, "gpsTagActive", gps_active);
     storage_status_t microsd_status = storage_ext_get_status();
-    cJSON_AddBoolToObject(root, "microsdAvailable", microsd_status == STORAGE_STATUS_AVAILABLE);
-    cJSON_AddStringToObject(root, "microsdStatus", storage_ext_status_str(microsd_status));
-    cJSON_AddNumberToObject(root, "logCapacityKb", storage_ext_log_capacity_kb());
-    cJSON_AddNumberToObject(root, "deviceCount", g_app.device_count);
-    cJSON_AddNumberToObject(root, "droneCount", g_app.drone_count);
 
-    /* Fox hunter state */
-    cJSON *fox = cJSON_AddObjectToObject(root, "fox");
-    char mac_str[18] = "none";
-    if (g_app.fox_target_set) mac_to_str(g_app.fox_target_mac, mac_str, sizeof(mac_str));
-    cJSON_AddStringToObject(fox, "target", mac_str);
-    cJSON_AddBoolToObject(fox, "hasTarget", g_app.fox_target_set);
-    cJSON_AddNumberToObject(fox, "rssi", g_app.fox_rssi);
-    cJSON_AddNumberToObject(fox, "bestRssi", g_app.fox_rssi_best);
-    cJSON_AddBoolToObject(fox, "found", g_app.fox_target_found);
-    cJSON_AddNumberToObject(fox, "ledMode", g_app.fox_led_mode);
-    cJSON_AddNumberToObject(fox, "registryCount", g_app.fox_registry_count);
+    char fox_mac[18] = "none";
+    if (g_app.fox_target_set) mac_to_str(g_app.fox_target_mac, fox_mac, sizeof(fox_mac));
+
     uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now_ms > g_app.fox_last_seen)
-                             ? (now_ms - g_app.fox_last_seen) / 1000U
-                             : 0;
-    cJSON_AddNumberToObject(fox, "lastSeenSec", last_seen_sec);
+                             ? (now_ms - g_app.fox_last_seen) / 1000U : 0;
     const char *prox = "very far";
     if (g_app.fox_rssi >= -45) prox = "very close";
     else if (g_app.fox_rssi >= -60) prox = "close";
     else if (g_app.fox_rssi >= -72) prox = "near";
     else if (g_app.fox_rssi >= -84) prox = "far";
-    cJSON_AddStringToObject(fox, "proximity", prox);
 
-    /* WiFi AP client MACs */
-    cJSON *wc_arr = cJSON_AddArrayToObject(root, "wifiClientMacs");
+    char *buf = (char *)malloc(STATE_JSON_BUF);
+    if (!buf) return NULL;
+
+    int n = snprintf(buf, STATE_JSON_BUF,
+        "{\"mode\":%d,\"uptime\":%lu,\"heap\":%lu,\"clients\":%u,"
+        "\"brightness\":%u,\"sound\":%s,\"led\":%s,"
+        "\"apBroadcast\":%s,\"singleApName\":%s,"
+        "\"displaySleepSec\":%u,\"menuLedColor\":%u,"
+        "\"soundProfileFlock\":%u,\"soundProfileFox\":%u,\"soundProfileSky\":%u,"
+        "\"shortcutModeBtn\":%u,\"shortcutActionBtn\":%u,\"shortcutBackBtn\":%u,"
+        "\"useMicrosdLogs\":%s,\"loggingActive\":%s,\"loggingBlocked\":%s,"
+        "\"loggingStatus\":\"%s\",\"gpsTagging\":%s,"
+        "\"gpsClientReady\":%s,\"gpsTagActive\":%s,"
+        "\"microsdAvailable\":%s,\"microsdStatus\":\"%s\","
+        "\"logCapacityKb\":%lu,\"deviceCount\":%d,\"droneCount\":%d,"
+        "\"foxRegistryCapacity\":%d,"
+        "\"fox\":{\"target\":\"%s\",\"hasTarget\":%s,\"rssi\":%d,"
+        "\"bestRssi\":%d,\"found\":%s,\"ledMode\":%u,"
+        "\"registryCount\":%d,\"lastSeenSec\":%lu,"
+        "\"estLat\":%.8f,\"estLon\":%.8f,\"estRadiusM\":%.1f,"
+        "\"gpsSamples\":%u,\"proximity\":\"%s\"},"
+        "\"sky\":{\"trackedIdx\":%d,\"estLat\":%.8f,\"estLon\":%.8f,"
+        "\"estRadiusM\":%.1f,\"gpsSamples\":%u},"
+        "\"wifiClientMacs\":[",
+        (int)g_app.current_mode,
+        (unsigned long)g_app.uptime_sec,
+        (unsigned long)esp_get_free_heap_size(),
+        (unsigned)g_app.wifi_clients,
+        (unsigned)g_app.lcd_brightness,
+        g_app.sound_enabled ? "true" : "false",
+        g_app.led_enabled ? "true" : "false",
+        g_app.ap_broadcast_enabled ? "true" : "false",
+        g_app.single_ap_name_enabled ? "true" : "false",
+        (unsigned)g_app.display_sleep_timeout_sec,
+        (unsigned)g_app.menu_led_color,
+        (unsigned)g_app.sound_profile_flock,
+        (unsigned)g_app.sound_profile_fox,
+        (unsigned)g_app.sound_profile_sky,
+        (unsigned)g_app.shortcut_mode_btn,
+        (unsigned)g_app.shortcut_action_btn,
+        (unsigned)g_app.shortcut_back_btn,
+        g_app.use_microsd_logs ? "true" : "false",
+        storage_ext_logging_active() ? "true" : "false",
+        storage_ext_logging_blocked() ? "true" : "false",
+        logging_status_label(),
+        g_app.gps_tagging_enabled ? "true" : "false",
+        gps_ready_fresh ? "true" : "false",
+        gps_active ? "true" : "false",
+        (microsd_status == STORAGE_STATUS_AVAILABLE) ? "true" : "false",
+        storage_ext_status_str(microsd_status),
+        (unsigned long)storage_ext_log_capacity_kb(),
+        g_app.device_count,
+        g_app.drone_count,
+        fox_hunter_registry_capacity(),
+        fox_mac,
+        g_app.fox_target_set ? "true" : "false",
+        (int)g_app.fox_rssi,
+        (int)g_app.fox_rssi_best,
+        g_app.fox_target_found ? "true" : "false",
+        (unsigned)g_app.fox_led_mode,
+        g_app.fox_registry_count,
+        (unsigned long)last_seen_sec,
+        g_app.fox_target_lat, g_app.fox_target_lon,
+        (double)g_app.fox_target_radius_m,
+        (unsigned)g_app.fox_target_gps_samples,
+        prox,
+        g_app.sky_tracked_drone_idx,
+        g_app.sky_tracked_lat, g_app.sky_tracked_lon,
+        (double)g_app.sky_tracked_radius_m,
+        (unsigned)g_app.sky_tracked_gps_samples
+    );
+
+    /* Append wifi client MACs */
     uint8_t tracked = (g_app.wifi_clients < WIFI_MAX_AP_CLIENTS)
                       ? g_app.wifi_clients : WIFI_MAX_AP_CLIENTS;
-    for (uint8_t i = 0; i < tracked; i++) {
+    for (uint8_t i = 0; i < tracked && n < STATE_JSON_BUF - 24; i++) {
         char mc[18];
         mac_to_str(g_app.wifi_client_macs[i], mc, sizeof(mc));
-        cJSON_AddItemToArray(wc_arr, cJSON_CreateString(mc));
+        n += snprintf(buf + n, STATE_JSON_BUF - n, "%s\"%s\"", (i > 0) ? "," : "", mc);
     }
-
-    char *str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    return str;
+    if (n < STATE_JSON_BUF - 3) {
+        buf[n++] = ']'; buf[n++] = '}'; buf[n] = '\0';
+    }
+    return buf;
 }
 
-static char *build_devices_json(void)
-{
-    cJSON *arr = cJSON_CreateArray();
-    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < g_app.device_count; i++) {
-            ble_device_t *d = &g_app.devices[i];
-            cJSON *item = cJSON_CreateObject();
-            char mac_str[18];
-            mac_to_str(d->mac, mac_str, sizeof(mac_str));
-            cJSON_AddStringToObject(item, "mac", mac_str);
-            cJSON_AddStringToObject(item, "name", d->name);
-            cJSON_AddNumberToObject(item, "rssi", d->rssi);
-            cJSON_AddNumberToObject(item, "bestRssi", d->rssi_best);
-            cJSON_AddNumberToObject(item, "hits", d->hit_count);
-            cJSON_AddNumberToObject(item, "flags", d->detect_flags);
-            cJSON_AddBoolToObject(item, "flock", d->is_flock);
-            cJSON_AddBoolToObject(item, "raven", d->is_raven);
-            cJSON_AddNumberToObject(item, "ravenFw", d->raven_fw);
-            cJSON_AddNumberToObject(item, "firstSeen", d->first_seen / 1000);
-            cJSON_AddNumberToObject(item, "lastSeen", d->last_seen / 1000);
-            cJSON_AddItemToArray(arr, item);
-        }
-        xSemaphoreGive(g_app.device_mutex);
-    }
-    char *str = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    return str;
-}
-
-static char *build_drones_json(void)
-{
-    cJSON *arr = cJSON_CreateArray();
-    if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < g_app.drone_count; i++) {
-            drone_info_t *d = &g_app.drones[i];
-            cJSON *item = cJSON_CreateObject();
-            char mac_str[18];
-            mac_to_str(d->mac, mac_str, sizeof(mac_str));
-            cJSON_AddStringToObject(item, "mac", mac_str);
-            cJSON_AddNumberToObject(item, "rssi", d->rssi);
-            cJSON_AddStringToObject(item, "id", d->basic_id);
-            cJSON_AddNumberToObject(item, "idType", d->id_type);
-            cJSON_AddNumberToObject(item, "uaType", d->ua_type);
-            cJSON_AddNumberToObject(item, "lat", d->lat);
-            cJSON_AddNumberToObject(item, "lon", d->lon);
-            cJSON_AddNumberToObject(item, "alt", d->altitude);
-            cJSON_AddNumberToObject(item, "height", d->height);
-            cJSON_AddNumberToObject(item, "speed", d->speed);
-            cJSON_AddNumberToObject(item, "dir", d->direction);
-            cJSON_AddNumberToObject(item, "pilotLat", d->pilot_lat);
-            cJSON_AddNumberToObject(item, "pilotLon", d->pilot_lon);
-            cJSON_AddStringToObject(item, "opId", d->operator_id);
-            const char *proto_names[] = {"wifi", "ble", "dji"};
-            cJSON_AddStringToObject(item, "proto", proto_names[d->protocol % 3]);
-            cJSON_AddBoolToObject(item, "hasLoc", d->has_location);
-            cJSON_AddBoolToObject(item, "hasPilot", d->has_pilot);
-            cJSON_AddItemToArray(arr, item);
-        }
-        xSemaphoreGive(g_app.drone_mutex);
-    }
-    char *str = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    return str;
-}
+/* build_devices_json / build_drones_json removed — streamed directly in handlers */
 
 /* ── API handlers ── */
 static esp_err_t get_state(httpd_req_t *req)
 {
     char *json = build_state_json();
+    if (!json) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
     httpd_resp_set_type(req, "application/json");
     set_security_headers(req);
     esp_err_t ret = httpd_resp_send(req, json, strlen(json));
@@ -212,22 +439,92 @@ static esp_err_t get_state(httpd_req_t *req)
     return ret;
 }
 
+/* Stream device list directly — no intermediate malloc/cJSON tree */
 static esp_err_t get_devices(httpd_req_t *req)
 {
-    char *json = build_devices_json();
     httpd_resp_set_type(req, "application/json");
     set_security_headers(req);
-    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
-    free(json);
-    return ret;
+    httpd_resp_sendstr_chunk(req, "[");
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        char buf[256];
+        for (int i = 0; i < g_app.device_count; i++) {
+            ble_device_t *d = &g_app.devices[i];
+            char ms[18];
+            mac_to_str(d->mac, ms, sizeof(ms));
+            char sn[DEVICE_NAME_LEN * 2];
+            json_escape_str(d->name, sn, sizeof(sn));
+            snprintf(buf, sizeof(buf),
+                "%s{\"mac\":\"%s\",\"name\":\"%s\",\"rssi\":%d,\"bestRssi\":%d,"
+                "\"hits\":%u,\"flags\":%u,\"flock\":%s,\"raven\":%s,"
+                "\"ravenFw\":%u,\"firstSeen\":%lu,\"lastSeen\":%lu}",
+                i ? "," : "",
+                ms, sn, (int)d->rssi, (int)d->rssi_best,
+                (unsigned)d->hit_count, (unsigned)d->detect_flags,
+                d->is_flock ? "true" : "false",
+                d->is_raven ? "true" : "false",
+                (unsigned)d->raven_fw,
+                (unsigned long)(d->first_seen / 1000),
+                (unsigned long)(d->last_seen / 1000));
+            httpd_resp_sendstr_chunk(req, buf);
+        }
+        xSemaphoreGive(g_app.device_mutex);
+    }
+
+    httpd_resp_sendstr_chunk(req, "]");
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+/* Stream drone list directly */
 static esp_err_t get_drones(httpd_req_t *req)
 {
-    char *json = build_drones_json();
+    static const char *proto_names[] = {"wifi", "ble", "dji"};
     httpd_resp_set_type(req, "application/json");
     set_security_headers(req);
-    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
+    httpd_resp_sendstr_chunk(req, "[");
+
+    if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        char buf[384];
+        for (int i = 0; i < g_app.drone_count; i++) {
+            drone_info_t *d = &g_app.drones[i];
+            char ms[18];
+            mac_to_str(d->mac, ms, sizeof(ms));
+            char sid[DRONE_ID_LEN * 2], sop[DRONE_ID_LEN * 2];
+            json_escape_str(d->basic_id, sid, sizeof(sid));
+            json_escape_str(d->operator_id, sop, sizeof(sop));
+            snprintf(buf, sizeof(buf),
+                "%s{\"mac\":\"%s\",\"rssi\":%d,\"id\":\"%s\",\"idType\":%u,"
+                "\"uaType\":%u,\"lat\":%.8f,\"lon\":%.8f,\"alt\":%.1f,"
+                "\"height\":%.1f,\"speed\":%.1f,\"dir\":%.1f,"
+                "\"pilotLat\":%.8f,\"pilotLon\":%.8f,\"opId\":\"%s\","
+                "\"proto\":\"%s\",\"hasLoc\":%s,\"hasPilot\":%s}",
+                i ? "," : "",
+                ms, (int)d->rssi, sid,
+                (unsigned)d->id_type, (unsigned)d->ua_type,
+                d->lat, d->lon, (double)d->altitude,
+                (double)d->height, (double)d->speed, (double)d->direction,
+                d->pilot_lat, d->pilot_lon, sop,
+                proto_names[d->protocol % 3],
+                d->has_location ? "true" : "false",
+                d->has_pilot ? "true" : "false");
+            httpd_resp_sendstr_chunk(req, buf);
+        }
+        xSemaphoreGive(g_app.drone_mutex);
+    }
+
+    httpd_resp_sendstr_chunk(req, "]");
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static esp_err_t get_logs(httpd_req_t *req)
+{
+    char *json = build_logs_json();
+    httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
+    if (!json) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+    }
+    esp_err_t ret = httpd_resp_send(req, json, (ssize_t)strlen(json));
     free(json);
     return ret;
 }
@@ -328,28 +625,127 @@ static esp_err_t post_fox_ledmode(httpd_req_t *req)
 }
 
 /* ── Fox registry endpoints ── */
+typedef struct {
+    bool        online;
+    uint32_t    age_sec;
+    int8_t      rssi;
+    uint16_t    hits;
+    const char *source;
+} fox_registry_live_info_t;
+
+static void fox_registry_live_info_for_mac(const uint8_t mac[6], fox_registry_live_info_t *info)
+{
+    if (!info) return;
+
+    uint32_t now_ms = uptime_ms();
+    info->online = false;
+    info->age_sec = 0;
+    info->rssi = -127;
+    info->hits = 0;
+    info->source = "";
+
+    if (g_app.fox_target_set && mac_equal(mac, g_app.fox_target_mac) && g_app.fox_last_seen > 0) {
+        uint32_t age_ms = (now_ms > g_app.fox_last_seen) ? (now_ms - g_app.fox_last_seen) : 0;
+        info->online = g_app.fox_target_found;
+        info->age_sec = age_ms / 1000U;
+        info->rssi = g_app.fox_rssi;
+        info->source = "fox";
+    }
+
+    for (uint8_t i = 0; i < g_app.wifi_clients && i < WIFI_MAX_AP_CLIENTS; i++) {
+        if (mac_equal(mac, g_app.wifi_client_macs[i])) {
+            info->online = true;
+            info->age_sec = 0;
+            info->hits = 0;
+            info->source = "wifi";
+            return;
+        }
+    }
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        for (int i = 0; i < g_app.device_count; i++) {
+            ble_device_t *d = &g_app.devices[i];
+            if (!mac_equal(mac, d->mac)) continue;
+            uint32_t age_ms = (now_ms > d->last_seen) ? (now_ms - d->last_seen) : 0;
+            if (!info->source[0] || (age_ms / 1000U) <= info->age_sec) {
+                info->online = (age_ms <= 8000U);
+                info->age_sec = age_ms / 1000U;
+                info->rssi = d->rssi;
+                info->hits = d->hit_count;
+                info->source = d->is_flock ? "flock" : "ble";
+            }
+        }
+
+        for (int i = 0; i < g_app.fox_nearby_count; i++) {
+            ble_device_t *d = &g_app.fox_nearby[i];
+            if (!mac_equal(mac, d->mac)) continue;
+            uint32_t age_ms = (now_ms > d->last_seen) ? (now_ms - d->last_seen) : 0;
+            if (!info->source[0] || (age_ms / 1000U) <= info->age_sec) {
+                info->online = (age_ms <= 8000U);
+                info->age_sec = age_ms / 1000U;
+                info->rssi = d->rssi;
+                info->hits = d->hit_count;
+                info->source = "ble";
+            }
+        }
+        xSemaphoreGive(g_app.device_mutex);
+    }
+
+    if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        for (int i = 0; i < g_app.drone_count; i++) {
+            drone_info_t *d = &g_app.drones[i];
+            if (!mac_equal(mac, d->mac)) continue;
+            uint32_t age_ms = (now_ms > d->last_seen) ? (now_ms - d->last_seen) : 0;
+            if (!info->source[0] || (age_ms / 1000U) <= info->age_sec) {
+                info->online = (age_ms <= 8000U);
+                info->age_sec = age_ms / 1000U;
+                info->rssi = d->rssi;
+                info->hits = 0;
+                info->source = "drone";
+            }
+        }
+        xSemaphoreGive(g_app.drone_mutex);
+    }
+}
+
 static esp_err_t get_fox_registry(httpd_req_t *req)
 {
-    cJSON *arr = cJSON_CreateArray();
+    httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
+    httpd_resp_sendstr_chunk(req, "[");
+
+    char buf[640];
     for (int i = 0; i < g_app.fox_registry_count; i++) {
         fox_reg_entry_t *e = &g_app.fox_registry[i];
-        cJSON *item = cJSON_CreateObject();
-        char mac_str[18];
-        mac_to_str(e->mac, mac_str, sizeof(mac_str));
-        cJSON_AddStringToObject(item, "mac", mac_str);
-        cJSON_AddStringToObject(item, "label", e->label);
-        cJSON_AddStringToObject(item, "originalName", e->original_name);
-        cJSON_AddStringToObject(item, "nickname", e->nickname);
-        cJSON_AddStringToObject(item, "notes", e->notes);
-        cJSON_AddStringToObject(item, "section", e->section);
-        cJSON_AddItemToArray(arr, item);
+        char ms[18];
+        mac_to_str(e->mac, ms, sizeof(ms));
+        char sl[FOX_REG_LABEL_LEN * 2], so[DEVICE_NAME_LEN * 2];
+        char snk[FOX_REG_NICK_LEN * 2], snt[FOX_REG_NOTES_LEN * 2];
+        char ss[FOX_REG_SECTION_LEN * 2];
+        json_escape_str(e->label, sl, sizeof(sl));
+        json_escape_str(e->original_name, so, sizeof(so));
+        json_escape_str(e->nickname, snk, sizeof(snk));
+        json_escape_str(e->notes, snt, sizeof(snt));
+        json_escape_str(e->section, ss, sizeof(ss));
+
+        fox_registry_live_info_t li;
+        fox_registry_live_info_for_mac(e->mac, &li);
+        int age = li.source[0] ? (int)li.age_sec : -1;
+
+        snprintf(buf, sizeof(buf),
+            "%s{\"mac\":\"%s\",\"label\":\"%s\",\"originalName\":\"%s\","
+            "\"nickname\":\"%s\",\"notes\":\"%s\",\"section\":\"%s\","
+            "\"online\":%s,\"lastSeenAgeSec\":%d,"
+            "\"liveRssi\":%d,\"liveHits\":%u,\"lastSeenSource\":\"%s\"}",
+            i ? "," : "",
+            ms, sl, so, snk, snt, ss,
+            li.online ? "true" : "false", age,
+            (int)li.rssi, (unsigned)li.hits, li.source);
+        httpd_resp_sendstr_chunk(req, buf);
     }
-    char *json = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    httpd_resp_set_type(req, "application/json");
-    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
-    free(json);
-    return ret;
+
+    httpd_resp_sendstr_chunk(req, "]");
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t post_fox_registry(httpd_req_t *req)
@@ -511,8 +907,9 @@ static esp_err_t post_gps_status(httpd_req_t *req)
 
     cJSON *ready = cJSON_GetObjectItem(root, "ready");
     if (ready) {
-        g_app.gps_client_ready = cJSON_IsTrue(ready);
-        g_app.gps_client_ready_ms = uptime_ms();
+        bool is_ready = cJSON_IsTrue(ready);
+        g_app.gps_client_ready = is_ready;
+        g_app.gps_client_ready_ms = is_ready ? uptime_ms() : 0;
     }
 
     cJSON_Delete(root);
@@ -615,7 +1012,13 @@ static esp_err_t post_settings(httpd_req_t *req)
     if (sd_logs) g_app.use_microsd_logs = cJSON_IsTrue(sd_logs);
 
     cJSON *gps_tagging = cJSON_GetObjectItem(root, "gpsTagging");
-    if (gps_tagging) g_app.gps_tagging_enabled = cJSON_IsTrue(gps_tagging);
+    if (gps_tagging) {
+        g_app.gps_tagging_enabled = cJSON_IsTrue(gps_tagging);
+        if (!g_app.gps_tagging_enabled) {
+            g_app.gps_client_ready = false;
+            g_app.gps_client_ready_ms = 0;
+        }
+    }
 
     if (old_ap_broadcast != g_app.ap_broadcast_enabled ||
         old_single_ap_name != g_app.single_ap_name_enabled) {
@@ -672,20 +1075,37 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
     /* Receive frame (handle ping, commands) */
     httpd_ws_frame_t frame = { .type = HTTPD_WS_TYPE_TEXT };
-    uint8_t buf[128];
-    frame.payload = buf;
-    esp_err_t ret = httpd_ws_recv_frame(req, &frame, sizeof(buf) - 1);
+    esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK) return ret;
-    buf[frame.len] = '\0';
+
+    uint8_t *payload = NULL;
+    if (frame.len > 0) {
+        payload = (uint8_t *)malloc(frame.len + 1);
+        if (!payload) {
+            return ESP_ERR_NO_MEM;
+        }
+        frame.payload = payload;
+        ret = httpd_ws_recv_frame(req, &frame, frame.len);
+        if (ret != ESP_OK) {
+            free(payload);
+            return ret;
+        }
+        payload[frame.len] = '\0';
+    }
 
     /* Echo state back on any client message */
     char *json = build_state_json();
+    if (!json) {
+        if (payload) free(payload);
+        return ESP_ERR_NO_MEM;
+    }
     httpd_ws_frame_t resp = {
         .type = HTTPD_WS_TYPE_TEXT,
         .payload = (uint8_t *)json,
         .len = strlen(json),
     };
     ret = httpd_ws_send_frame(req, &resp);
+    if (payload) free(payload);
     free(json);
     return ret;
 }
@@ -705,7 +1125,10 @@ static void broadcast_on_server(httpd_handle_t server, const char *json)
                     .payload = (uint8_t *)json,
                     .len = strlen(json),
                 };
-                httpd_ws_send_frame_async(server, fds[i], &pkt);
+                esp_err_t send_err = httpd_ws_send_data(server, fds[i], &pkt);
+                if (send_err != ESP_OK) {
+                    ESP_LOGW(TAG, "WS send failed fd=%d err=%s", fds[i], esp_err_to_name(send_err));
+                }
             }
         }
     }
@@ -718,54 +1141,52 @@ void web_server_broadcast(const char *json)
     broadcast_on_server(s_https_server, json);
 }
 
-/* ── Push task: sends state updates over WS every 500ms ── */
+/* ── Push task: sends state updates over WS every 1 s ── */
 static void ws_push_task(void *arg)
 {
     while (s_http_server || s_https_server) {
-        char *json = build_state_json();
-        if (json) {
-            web_server_broadcast(json);
-            free(json);
+        if (esp_get_free_heap_size() > 8192) {
+            char *json = build_state_json();
+            if (json) {
+                web_server_broadcast(json);
+                free(json);
+            }
         }
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
     vTaskDelete(NULL);
 }
 
-/* ── Fox nearby candidates ── */
-static char *build_fox_nearby_json(void)
+/* ── Fox nearby candidates (streamed) ── */
+static esp_err_t get_fox_nearby(httpd_req_t *req)
 {
-    cJSON *arr = cJSON_CreateArray();
+    httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
+    httpd_resp_sendstr_chunk(req, "[");
+
     if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        char buf[192];
         for (int i = 0; i < g_app.fox_nearby_count; i++) {
             ble_device_t *d = &g_app.fox_nearby[i];
-            cJSON *item = cJSON_CreateObject();
-            char mac_str[18];
-            mac_to_str(d->mac, mac_str, sizeof(mac_str));
-            cJSON_AddStringToObject(item, "mac", mac_str);
-            cJSON_AddStringToObject(item, "name", d->name);
-            cJSON_AddNumberToObject(item, "rssi", d->rssi);
-            cJSON_AddNumberToObject(item, "bestRssi", d->rssi_best);
-            cJSON_AddNumberToObject(item, "hits", d->hit_count);
-            cJSON_AddNumberToObject(item, "firstSeen", d->first_seen / 1000);
-            cJSON_AddNumberToObject(item, "lastSeen", d->last_seen / 1000);
-            cJSON_AddItemToArray(arr, item);
+            char ms[18];
+            mac_to_str(d->mac, ms, sizeof(ms));
+            char sn[DEVICE_NAME_LEN * 2];
+            json_escape_str(d->name, sn, sizeof(sn));
+            snprintf(buf, sizeof(buf),
+                "%s{\"mac\":\"%s\",\"name\":\"%s\",\"rssi\":%d,\"bestRssi\":%d,"
+                "\"hits\":%u,\"firstSeen\":%lu,\"lastSeen\":%lu}",
+                i ? "," : "",
+                ms, sn, (int)d->rssi, (int)d->rssi_best,
+                (unsigned)d->hit_count,
+                (unsigned long)(d->first_seen / 1000),
+                (unsigned long)(d->last_seen / 1000));
+            httpd_resp_sendstr_chunk(req, buf);
         }
         xSemaphoreGive(g_app.device_mutex);
     }
-    char *str = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    return str;
-}
 
-static esp_err_t get_fox_nearby(httpd_req_t *req)
-{
-    char *json = build_fox_nearby_json();
-    httpd_resp_set_type(req, "application/json");
-    set_security_headers(req);
-    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
-    free(json);
-    return ret;
+    httpd_resp_sendstr_chunk(req, "]");
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t post_target_gps(httpd_req_t *req)
@@ -781,6 +1202,7 @@ static esp_err_t post_target_gps(httpd_req_t *req)
     const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(root, "type"));
     double lat = cJSON_GetObjectItem(root, "lat") ? cJSON_GetObjectItem(root, "lat")->valuedouble : 0;
     double lon = cJSON_GetObjectItem(root, "lon") ? cJSON_GetObjectItem(root, "lon")->valuedouble : 0;
+    int rssi = cJSON_GetObjectItem(root, "rssi") ? cJSON_GetObjectItem(root, "rssi")->valueint : -85;
     uint8_t mac[6] = {0};
 
     cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
@@ -791,16 +1213,18 @@ static esp_err_t post_target_gps(httpd_req_t *req)
     if (type && lat != 0 && lon != 0) {
         char log_msg[128];
         if (strcmp(type, "fox") == 0) {
-            g_app.fox_target_lat = lat;
-            g_app.fox_target_lon = lon;
-            snprintf(log_msg, sizeof(log_msg), "gps_captured mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f",
-                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], lat, lon);
+            update_fox_fused_pin(lat, lon, rssi);
+            snprintf(log_msg, sizeof(log_msg), "gps_fused mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f r=%dm n=%u rssi=%d",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                     g_app.fox_target_lat, g_app.fox_target_lon,
+                     (int)g_app.fox_target_radius_m, (unsigned)g_app.fox_target_gps_samples, rssi);
             storage_ext_append_log("fox", log_msg);
         } else if (strcmp(type, "sky") == 0) {
-            g_app.sky_tracked_lat = lat;
-            g_app.sky_tracked_lon = lon;
-            snprintf(log_msg, sizeof(log_msg), "gps_captured mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f",
-                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], lat, lon);
+            update_sky_fused_pin(lat, lon, rssi);
+            snprintf(log_msg, sizeof(log_msg), "gps_fused mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f r=%dm n=%u rssi=%d",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                     g_app.sky_tracked_lat, g_app.sky_tracked_lon,
+                     (int)g_app.sky_tracked_radius_m, (unsigned)g_app.sky_tracked_gps_samples, rssi);
             storage_ext_append_log("sky", log_msg);
         }
     }
@@ -822,6 +1246,7 @@ static esp_err_t post_sky_track(httpd_req_t *req)
 
     double lat = cJSON_GetObjectItem(root, "lat") ? cJSON_GetObjectItem(root, "lat")->valuedouble : 0;
     double lon = cJSON_GetObjectItem(root, "lon") ? cJSON_GetObjectItem(root, "lon")->valuedouble : 0;
+    int rssi = cJSON_GetObjectItem(root, "rssi") ? cJSON_GetObjectItem(root, "rssi")->valueint : -85;
     uint8_t mac[6] = {0};
 
     cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
@@ -839,11 +1264,12 @@ static esp_err_t post_sky_track(httpd_req_t *req)
     // Log GPS if provided
     if (lat != 0 && lon != 0) {
         char log_msg[128];
-        snprintf(log_msg, sizeof(log_msg), "gps_captured mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], lat, lon);
+        update_sky_fused_pin(lat, lon, rssi);
+        snprintf(log_msg, sizeof(log_msg), "gps_fused mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f r=%dm n=%u rssi=%d",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                 g_app.sky_tracked_lat, g_app.sky_tracked_lon,
+                 (int)g_app.sky_tracked_radius_m, (unsigned)g_app.sky_tracked_gps_samples, rssi);
         storage_ext_append_log("sky", log_msg);
-        g_app.sky_tracked_lat = lat;
-        g_app.sky_tracked_lon = lon;
     }
 
     cJSON_Delete(root);
@@ -867,6 +1293,9 @@ static void web_register_routes(httpd_handle_t srv)
 
     httpd_uri_t uri_drones = { .uri="/api/drones", .method=HTTP_GET, .handler=get_drones };
     httpd_register_uri_handler(srv, &uri_drones);
+
+    httpd_uri_t uri_logs = { .uri="/api/logs", .method=HTTP_GET, .handler=get_logs };
+    httpd_register_uri_handler(srv, &uri_logs);
 
     httpd_uri_t uri_mode = { .uri="/api/mode", .method=HTTP_POST, .handler=post_mode };
     httpd_register_uri_handler(srv, &uri_mode);
@@ -921,7 +1350,8 @@ void web_server_start(void)
 
     httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
     ssl_config.httpd.max_uri_handlers = 20;
-    ssl_config.httpd.stack_size = 8192;
+    ssl_config.httpd.stack_size = 6144;
+    ssl_config.httpd.max_open_sockets = 2;
     ssl_config.httpd.lru_purge_enable = true;
     ssl_config.httpd.server_port = 443;
     ssl_config.httpd.ctrl_port = 32769;
@@ -940,7 +1370,8 @@ void web_server_start(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 20;
-    config.stack_size       = 8192;
+    config.stack_size       = 6144;
+    config.max_open_sockets = 3;
     config.lru_purge_enable = true;
     config.server_port      = 80;
     config.ctrl_port        = 32768;

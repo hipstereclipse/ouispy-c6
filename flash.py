@@ -833,24 +833,10 @@ def select_port(specified=None):
 def flash_firmware(port, build_dir, erase=False):
     import esptool
 
-    args = ["--chip", CHIP, "--port", port, "--baud", str(BAUD)]
+    base_args = ["--chip", CHIP, "--port", port]
 
-    if erase:
-        color_print("\n  Erasing flash first...", C.YELLOW)
-        try:
-            esptool.main(args + ["erase_flash"])
-            color_print("  Erase OK.", C.GREEN)
-        except Exception as e:
-            color_print(f"  Erase failed: {e}", C.RED)
-            return False
-        time.sleep(1)
-
-    flash_args = args + [
-        "write_flash",
-        "--flash_mode", FLASH_MODE,
-        "--flash_freq", FLASH_FREQ,
-        "--flash_size", FLASH_SIZE,
-    ]
+    # Build write list once; each retry profile reuses the same map.
+    write_pairs = []
 
     for offset, name, rel in FLASH_MAP:
         full = os.path.join(build_dir, rel)
@@ -859,24 +845,82 @@ def flash_firmware(port, build_dir, erase=False):
             continue
         size_kb = os.path.getsize(full) / 1024
         color_print(f"    0x{offset:05X}  {name:28s}  ({size_kb:.1f} kB)", C.CYAN)
-        flash_args.extend([f"0x{offset:x}", full])
+        write_pairs.extend([f"0x{offset:x}", full])
+
+    if not write_pairs:
+        color_print("\n  No firmware segments available to flash.", C.RED)
+        return False
+
+    profiles = [
+        {"name": "default reset", "before": "default-reset", "after": "hard-reset", "baud": BAUD},
+        {"name": "USB reset",     "before": "usb-reset",     "after": "hard-reset", "baud": BAUD},
+        {"name": "safe baud",     "before": "default-reset", "after": "hard-reset", "baud": 115200},
+    ]
+
+    if erase:
+        color_print("\n  Erasing flash first...", C.YELLOW)
+        erased = False
+        erase_err = None
+        for prof in profiles:
+            try:
+                erase_args = base_args + [
+                    "--before", prof["before"],
+                    "--after", prof["after"],
+                    "--baud", str(prof["baud"]),
+                    "erase-flash",
+                ]
+                color_print(f"  Erase attempt ({prof['name']} @ {prof['baud']})...", C.DIM)
+                esptool.main(erase_args)
+                erased = True
+                break
+            except Exception as e:
+                erase_err = e
+                continue
+
+        if not erased:
+            color_print(f"  Erase failed: {erase_err}", C.RED)
+            return False
+
+        color_print("  Erase OK.", C.GREEN)
+        time.sleep(1)
 
     color_print("\n  Writing to flash...", C.YELLOW)
     color_print("  (If it hangs: hold BOOT, press RESET, then release both)\n", C.DIM)
 
-    try:
-        esptool.main(flash_args)
-    except Exception as e:
-        color_print(f"\n  Flash failed: {e}", C.RED)
-        print()
-        color_print("  Troubleshooting:", C.YELLOW)
-        color_print("    1. Hold BOOT, press RESET, release RESET, release BOOT", C.CYAN)
-        color_print("    2. Try a different USB cable (must be data, not charge-only)", C.CYAN)
-        color_print("    3. Check that the correct port is selected", C.CYAN)
-        color_print("    4. Install the CH340 / CP2102 USB driver for your OS", C.CYAN)
-        return False
+    last_error = None
+    for i, prof in enumerate(profiles, start=1):
+        flash_args = base_args + [
+            "--before", prof["before"],
+            "--after", prof["after"],
+            "--baud", str(prof["baud"]),
+            "write-flash",
+            "--flash-mode", FLASH_MODE,
+            "--flash-freq", FLASH_FREQ,
+            "--flash-size", FLASH_SIZE,
+        ] + write_pairs
 
-    return True
+        color_print(f"  Flash attempt {i}/{len(profiles)} ({prof['name']} @ {prof['baud']})...", C.DIM)
+        try:
+            esptool.main(flash_args)
+            return True
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            color_print(f"  Attempt failed: {msg}", C.YELLOW)
+            if "Failed to connect" in msg or "No serial data" in msg:
+                color_print("  Tip: hold BOOT, tap RESET, release RESET, then release BOOT.", C.CYAN)
+            if i < len(profiles):
+                time.sleep(1.0)
+
+    color_print(f"\n  Flash failed: {last_error}", C.RED)
+    print()
+    color_print("  Troubleshooting:", C.YELLOW)
+    color_print("    1. Hold BOOT, press RESET, release RESET, release BOOT", C.CYAN)
+    color_print("    2. Try a different USB cable (must be data, not charge-only)", C.CYAN)
+    color_print("    3. Check that the correct port is selected", C.CYAN)
+    color_print("    4. Install the CH340 / CP2102 USB driver for your OS", C.CYAN)
+    color_print("    5. Re-run with --baud 115200 for noisy USB links", C.CYAN)
+    return False
 
 
 # ═════════════════════════════════════════════

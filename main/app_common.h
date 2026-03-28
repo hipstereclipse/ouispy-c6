@@ -61,16 +61,24 @@ typedef enum {
 } app_mode_t;
 
 typedef enum {
-    MENU_LED_GOLD = 0,
-    MENU_LED_MINT,
-    MENU_LED_SKY,
-    MENU_LED_AMBER,
-    MENU_LED_MAGENTA,
-    MENU_LED_RUBY,
-    MENU_LED_LIME,
-    MENU_LED_ICE,
-    MENU_LED_WHITE,
-    MENU_LED_DEEP_PURPLE,
+    MENU_LED_TOPAZ        = 0,   /* golden yellow  — maps from old GOLD         */
+    MENU_LED_AQUAMARINE   = 1,   /* teal           — maps from old MINT         */
+    MENU_LED_SAPPHIRE     = 2,   /* vivid blue     — maps from old SKY          */
+    MENU_LED_AMBER        = 3,   /* orange         — unchanged                  */
+    MENU_LED_ALEXANDRITE  = 4,   /* purple-crimson — maps from old MAGENTA      */
+    MENU_LED_RUBY         = 5,   /* red            — unchanged                  */
+    MENU_LED_PERIDOT      = 6,   /* yellow-green   — maps from old LIME         */
+    MENU_LED_MOONSTONE    = 7,   /* ice blue-white — maps from old ICE          */
+    MENU_LED_DIAMOND      = 8,   /* bright white   — maps from old WHITE        */
+    MENU_LED_AMETHYST     = 9,   /* violet-purple  — maps from old DEEP_PURPLE  */
+    MENU_LED_EMERALD      = 10,
+    MENU_LED_CITRINE      = 11,
+    MENU_LED_CARNELIAN    = 12,
+    MENU_LED_ROSE_QUARTZ  = 13,
+    MENU_LED_TANZANITE    = 14,
+    MENU_LED_LABRADORITE  = 15,
+    MENU_LED_CHALCOPYRITE = 16,
+    MENU_LED_MALACHITE    = 17,
     MENU_LED_COUNT,
 } menu_led_color_t;
 
@@ -159,7 +167,8 @@ typedef struct {
 
 /* ── Fox Hunter Target Registry ───────────────────────────── */
 
-#define FOX_REGISTRY_MAX     8
+#define FOX_REGISTRY_BASE_MAX 8
+#define FOX_REGISTRY_MAX     32
 #define FOX_REG_LABEL_LEN   16
 #define FOX_REG_NICK_LEN    24
 #define FOX_REG_NOTES_LEN   96
@@ -208,6 +217,9 @@ typedef struct {
 
     /* Fox target GPS (captured when target selected with GPS enabled) */
     double          fox_target_lat, fox_target_lon;
+    float           fox_target_radius_m;
+    uint16_t        fox_target_gps_samples;
+    float           fox_target_weight_sum;
 
     /* WiFi AP connected client MACs */
     uint8_t         wifi_client_macs[WIFI_MAX_AP_CLIENTS][6];
@@ -221,6 +233,8 @@ typedef struct {
     /* Currently tracked sky spy drone GPS (captured when selected with GPS enabled) */
     int             sky_tracked_drone_idx;  /* -1 if none */
     double          sky_tracked_lat, sky_tracked_lon;
+    float           sky_tracked_radius_m;
+    uint16_t        sky_tracked_gps_samples;
 
     /* Hardware preferences (persisted via NVS) */
     uint8_t         lcd_brightness;   /* 0-255 */
@@ -253,6 +267,8 @@ typedef struct {
     /* UI navigation (button-driven cursor) */
     int             ui_cursor;        /* current selection index  */
     int             ui_item_count;    /* selectable items in view */
+    bool            log_viewer_open;  /* true = showing log viewer on LCD */
+    int             log_scroll_pos;   /* scroll offset in log viewer */
     uint32_t        last_input_ms;
     bool            display_sleeping;
 } app_state_t;

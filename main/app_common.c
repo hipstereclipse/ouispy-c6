@@ -51,7 +51,7 @@ void app_state_init(void)
     g_app.ap_broadcast_enabled = true;
     g_app.single_ap_name_enabled = false;
     g_app.display_sleep_timeout_sec = 60;
-    g_app.menu_led_color = MENU_LED_GOLD;
+    g_app.menu_led_color = MENU_LED_TOPAZ;
     g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
     g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
     g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;
@@ -63,6 +63,11 @@ void app_state_init(void)
     g_app.gps_client_ready = false;
     g_app.gps_client_ready_ms = 0;
     g_app.sky_tracked_drone_idx = -1;
+    g_app.fox_target_radius_m = 60.0f;
+    g_app.sky_tracked_radius_m = 120.0f;
+    g_app.fox_target_gps_samples = 0;
+    g_app.sky_tracked_gps_samples = 0;
+    g_app.fox_target_weight_sum = 0.0f;
     g_app.last_input_ms = uptime_ms();
     g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();

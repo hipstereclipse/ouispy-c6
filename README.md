@@ -45,6 +45,8 @@ Locks onto a single BLE MAC address and acts as a Geiger counter for Bluetooth â
 - Lost-signal screen waits a short grace period (about 9 seconds) after last contact before switching to full "SIGNAL LOST"
 - Targets can be set via the web UI, or imported directly from Flock You detections with a single button hold
 - Target MAC persists across reboots via NVS flash storage
+- Saved target registry behaves like a compact contact list in the web UI, with live `last seen`, source, and RSSI context when the device is visible in the current session
+- Fox registry capacity automatically expands from 8 entries to 32 when a usable microSD card is mounted
 - Two toggleable LED tracking modes:
 
   **Detector Mode:**
@@ -90,11 +92,32 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - Fox Hunter target selection and LED mode toggle
 - Flock You GPS ON/OFF safety toggle; GPS marking only when enabled and secure (HTTPS)
 - GPS toggle is synchronized to firmware state (`gpsTagging`) so web + device stay in sync
-- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, button shortcut mappings, and microSD logging controls
+- GPS status is now surfaced across the web interface and in the on-device Settings screen, not only in Flock You
+- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls
 - microSD status is surfaced as `Available`, `Needs Format`, or `Not Found` in both the LCD UI and web UI
 - Unformatted but detected cards can be formatted directly from the on-device Settings menu
+- When microSD logging is enabled, identity-bearing log records (entries containing device MAC/unique IDs) are written to a protected log file and are not auto-pruned; if storage gets tight, the oldest non-critical event records are trimmed first
 - CSV data export for Flock You detections
 - Mobile-optimized responsive embedded web UI
+
+### Offline Flock Map Addon
+
+The Flock You web page includes an optional local offline map overlay for pinned Flock camera locations.
+
+- Requirements:
+  - Open the device over `https://192.168.4.1`
+  - Enable `GPS Tagging` in Settings or the Flock page toggle
+  - Allow browser location access so GPS status becomes live
+  - Save camera pins from the Flock device list using GPS or manual coordinates
+- Access:
+  - In the Flock You web UI, triple-click the GPS status tile to open the map panel
+  - Double-click the map canvas to cycle zoom levels
+- Tiles:
+  - Click `Load Tiles` and choose a folder structured like standard slippy-map exports (`z/x/y.png`, `jpg`, `jpeg`, or `webp`), such as offline tiles prepared for Meshtastic-style field use
+  - If no offline tiles are loaded, the map still shows a gray grid with relative Flock pins
+- Notes:
+  - Tile loading uses your browser's local file access support; if the browser does not support directory selection, the grid fallback still works
+  - Pins come from camera locations you saved in the web UI, so populate those first for a meaningful map
 
 ---
 
@@ -121,6 +144,7 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - **Click**: Navigate to next item
 - **Double-click**: Navigate to previous item
 - **Triple-click**: Back/cancel (Fox main: clears target; Fox registry: exits registry)
+- **Settings menu now includes a GPS Tagging toggle**, so the device-side UI can enable/disable web GPS capture without opening the browser
 - **Quintuple-click**:
   - In Flock You: lock selected/strongest Flock camera and jump to Fox Hunter
   - In Sky Spy: lock selected/strongest drone and jump to Fox Hunter
@@ -213,7 +237,7 @@ Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on
 | POST | `/api/settings` | Update prefs: `{"brightness":200,"sound":true,"led":true,"gpsTagging":false}` |
 | WS | `/ws` | WebSocket for real-time push updates |
 
-`/api/state` now includes `microsdAvailable` and `microsdStatus` where `microsdStatus` is one of `Available`, `Needs Format`, or `Not Found`.
+`/api/state` now includes `microsdAvailable`, `microsdStatus`, and `foxRegistryCapacity`, where `microsdStatus` is one of `Available`, `Needs Format`, or `Not Found`.
 
 ---
 

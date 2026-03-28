@@ -33,10 +33,14 @@ a:hover{color:#a5b4fc}
 .hdr h1 span{color:var(--accent)}
 .hdr h1.logo-btn{cursor:pointer;user-select:none}
 .hdr h1.logo-btn:hover{filter:brightness(1.08)}
-.hdr .status{display:flex;gap:10px;font-size:11px;color:var(--dim)}
+.hdr .status{display:flex;gap:10px;font-size:11px;color:var(--dim);align-items:center;flex-wrap:wrap}
 .hdr .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
 .dot.on{background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.5)}
 .dot.off{background:var(--rose);opacity:.7}
+.status-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text)}
+.status-pill.active{border-color:rgba(74,222,128,.45);color:var(--green);background:rgba(74,222,128,.08)}
+.status-pill.wait{border-color:rgba(251,191,36,.45);color:var(--amber);background:rgba(251,191,36,.08)}
+.status-pill.off{border-color:rgba(161,161,170,.35);color:var(--dim)}
 
 /* Mode tabs */
 .tabs{display:flex;gap:4px;padding:8px 12px;background:rgba(9,18,34,.95);border-bottom:1px solid var(--border)}
@@ -149,12 +153,13 @@ a:hover{color:#a5b4fc}
 .drone-fields dt{color:var(--dim)}.drone-fields dd{font-weight:600}
 
 /* Radar animation */
-.radar{width:120px;height:120px;margin:20px auto;position:relative}
+.radar{width:120px;height:120px;margin:20px auto;position:relative;border-radius:50%;overflow:hidden;isolation:isolate}
 .radar-bg{width:100%;height:100%;border-radius:50%;border:1px solid var(--border);
   background:radial-gradient(circle,rgba(56,189,248,.06),transparent)}
 .radar-sweep{position:absolute;inset:0;border-radius:50%;
-  background:conic-gradient(from 0deg,transparent 0deg,rgba(56,189,248,.18) 30deg,transparent 60deg);
-  animation:sweep 3s linear infinite}
+  background:conic-gradient(from 0deg,transparent 0deg,rgba(56,189,248,.24) 22deg,transparent 56deg);
+  transform-origin:50% 50%;will-change:transform;backface-visibility:hidden;
+  animation:sweep 2.8s linear infinite}
 .radar-dot{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--flock);
   box-shadow:0 0 8px rgba(248,113,113,.6);top:50%;left:50%;transform:translate(-50%,-50%)}
 @keyframes sweep{to{transform:rotate(360deg)}}
@@ -250,10 +255,27 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
   margin-bottom:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--card2)}
 .gps-status{font-size:11px;color:var(--dim);line-height:1.4}
 .gps-status strong{color:var(--text)}
-.gps-chip{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border);background:rgba(34,211,238,.08);color:var(--cyan)}
+.gps-chip,.log-chip{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border)}
+.gps-chip{background:rgba(34,211,238,.08);color:var(--cyan)}
 .gps-chip.bad{border-color:rgba(248,113,113,.6);color:var(--rose);background:rgba(248,113,113,.08)}
+.log-chip{background:rgba(74,222,128,.08);color:var(--green);border-color:rgba(74,222,128,.45)}
+.log-chip.wait{background:rgba(251,191,36,.08);color:var(--amber);border-color:rgba(251,191,36,.45)}
+.log-chip.off{background:rgba(161,161,170,.06);color:var(--dim);border-color:rgba(161,161,170,.35)}
 .dev-loc{font-size:10px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dev-loc a{color:var(--cyan)}
+
+.log-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.log-filter-row{display:flex;gap:6px;flex-wrap:wrap}
+.log-list{display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow-y:auto}
+.log-entry{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.log-entry-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.log-entry-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.log-source{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border);text-transform:uppercase;letter-spacing:.6px}
+.log-source.identity{border-color:rgba(248,113,113,.45);color:var(--rose);background:rgba(248,113,113,.08)}
+.log-source.events{border-color:rgba(74,222,128,.45);color:var(--green);background:rgba(74,222,128,.08)}
+.log-kind{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;color:var(--text)}
+.log-time{font-size:11px;color:var(--dim)}
+.log-msg{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;line-height:1.5;color:var(--dim);white-space:pre-wrap;word-break:break-word}
 
 /* Animations */
 @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -281,6 +303,7 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
     <span><span class="dot on" id="wsDot"></span>WS</span>
     <span id="heapInfo">--</span>
     <span id="uptimeInfo">--</span>
+    <span class="status-pill off" id="logStatusHdr">LOG OFF</span>
   </div>
 </div>
 
@@ -306,6 +329,8 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 let ws, state = {}, devices = [], drones = [];
 let wsRetryMs = 1500;
+let wsReconnectTimer = null;
+let wsConnectInFlight = false;
 let currentView = -1; // track which view is shown
 let modeRenderSeq = 0;
 let uiFramePending = false;
@@ -317,6 +342,22 @@ let gpsClientReady = false;
 let gpsReadyLastPushMs = 0;
 let gpsReadyLastSent = null;
 let gpsReadyPushInFlight = false;
+let lastBrowserPosition = null;
+let flockMapVisible = false;
+let flockMapTapCount = 0;
+let flockMapLastTapMs = 0;
+let flockMapTileDir = null;
+let flockMapZoomIdx = 1;
+let flockMapDrawToken = 0;
+let flockMapAlertDismissed = false;
+let foxRegistrySortMode = 'recent';
+let logsData = null;
+let logsRefreshCounter = 0;
+let logsRefreshInFlight = false;
+let logFilter = 'all';
+let skyRadarAnimId = 0;
+let skyRadarAngle = 0;
+const FLOCK_MAP_ZOOMS = [12, 14, 16];
 const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
 const GPS_TOGGLE_STORE_KEY = 'ouispy_gps_toggle_v1';
 let cameraLocations = loadCameraLocations();
@@ -442,6 +483,7 @@ async function computeGpsClientReady() {
 }
 
 async function pushGpsClientStatus(force) {
+  if (document.hidden && !force) return;
   const ready = await computeGpsClientReady();
   const changed = (gpsClientReady !== ready);
   gpsClientReady = ready;
@@ -450,11 +492,13 @@ async function pushGpsClientStatus(force) {
   if (changed) {
     renderGpsStatus();
     renderGpsToggleBlock();
+    if (Number(state.mode) === 1) renderFlockMapPanel();
+    if (Number(state.mode) === 3) renderSkyGpsWidgets();
   }
 
   const now = Date.now();
   const sendChanged = (gpsReadyLastSent !== ready);
-  const stale = (now - gpsReadyLastPushMs) > 4000;
+  const stale = (now - gpsReadyLastPushMs) > 30000;
   if (!force && !sendChanged && !stale) return;
   if (gpsReadyPushInFlight) return;
 
@@ -482,6 +526,8 @@ function setGpsToggle(enabled) {
     renderGpsStatus();
     renderGpsToggleBlock();
     if (Number(state.mode) === 1) renderDevList();
+    if (Number(state.mode) === 1) renderFlockMapPanel();
+    if (Number(state.mode) === 3) renderSkyGpsWidgets();
     return;
   }
   gpsToggleEnabled = !!enabled;
@@ -492,6 +538,8 @@ function setGpsToggle(enabled) {
   renderGpsStatus();
   renderGpsToggleBlock();
   if (Number(state.mode) === 1) renderDevList();
+  if (Number(state.mode) === 1) renderFlockMapPanel();
+  if (Number(state.mode) === 3) renderSkyGpsWidgets();
 }
 
 function toggleGpsFeature() {
@@ -528,6 +576,55 @@ function renderGpsToggleBlock() {
   }
 }
 
+function renderSkyGpsWidgets() {
+  const block = $('#sGpsBlock');
+  const stateEl = $('#sGpsState');
+  const labelEl = $('#sGpsLabel');
+  const statusEl = $('#sGpsStatus');
+  const btn = $('#sGpsToggleBtn');
+  const caps = gpsCaps();
+  const allowed = gpsSecureAvailable(caps);
+  const activeFromDevice = (typeof state.gpsTagActive === 'boolean')
+    ? !!state.gpsTagActive
+    : (gpsToggleEnabled && gpsClientReady && allowed);
+  const on = gpsToggleEnabled && allowed && activeFromDevice;
+
+  if (block) block.className = 'stat gps ' + (on ? 'on' : 'off');
+  if (stateEl) stateEl.textContent = on ? 'ON' : 'OFF';
+
+  if (labelEl) {
+    if (!allowed && caps.iphone && !caps.secure) labelEl.textContent = 'GPS (HTTPS)';
+    else if (!allowed) labelEl.textContent = 'GPS (N/A)';
+    else labelEl.textContent = 'GPS';
+  }
+
+  if (statusEl) {
+    if (!caps.supported) {
+      statusEl.innerHTML = '<span class="gps-chip bad">GPS unavailable</span> Browser geolocation is unavailable for Sky Spy.';
+    } else if (!gpsToggleEnabled && caps.secure) {
+      statusEl.innerHTML = '<span class="gps-chip bad">GPS off</span> Enable GPS to annotate drone tracking with location context.';
+    } else if (!caps.secure) {
+      statusEl.innerHTML = caps.iphone
+        ? '<span class="gps-chip bad">GPS off</span> iPhone on HTTP cannot use geolocation. Use https://192.168.4.1.'
+        : '<span class="gps-chip bad">HTTPS required</span> Sky Spy GPS needs secure context.';
+    } else if (!gpsClientReady) {
+      statusEl.innerHTML = '<span class="gps-chip bad">GPS waiting</span> Waiting for browser location permission.';
+    } else {
+      statusEl.innerHTML = '<span class="gps-chip">GPS ready</span> Device can receive Sky Spy GPS context from this browser.';
+    }
+  }
+
+  if (btn) {
+    btn.textContent = on ? 'GPS On' : 'GPS Off';
+    btn.style.borderColor = on ? 'var(--green)' : 'var(--rose)';
+    btn.style.color = on ? 'var(--green)' : 'var(--rose)';
+    btn.disabled = !allowed;
+    btn.title = !allowed
+      ? (caps.iphone && !caps.secure ? 'iPhone GPS requires HTTPS.' : 'GPS needs secure HTTPS context.')
+      : '';
+  }
+}
+
 function locKey(mac) {
   return String(mac || '').toUpperCase();
 }
@@ -548,6 +645,32 @@ function formatLocAge(ts) {
   if (min < 60) return min + 'm ago';
   const hr = Math.floor(min / 60);
   return hr + 'h ' + (min % 60) + 'm ago';
+}
+
+function clampNum(v, lo, hi) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function rssiWeight(rssi) {
+  const norm = clampNum((Number(rssi) + 95) / 50, 0, 1);
+  return 0.35 + (norm * 1.65);
+}
+
+function assumedRadiusFromRssi(rssi, mode) {
+  const norm = clampNum((Number(rssi) + 95) / 50, 0, 1);
+  if (mode === 'drone') return 55 + ((1 - norm) * 245);
+  return 6 + ((1 - norm) * 64);
+}
+
+function approxDistanceM(aLat, aLon, bLat, bLon) {
+  const dLat = (Number(bLat) - Number(aLat)) * Math.PI / 180;
+  const dLon = (Number(bLon) - Number(aLon)) * Math.PI / 180;
+  const mean = ((Number(aLat) + Number(bLat)) * 0.5) * Math.PI / 180;
+  const x = dLon * Math.cos(mean);
+  const y = dLat;
+  return Math.sqrt((x * x) + (y * y)) * 6371000;
 }
 
 function mapHrefForLocation(loc) {
@@ -582,12 +705,62 @@ function renderGpsStatus() {
   el.innerHTML = '<span class="gps-chip">GPS ready</span> Phone is connected and allowed to transmit GPS to the device.';
 }
 
-function saveCameraLocation(mac, lat, lon, source) {
-  cameraLocations[locKey(mac)] = {
-    lat: Number(lat),
-    lon: Number(lon),
-    source: source || 'gps',
-    ts: Date.now()
+function saveCameraLocation(mac, lat, lon, source, rssi, mode) {
+  const key = locKey(mac);
+  const prev = cameraLocations[key] || null;
+  const sampleLat = Number(lat);
+  const sampleLon = Number(lon);
+  const now = Date.now();
+  const m = (mode === 'drone') ? 'drone' : 'flock';
+  const rss = Number.isFinite(Number(rssi)) ? Number(rssi) : -85;
+
+  if (!prev || !Number.isFinite(prev.lat) || !Number.isFinite(prev.lon)) {
+    cameraLocations[key] = {
+      lat: sampleLat,
+      lon: sampleLon,
+      source: source || 'gps',
+      mode: m,
+      ts: now,
+      samples: 1,
+      weight: rssiWeight(rss),
+      radiusM: assumedRadiusFromRssi(rss, m)
+    };
+    saveCameraLocations();
+    return;
+  }
+
+  let nextLat = sampleLat;
+  let nextLon = sampleLon;
+  let nextWeight = Number(prev.weight || 1);
+  let nextRadius = Number(prev.radiusM || assumedRadiusFromRssi(rss, m));
+
+  if (m === 'drone') {
+    const alpha = clampNum(0.62 + (rssiWeight(rss) * 0.16), 0.62, 0.90);
+    nextLat = (Number(prev.lat) * (1 - alpha)) + (sampleLat * alpha);
+    nextLon = (Number(prev.lon) * (1 - alpha)) + (sampleLon * alpha);
+    const drift = approxDistanceM(prev.lat, prev.lon, sampleLat, sampleLon);
+    const instant = assumedRadiusFromRssi(rss, 'drone') + (drift * 0.90);
+    nextRadius = clampNum((nextRadius * 0.72) + (instant * 0.28), 40, 500);
+  } else {
+    const w = rssiWeight(rss);
+    const total = nextWeight + w;
+    nextLat = ((Number(prev.lat) * nextWeight) + (sampleLat * w)) / total;
+    nextLon = ((Number(prev.lon) * nextWeight) + (sampleLon * w)) / total;
+    nextWeight = total;
+    const drift = approxDistanceM(prev.lat, prev.lon, sampleLat, sampleLon);
+    const instant = assumedRadiusFromRssi(rss, 'flock') + (drift * 0.42);
+    nextRadius = clampNum((nextRadius * 0.78) + (instant * 0.22), 6, 110);
+  }
+
+  cameraLocations[key] = {
+    lat: nextLat,
+    lon: nextLon,
+    source: source || prev.source || 'gps',
+    mode: m,
+    ts: now,
+    samples: Number(prev.samples || 1) + 1,
+    weight: nextWeight,
+    radiusM: nextRadius
   };
   saveCameraLocations();
 }
@@ -609,7 +782,14 @@ function promptManualLocation(mac) {
 
 function getCurrentPosition() {
   return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
+    navigator.geolocation.getCurrentPosition(pos => {
+      lastBrowserPosition = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        ts: Date.now()
+      };
+      resolve(pos);
+    }, reject, {
       enableHighAccuracy: true,
       timeout: 10000,
       maximumAge: 2000
@@ -648,22 +828,363 @@ function clearCameraLocation(mac) {
   if (Number(state.mode) === 1) renderDevList();
 }
 
+function gpsMapEligible() {
+  return !!state.gpsTagActive && !!gpsClientReady && gpsEffectiveEnabled();
+}
+
+function handleFlockMapTap() {
+  const now = Date.now();
+  if ((now - flockMapLastTapMs) > 800) flockMapTapCount = 0;
+  flockMapTapCount++;
+  flockMapLastTapMs = now;
+  if (flockMapTapCount >= 3) {
+    flockMapTapCount = 0;
+    toggleFlockMap();
+  }
+}
+
+function flockMapPins() {
+  const flockPins = devices
+    .filter(d => d.flock)
+    .map(d => {
+      const loc = getStoredLocation(d.mac);
+      if (!loc) return null;
+      return {
+        mac: d.mac,
+        name: d.name || 'Flock device',
+        lat: Number(loc.lat),
+        lon: Number(loc.lon),
+        kind: 'flock',
+        radiusM: clampNum(loc.radiusM || assumedRadiusFromRssi(d.rssi, 'flock'), 6, 110),
+        source: loc.source || 'manual',
+        rssi: Number(d.rssi || -100),
+        age: formatLocAge(loc.ts)
+      };
+    })
+    .filter(Boolean);
+
+  const dronePins = drones
+    .map(d => {
+      const stored = getStoredLocation(d.mac);
+      const fromRid = d && d.hasLoc && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon));
+      if (!stored && !fromRid) return null;
+      const lat = stored ? Number(stored.lat) : Number(d.lat);
+      const lon = stored ? Number(stored.lon) : Number(d.lon);
+      return {
+        mac: d.mac,
+        name: d.id || 'Drone',
+        lat,
+        lon,
+        kind: 'drone',
+        radiusM: clampNum((stored && stored.radiusM) ? stored.radiusM : (assumedRadiusFromRssi(d.rssi, 'drone') + 35), 40, 500),
+        source: stored ? (stored.source || 'gps') : 'rid',
+        rssi: Number(d.rssi || -100),
+        age: stored ? formatLocAge(stored.ts) : 'live'
+      };
+    })
+    .filter(Boolean);
+
+  return flockPins.concat(dronePins);
+}
+
+function flockMapZoom() {
+  return FLOCK_MAP_ZOOMS[flockMapZoomIdx] || 14;
+}
+
+function flockMapCenter(pins) {
+  if (lastBrowserPosition && Number.isFinite(lastBrowserPosition.lat) && Number.isFinite(lastBrowserPosition.lon)) {
+    return { lat: lastBrowserPosition.lat, lon: lastBrowserPosition.lon };
+  }
+  if (pins.length) {
+    const lat = pins.reduce((sum, pin) => sum + pin.lat, 0) / pins.length;
+    const lon = pins.reduce((sum, pin) => sum + pin.lon, 0) / pins.length;
+    return { lat, lon };
+  }
+  return { lat: 0, lon: 0 };
+}
+
+function latLonToWorld(lat, lon, zoom) {
+  const scale = 256 * Math.pow(2, zoom);
+  const sin = Math.sin((lat * Math.PI) / 180);
+  return {
+    x: ((lon + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale
+  };
+}
+
+function wrapTileX(x, zoom) {
+  const count = Math.pow(2, zoom);
+  return ((x % count) + count) % count;
+}
+
+async function loadLocalTileBitmap(z, x, y) {
+  if (!flockMapTileDir || !window.showDirectoryPicker) return null;
+  try {
+    const zDir = await flockMapTileDir.getDirectoryHandle(String(z));
+    const xDir = await zDir.getDirectoryHandle(String(x));
+    for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
+      try {
+        const fileHandle = await xDir.getFileHandle(`${y}.${ext}`);
+        const file = await fileHandle.getFile();
+        return await createImageBitmap(file);
+      } catch (e) {}
+    }
+  } catch (e) {}
+  return null;
+}
+
+function drawFlockMapGrid(ctx, width, height) {
+  ctx.fillStyle = '#15181c';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = 'rgba(148,163,184,0.18)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= width; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= height; y += 32) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(203,213,225,0.26)';
+  ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+}
+
+async function drawFlockMapTiles(ctx, canvas, center, zoom, token) {
+  if (!flockMapTileDir) return false;
+  const centerWorld = latLonToWorld(center.lat, center.lon, zoom);
+  const startX = centerWorld.x - canvas.width / 2;
+  const startY = centerWorld.y - canvas.height / 2;
+  const startTileX = Math.floor(startX / 256);
+  const endTileX = Math.floor((centerWorld.x + canvas.width / 2) / 256);
+  const startTileY = Math.floor(startY / 256);
+  const endTileY = Math.floor((centerWorld.y + canvas.height / 2) / 256);
+  let drewAny = false;
+
+  for (let tileY = startTileY; tileY <= endTileY; tileY++) {
+    if (tileY < 0 || tileY >= Math.pow(2, zoom)) continue;
+    for (let tileX = startTileX; tileX <= endTileX; tileX++) {
+      if (token !== flockMapDrawToken) return drewAny;
+      const wrappedX = wrapTileX(tileX, zoom);
+      const bitmap = await loadLocalTileBitmap(zoom, wrappedX, tileY);
+      if (!bitmap) continue;
+      const dx = Math.round((tileX * 256) - startX);
+      const dy = Math.round((tileY * 256) - startY);
+      ctx.drawImage(bitmap, dx, dy, 256, 256);
+      bitmap.close();
+      drewAny = true;
+    }
+  }
+
+  return drewAny;
+}
+
+function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
+  const centerWorld = latLonToWorld(center.lat, center.lon, zoom);
+  ctx.font = '11px Segoe UI, Aptos, sans-serif';
+  ctx.textBaseline = 'top';
+
+  const metersPerPixel = (40075016.686 * Math.cos(center.lat * Math.PI / 180)) / (256 * Math.pow(2, zoom));
+
+  pins.forEach(pin => {
+    const point = latLonToWorld(pin.lat, pin.lon, zoom);
+    const px = Math.round((point.x - centerWorld.x) + canvas.width / 2);
+    const py = Math.round((point.y - centerWorld.y) + canvas.height / 2);
+    if (px < -24 || px > canvas.width + 24 || py < -24 || py > canvas.height + 24) return;
+
+    const radiusPx = Math.max(3, Math.min(48, Number(pin.radiusM || 0) / Math.max(0.01, metersPerPixel)));
+    ctx.fillStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.12)' : 'rgba(248,113,113,0.12)';
+    ctx.strokeStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.45)' : 'rgba(248,113,113,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(px, py, radiusPx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.92)' : 'rgba(248,113,113,0.92)';
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const label = `${pin.name} ${pin.rssi} dBm ±${Math.round(Number(pin.radiusM || 0))}m`;
+    const width = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(9,9,11,0.78)';
+    ctx.fillRect(px + 8, py - 10, width, 16);
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(label, px + 13, py - 8);
+  });
+
+  if (lastBrowserPosition) {
+    ctx.strokeStyle = 'rgba(34,211,238,0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(34,211,238,0.18)';
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+async function drawFlockMap() {
+  const canvas = $('#flockMapCanvas');
+  if (!canvas || !flockMapVisible) return;
+
+  const ctx = canvas.getContext('2d');
+  const pins = flockMapPins();
+  const center = flockMapCenter(pins);
+  const zoom = flockMapZoom();
+  const token = ++flockMapDrawToken;
+
+  drawFlockMapGrid(ctx, canvas.width, canvas.height);
+  const drewTiles = await drawFlockMapTiles(ctx, canvas, center, zoom, token);
+  if (token !== flockMapDrawToken) return;
+
+  if (!drewTiles) {
+    drawFlockMapGrid(ctx, canvas.width, canvas.height);
+  }
+  drawFlockMapPins(ctx, canvas, center, zoom, pins);
+
+  ctx.fillStyle = 'rgba(9,9,11,0.78)';
+  ctx.fillRect(8, canvas.height - 24, canvas.width - 16, 16);
+  ctx.fillStyle = '#d4d4d8';
+  ctx.font = '11px Segoe UI, Aptos, sans-serif';
+  ctx.fillText(`Zoom ${zoom} · ${pins.length} pinned cameras${drewTiles ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
+
+  if (!pins.length) {
+    ctx.fillStyle = 'rgba(9,9,11,0.68)';
+    ctx.fillRect(40, 46, canvas.width - 80, 42);
+    ctx.fillStyle = '#e4e4e7';
+    ctx.fillText('No pinned Flock devices yet.', 54, 58);
+    ctx.fillStyle = '#a1a1aa';
+    ctx.fillText('Save camera GPS/manual pins to populate the map.', 54, 72);
+  }
+}
+
+function cycleFlockMapZoom() {
+  flockMapZoomIdx = (flockMapZoomIdx + 1) % FLOCK_MAP_ZOOMS.length;
+  drawFlockMap();
+  toast(`Map zoom ${flockMapZoom()}`);
+}
+
+function dismissFlockMapAlert() {
+  flockMapAlertDismissed = true;
+  renderFlockMapPanel();
+}
+
+async function loadFlockMapTiles() {
+  if (!gpsMapEligible()) {
+    toast('Enable GPS and connect a live GPS client first');
+    return;
+  }
+  if (!window.showDirectoryPicker) {
+    toast('This browser cannot open local tile folders');
+    return;
+  }
+  try {
+    flockMapTileDir = await window.showDirectoryPicker();
+    flockMapAlertDismissed = false;
+    renderFlockMapPanel();
+    await drawFlockMap();
+    toast('Offline tile folder loaded');
+  } catch (e) {}
+}
+
+function renderFlockMapPanel() {
+  const el = $('#flockMapPanel');
+  const toggleBtn = $('#flockMapToggleBtn');
+  const tilesBtn = $('#flockMapTilesBtn');
+  const summary = $('#flockMapSummary');
+  if (!el) return;
+
+  const eligible = gpsMapEligible();
+  if (toggleBtn) {
+    toggleBtn.disabled = !eligible;
+    toggleBtn.textContent = flockMapVisible ? 'Hide Map' : 'Open Map';
+  }
+  if (tilesBtn) tilesBtn.disabled = !eligible;
+  if (summary) {
+    summary.textContent = eligible
+      ? 'Triple-click the GPS tile or use Open Map to view pinned Flock devices. Double-click the map to cycle zoom.'
+      : 'Enable GPS tagging and allow a connected client before opening the Flock map.';
+  }
+
+  if (!eligible) {
+    flockMapVisible = false;
+    el.innerHTML = '<div class="empty" style="padding:14px 0"><div class="icon" style="font-size:24px">&#128506;</div>Map view is locked until GPS tagging is enabled and a client is sharing location.</div>';
+    return;
+  }
+
+  if (!flockMapVisible) {
+    el.innerHTML = `<div class="empty" style="padding:14px 0"><div class="icon" style="font-size:24px">&#128506;</div>Triple-click the GPS tile to open the map, or use Open Map above.<br><small style="color:var(--dim)">Pinned cameras render on a gray grid even if offline tiles are not loaded.</small></div>`;
+    return;
+  }
+
+  const showAlert = !flockMapTileDir && !flockMapAlertDismissed;
+  el.innerHTML = `
+    ${showAlert ? `<div style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(248,113,113,.45);background:rgba(127,29,29,.18);border-radius:10px;color:#fecaca;font-size:12px">
+      No offline tiles loaded yet. The map is using a gray grid fallback. <a href="https://github.com/colonelpanichacks/ouispy-c6#offline-flock-map-addon" target="_blank">README instructions</a>
+      <button class="btn sm" style="margin-left:8px;border-color:var(--rose);color:var(--rose)" onclick="dismissFlockMapAlert()">Clear</button>
+    </div>` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn sm" onclick="loadFlockMapTiles()">${flockMapTileDir ? 'Reload Tiles' : 'Load Tiles'}</button>
+      <button class="btn sm" onclick="cycleFlockMapZoom()">Zoom ${flockMapZoom()}</button>
+    </div>
+    <canvas id="flockMapCanvas" width="320" height="220" ondblclick="cycleFlockMapZoom()" style="width:100%;max-width:100%;border-radius:12px;border:1px solid var(--border);background:#15181c"></canvas>`;
+
+  setTimeout(() => { drawFlockMap(); }, 0);
+}
+
+function toggleFlockMap(forceOpen) {
+  if (!gpsMapEligible()) {
+    toast('Enable GPS tagging and allow location before opening the map');
+    return;
+  }
+  flockMapVisible = typeof forceOpen === 'boolean' ? forceOpen : !flockMapVisible;
+  renderFlockMapPanel();
+}
+
 // ── WebSocket ──
 function wsConnect() {
+  if (wsConnectInFlight) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  wsConnectInFlight = true;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host + '/ws');
   ws.onopen = () => {
+    wsConnectInFlight = false;
     $('#wsDot').className = 'dot on';
     wsRetryMs = 1500;
     ws.send('hi');
     pushGpsClientStatus(true);
   };
   ws.onclose = () => {
+    wsConnectInFlight = false;
     $('#wsDot').className = 'dot off';
-    setTimeout(wsConnect, wsRetryMs);
-    wsRetryMs = Math.min(Math.floor(wsRetryMs * 1.5), 8000);
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+    const reconnectDelay = document.hidden ? Math.max(wsRetryMs, 10000) : wsRetryMs;
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
+      wsConnect();
+    }, reconnectDelay);
+    wsRetryMs = Math.min(Math.floor(wsRetryMs * 1.6), 30000);
   };
-  ws.onerror = () => ws.close();
+  ws.onerror = () => {
+    wsConnectInFlight = false;
+    try { ws.close(); } catch(ex) {}
+  };
   ws.onmessage = e => {
     try { applyIncomingState(JSON.parse(e.data)); } catch(ex) {}
   };
@@ -705,6 +1226,7 @@ async function apiPostOk(path, body) {
 
 async function fetchDevices() { devices = await api('/api/devices') || []; }
 async function fetchDrones()  { drones  = await api('/api/drones') || []; }
+async function fetchLogs()    { logsData = await api('/api/logs') || null; return logsData; }
 
 function apInfoForMode(mode) {
   if (state.singleApName) return {ssid:'UniSpy-C6', pass:'ouispy123'};
@@ -752,8 +1274,44 @@ const WIFI_CFG = [
   {ssid:'skyspy-c6',   pass:'skyspy1234'},
   {ssid:'ouispy-c6',   pass:'ouispy123'}
 ];
+function loggingChipClass() {
+  if (state.loggingActive) return 'log-chip';
+  if (state.loggingBlocked) return 'log-chip wait';
+  return 'log-chip off';
+}
+
+function loggingStatusText() {
+  return state.loggingStatus || (state.loggingActive ? 'Active' : (state.loggingBlocked ? 'Waiting for microSD' : 'Off'));
+}
+
+function updateHeaderLoggingStatus() {
+  const el = $('#logStatusHdr');
+  if (!el) return;
+  el.className = 'status-pill ' + (state.loggingActive ? 'active' : (state.loggingBlocked ? 'wait' : 'off'));
+  el.textContent = state.loggingActive ? 'LOG ON' : (state.loggingBlocked ? 'LOG WAIT' : 'LOG OFF');
+}
+
+function logBootStamp(ts) {
+  return 'T+' + fmtTime(Math.max(0, Number(ts) || 0));
+}
+
+function logAgeLabel(ts) {
+  const now = Number(state.uptime || 0);
+  const age = Math.max(0, now - Number(ts || 0));
+  return age < 2 ? 'just now' : fmtTime(age) + ' ago';
+}
+
 function wifiInfoHtml() {
   const w = apInfoForMode(state.mode);
+  const gpsActive = !!state.gpsTagActive;
+  const gpsConfigured = !!state.gpsTagging;
+  const gpsBadge = gpsActive
+    ? '<span class="gps-chip">GPS live</span>'
+    : (gpsConfigured ? '<span class="gps-chip bad">GPS waiting</span>' : '<span class="gps-chip bad">GPS off</span>');
+  const gpsDetail = gpsActive
+    ? 'enabled and connected'
+    : (gpsConfigured ? 'enabled, waiting on client permission' : 'disabled in settings');
+  const logBadge = `<span class="${loggingChipClass()}">${state.loggingActive ? 'Logging live' : (state.loggingBlocked ? 'Logging waiting' : 'Logging off')}</span>`;
   return `<div class="wifi-bar">
     <span class="wifi-icon">&#128246;</span>
     <div class="wifi-detail">
@@ -761,6 +1319,8 @@ function wifiInfoHtml() {
       <span><span class="wifi-lbl">Pass:</span> <code>${w.pass}</code></span>
       <span><span class="wifi-lbl">IP:</span> <code>192.168.4.1</code></span>
       <span><span class="wifi-lbl">Clients:</span> <code>${state.clients||0}</code></span>
+      <span><span class="wifi-lbl">GPS:</span> ${gpsBadge} ${gpsDetail}</span>
+      <span><span class="wifi-lbl">Logs:</span> ${logBadge} ${loggingStatusText()}</span>
     </div>
   </div>`;
 }
@@ -813,6 +1373,7 @@ function renderModeLoading(mode) {
 function updateUI() {
   $('#heapInfo').textContent = Math.round((state.heap||0)/1024) + 'kB';
   $('#uptimeInfo').textContent = fmtTime(state.uptime || 0);
+  updateHeaderLoggingStatus();
   updateTabs();
 
   const m = Number(state.mode);
@@ -854,13 +1415,17 @@ function updateUI() {
     }
   } else {
     // Live update within current view
-    if (m === 1) updateFlockLive();
+    if (m === 0) updateMainMenuLive();
+    else if (m === 1) updateFlockLive();
     else if (m === 2) updateFoxLive();
     else if (m === 3) updateSkyLive();
+    else if (m === 4) updateSettingsLive();
   }
   // Always refresh WiFi bar (clients count is dynamic)
   $('#wifiBar').innerHTML = wifiInfoHtml();
 }
+
+let mainMenuLogsRefreshCounter = 0;
 
 function renderModeSelectInfo() {
   const c = $('#main');
@@ -890,13 +1455,94 @@ function renderModeSelectInfo() {
         <button class="btn" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="setMode(3)">Start Sky Spy</button>
         <button class="btn" style="border-color:var(--accent);color:var(--accent)" onclick="setMode(4)">Open Settings</button>
       </div>
+    </div>
+    <div class="card">
+      <h2>Logs</h2>
+      <div class="log-toolbar">
+        <div class="gps-status" id="mainMenuLogSummary">${state.loggingActive ? 'microSD logging is active.' : (state.loggingBlocked ? 'Logging enabled — waiting for microSD.' : 'Logging is currently off.')}</div>
+        <div class="log-filter-row">
+          <button class="btn sm" id="mmLogFilterAll" onclick="setMainMenuLogFilter('all')">All</button>
+          <button class="btn sm" id="mmLogFilterEvents" onclick="setMainMenuLogFilter('events')">Events</button>
+          <button class="btn sm" id="mmLogFilterIdentity" onclick="setMainMenuLogFilter('identity')">Identity</button>
+          <button class="btn sm" onclick="refreshMainMenuLogs(true)">Refresh</button>
+        </div>
+      </div>
+      <div id="mainMenuLogs"></div>
     </div>`;
+  mainMenuLogsRefreshCounter = 0;
+  renderMainMenuLogs();
+  refreshMainMenuLogs(false);
+}
+
+function setMainMenuLogFilter(f) {
+  logFilter = f;
+  renderMainMenuLogs();
+}
+
+async function refreshMainMenuLogs(showToast) {
+  if (logsRefreshInFlight) return;
+  logsRefreshInFlight = true;
+  const result = await fetchLogs();
+  logsRefreshInFlight = false;
+  renderMainMenuLogs();
+  if (showToast) toast(result ? 'Logs refreshed' : 'Log refresh failed');
+}
+
+function renderMainMenuLogs() {
+  const host = $('#mainMenuLogs');
+  if (!host) return;
+
+  const allBtn = $('#mmLogFilterAll');
+  const eventsBtn = $('#mmLogFilterEvents');
+  const identityBtn = $('#mmLogFilterIdentity');
+  if (allBtn) allBtn.classList.toggle('primary', logFilter === 'all');
+  if (eventsBtn) eventsBtn.classList.toggle('primary', logFilter === 'events');
+  if (identityBtn) identityBtn.classList.toggle('primary', logFilter === 'identity');
+
+  const summary = $('#mainMenuLogSummary');
+  if (summary) {
+    summary.textContent = state.loggingActive
+      ? 'microSD logging is active.'
+      : (state.loggingBlocked ? 'Logging enabled — waiting for microSD.' : 'Logging is currently off.');
+  }
+
+  if (!logsData) {
+    host.innerHTML = '<div class="empty"><div class="icon">📝</div>Loading recent logs...</div>';
+    return;
+  }
+
+  const entries = Array.isArray(logsData[logFilter]) ? logsData[logFilter] : [];
+  if (!entries.length) {
+    host.innerHTML = '<div class="empty"><div class="icon">🗂️</div>No log entries available for this filter.</div>';
+    return;
+  }
+
+  host.innerHTML = `<div class="log-list">${entries.map(entry => `
+    <div class="log-entry">
+      <div class="log-entry-top">
+        <div class="log-entry-meta">
+          <span class="log-source ${htmlEsc(entry.source)}">${htmlEsc(entry.source)}</span>
+          <span class="log-kind">${htmlEsc(entry.kind)}</span>
+        </div>
+        <span class="log-time">${logBootStamp(entry.ts)} · ${logAgeLabel(entry.ts)}</span>
+      </div>
+      <div class="log-msg">${htmlEsc(entry.message)}</div>
+    </div>`).join('')}</div>`;
+}
+
+function updateMainMenuLive() {
+  if ((++mainMenuLogsRefreshCounter % 4) === 0) {
+    refreshMainMenuLogs(false);
+  } else {
+    renderMainMenuLogs();
+  }
 }
 
 // ── Flock You View ──
 let flockRefresh = 0;
 function renderFlock() {
   const c = $('#main');
+  const mapReady = !!state.gpsTagActive;
   c.innerHTML = `
     <div class="card">
       <h2>Surveillance Hardware Scanner</h2>
@@ -904,7 +1550,7 @@ function renderFlock() {
         <div class="stat highlight"><div class="val" id="fDevCount">${state.deviceCount||0}</div><div class="lbl">Detected</div></div>
         <div class="stat"><div class="val" id="fFlockCount" style="color:var(--flock)">--</div><div class="lbl">Flock</div></div>
         <div class="stat"><div class="val" id="fRavenCount" style="color:var(--fox)">--</div><div class="lbl">Raven</div></div>
-        <div class="stat gps off" id="fGpsBlock"><div class="val" id="fGpsState">OFF</div><div class="lbl" id="fGpsLabel">GPS</div></div>
+        <div class="stat gps off" id="fGpsBlock" onclick="handleFlockMapTap()" title="Triple-click to open the Flock pin map when GPS is live"><div class="val" id="fGpsState">OFF</div><div class="lbl" id="fGpsLabel">GPS</div></div>
       </div>
     </div>
     <div class="card">
@@ -918,10 +1564,22 @@ function renderFlock() {
         <a class="btn sm" href="/api/export/csv" target="_blank">Export CSV</a>
       </div>
       <div id="devList" class="dev-list"></div>
+    </div>
+    <div class="card">
+      <h2>Flock Pin Map</h2>
+      <div class="gps-toolbar">
+        <div class="gps-status" id="flockMapSummary">${mapReady ? 'Triple-click the GPS tile or use Open Map to view pinned Flock devices. Double-click the map to cycle zoom.' : 'Enable GPS tagging and allow a connected client before opening the Flock map.'}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" id="flockMapToggleBtn" onclick="toggleFlockMap()" ${mapReady ? '' : 'disabled'}>${flockMapVisible ? 'Hide Map' : 'Open Map'}</button>
+          <button class="btn sm" id="flockMapTilesBtn" onclick="loadFlockMapTiles()" ${mapReady ? '' : 'disabled'}>Load Tiles</button>
+        </div>
+      </div>
+      <div id="flockMapPanel"></div>
     </div>`;
   renderGpsStatus();
   renderGpsToggleBlock();
   renderDevList();
+  renderFlockMapPanel();
 }
 function renderDevList() {
   const el = $('#devList');
@@ -959,12 +1617,14 @@ function renderDevList() {
   el.innerHTML = html;
   const fc = $('#fFlockCount'); if(fc) fc.textContent = flock;
   const rc = $('#fRavenCount'); if(rc) rc.textContent = raven;
+  if (flockMapVisible) drawFlockMap();
 }
 function updateFlockLive() {
   const el = $('#fDevCount'); if(el) el.textContent = state.deviceCount || 0;
   renderGpsStatus();
   renderGpsToggleBlock();
-  if (++flockRefresh % 6 === 0) fetchDevices().then(() => renderDevList());
+  renderFlockMapPanel();
+  if (++flockRefresh % 6 === 0) fetchDevices().then(() => { renderDevList(); if (flockMapVisible) drawFlockMap(); });
 }
 function flagsStr(f) {
   const parts = [];
@@ -986,8 +1646,10 @@ async function trackDevice(i) {
         type: 'fox',
         mac: device.mac,
         lat: pos.coords.latitude,
-        lon: pos.coords.longitude
+        lon: pos.coords.longitude,
+        rssi: Number(device.rssi || -85)
       });
+      saveCameraLocation(device.mac, pos.coords.latitude, pos.coords.longitude, 'gps', Number(device.rssi || -85), 'flock');
     } catch (e) {
       // GPS capture failed, proceed without it
     }
@@ -998,6 +1660,8 @@ async function trackDevice(i) {
 }
 
 async function trackDrone(mac) {
+  const tracked = (drones || []).find(d => String(d.mac || '').toUpperCase() === String(mac || '').toUpperCase());
+  const rssi = Number((tracked && tracked.rssi) || -85);
   // Capture GPS if enabled and available
   if (gpsToggleEnabled && gpsSecureAvailable()) {
     try {
@@ -1005,14 +1669,16 @@ async function trackDrone(mac) {
       await api('/api/sky/track', {
         mac: mac,
         lat: pos.coords.latitude,
-        lon: pos.coords.longitude
+        lon: pos.coords.longitude,
+        rssi: rssi
       });
+      saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, 'drone');
     } catch (e) {
       // GPS capture failed, proceed without it
-      api('/api/sky/track', {mac: mac});
+      api('/api/sky/track', {mac: mac, rssi: rssi});
     }
   } else {
-    api('/api/sky/track', {mac: mac});
+    api('/api/sky/track', {mac: mac, rssi: rssi});
   }
   
   setMode(2);
@@ -1057,6 +1723,46 @@ function regSectionOptions(selected) {
   const cur = normRegSection(selected);
   return REG_SECTIONS.map(s => `<option value="${s}" ${cur===s?'selected':''}>${sectionPretty(s)}</option>`).join('');
 }
+function foxRegistryCapacity() {
+  return Number(state.foxRegistryCapacity || (state.microsdAvailable ? 32 : 8));
+}
+function shortAgeLabel(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return 'not seen this session';
+  if (n === 0) return 'live now';
+  if (n < 60) return `${n}s ago`;
+  const min = Math.floor(n / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ${min % 60}m ago`;
+}
+function foxRegistrySortEntries(items) {
+  const sorted = (items || []).slice();
+  sorted.sort((a, b) => {
+    if (foxRegistrySortMode === 'name') {
+      return regDisplayName(a).localeCompare(regDisplayName(b)) || a.mac.localeCompare(b.mac);
+    }
+    if (foxRegistrySortMode === 'section') {
+      return sectionPretty(a.section).localeCompare(sectionPretty(b.section)) || regDisplayName(a).localeCompare(regDisplayName(b));
+    }
+    const aSeen = Number.isFinite(Number(a.lastSeenAgeSec)) ? Number(a.lastSeenAgeSec) : Number.MAX_SAFE_INTEGER;
+    const bSeen = Number.isFinite(Number(b.lastSeenAgeSec)) ? Number(b.lastSeenAgeSec) : Number.MAX_SAFE_INTEGER;
+    if (aSeen !== bSeen) return aSeen - bSeen;
+    return regDisplayName(a).localeCompare(regDisplayName(b));
+  });
+  return sorted;
+}
+function renderFoxRegSortBar() {
+  const mk = (mode, label) => `<button class="btn sm" style="${foxRegistrySortMode===mode?'border-color:var(--fox);color:var(--fox)':'border-color:var(--border);color:var(--dim)'}" onclick="setFoxRegistrySort('${mode}')">${label}</button>`;
+  return `<div id="foxRegSortBar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${mk('recent','Recent')} ${mk('name','Name')} ${mk('section','Section')}</div>`;
+}
+function setFoxRegistrySort(mode) {
+  foxRegistrySortMode = mode;
+  const sortBar = $('#foxRegSortBar');
+  if (sortBar) sortBar.outerHTML = renderFoxRegSortBar();
+  const list = $('#foxRegList');
+  if (list) list.innerHTML = renderFoxRegList();
+}
 async function saveRegistryFromSource(mac, label, originalName, section, encoded) {
   const safeLabel = encoded ? decodeURIComponent(label || '') : (label || '');
   const safeOriginal = encoded ? decodeURIComponent(originalName || '') : (originalName || '');
@@ -1072,7 +1778,7 @@ async function saveRegistryFromSource(mac, label, originalName, section, encoded
     await fetchFoxRegistry();
     const el = $('#foxRegList'); if(el) el.innerHTML = renderFoxRegList();
   } else {
-    toast('Registry full or error');
+    toast(`Registry full (${foxRegistryCapacity()}) or error`);
   }
 }
 
@@ -1388,7 +2094,9 @@ function renderFoxInner() {
     </div>
 
     <div class="card full-row">
-      <h2>Target Registry (${foxRegistry.length}/8)</h2>
+      <h2>Target Registry (${foxRegistry.length}/${foxRegistryCapacity()})</h2>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px">microSD raises the saved-target ceiling automatically when available. Saved entries now sort like a contact list with live last-seen context.</div>
+      ${renderFoxRegSortBar()}
       <div id="foxRegList">${renderFoxRegList()}</div>
     </div>
     </div>`;
@@ -1481,10 +2189,12 @@ function updateFoxLive() {
   }
   // Refresh nearby BLE + flock/drone counts periodically
   if (++foxLiveCounter % 20 === 0) {
-    fetchFoxNearby().then(() => {
+    Promise.all([fetchFoxNearby(), fetchFoxRegistry()]).then(() => {
       const bc = $('#foxBleCount'); if(bc) bc.textContent = foxNearby.length + ' visible';
       const smart = $('#foxBleSmartSections');
       if (smart) smart.outerHTML = renderFoxBleSmartSections();
+      const regList = $('#foxRegList');
+      if (regList) regList.innerHTML = renderFoxRegList();
     });
   }
 }
@@ -1547,40 +2257,47 @@ function setFoxTarget() {
 
 function renderFoxRegList() {
   if(!foxRegistry.length) return '<div class="empty" style="padding:10px"><div class="icon">&#128203;</div>No saved targets</div>';
-  return foxRegistry.map((r,i) => `
-    <div class="prof-card" style="border-color:rgba(251,146,60,.35)">
-      <div class="prof-hdr">
-        <div class="dev-icon raven">&#127919;</div>
-        <div class="prof-info">
-          <div class="dev-mac">${htmlEsc(r.mac)}</div>
-          <div class="dev-name">${htmlEsc(regDisplayName(r))} &middot; Section: ${htmlEsc(sectionPretty(r.section))}</div>
-          <div class="dev-name" style="margin-top:2px">Original: ${htmlEsc(r.originalName || r.label || 'Unknown')}</div>
+  return foxRegistrySortEntries(foxRegistry.map((r, i) => Object.assign({__index:i}, r))).map(r => {
+    const idx = r.__index;
+    const liveSource = r.lastSeenSource ? sectionPretty(r.lastSeenSource) : 'No live source';
+    const liveText = shortAgeLabel(r.lastSeenAgeSec);
+    const liveRssi = Number(r.liveRssi);
+    const liveRssiChip = Number.isFinite(liveRssi) && liveRssi > -127 ? `<span class="fox-chip">${liveRssi} dBm</span>` : '';
+    return `
+    <div class="fox-contact" style="margin-bottom:10px">
+      <div class="fox-contact-avatar">&#127919;</div>
+      <div class="fox-contact-main">
+        <div class="fox-contact-name">${htmlEsc(regDisplayName(r))}</div>
+        <div class="fox-contact-sub">${htmlEsc(r.mac)} &middot; ${htmlEsc(sectionPretty(r.section))}</div>
+        <div class="fox-contact-meta">
+          <span class="fox-chip ${r.online ? 'near' : 'detected'}">${r.online ? 'LIVE' : 'STORED'}</span>
+          <span class="fox-chip">Seen ${htmlEsc(liveText)}</span>
+          <span class="fox-chip">Source ${htmlEsc(liveSource)}</span>
+          ${liveRssiChip}
+          ${r.liveHits ? `<span class="fox-chip">hits ${r.liveHits}</span>` : ''}
         </div>
-        <div style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-            onclick="lockFox('${htmlEsc(r.mac)}')">&#127919; Track</button>
-          <button class="btn sm" style="border-color:var(--rose);color:var(--rose)"
-            onclick="removeFromRegistry(${i})">&#10005;</button>
+        <div class="drone-fields" style="grid-template-columns:1fr 1fr;margin-top:8px">
+          <div>
+            <dt style="margin-bottom:4px">Nickname Override</dt>
+            <input class="input-sm" id="regNick_${idx}" maxlength="23" value="${htmlEsc(r.nickname||'')}" placeholder="Friendly nickname">
+          </div>
+          <div>
+            <dt style="margin-bottom:4px">Section Override</dt>
+            <select class="sel-sm" id="regSection_${idx}">${regSectionOptions(r.section)}</select>
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <dt style="margin-bottom:4px;color:var(--dim);font-size:12px">Notes</dt>
+          <textarea class="txt-sm" id="regNotes_${idx}" maxlength="95" placeholder="Operator notes, location notes, behavior notes...">${htmlEsc(r.notes||'')}</textarea>
         </div>
       </div>
-      <div class="drone-fields" style="grid-template-columns:1fr 1fr;margin-top:8px">
-        <div>
-          <dt style="margin-bottom:4px">Nickname Override</dt>
-          <input class="input-sm" id="regNick_${i}" maxlength="23" value="${htmlEsc(r.nickname||'')}" placeholder="Friendly nickname">
-        </div>
-        <div>
-          <dt style="margin-bottom:4px">Section Override</dt>
-          <select class="sel-sm" id="regSection_${i}">${regSectionOptions(r.section)}</select>
-        </div>
+      <div class="fox-contact-actions" style="flex-direction:column">
+        <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="lockFox('${htmlEsc(r.mac)}')">Track</button>
+        <button class="btn sm" style="border-color:var(--accent);color:var(--accent)" onclick="saveRegistryMeta(${idx})">Save</button>
+        <button class="btn sm" style="border-color:var(--rose);color:var(--rose)" onclick="removeFromRegistry(${idx})">Delete</button>
       </div>
-      <div style="margin-top:8px">
-        <dt style="margin-bottom:4px;color:var(--dim);font-size:12px">Notes</dt>
-        <textarea class="txt-sm" id="regNotes_${i}" maxlength="95" placeholder="Operator notes, location notes, behavior notes...">${htmlEsc(r.notes||'')}</textarea>
-      </div>
-      <div style="margin-top:8px;display:flex;justify-content:flex-end">
-        <button class="btn sm" style="border-color:var(--accent);color:var(--accent)" onclick="saveRegistryMeta(${i})">Save Details</button>
-      </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function saveRegistryMeta(idx) {
@@ -1609,7 +2326,7 @@ async function addMacToRegistry() {
   if(!mac || mac.length < 17) { toast('Enter a valid MAC'); return; }
   const r = await api('/api/fox/registry', {mac, label, originalName: label || mac, section: 'known'});
   if(r && r.ok) { toast('Saved to registry'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); }); }
-  else toast('Registry full or error');
+  else toast(`Registry full (${foxRegistryCapacity()}) or error`);
 }
 
 async function saveTargetToRegistry() {
@@ -1618,7 +2335,7 @@ async function saveTargetToRegistry() {
   const label = prompt('Label for '+f.target+':', '') || '';
   const r = await api('/api/fox/registry', {mac: f.target, label, originalName: label || f.target, section: 'known'});
   if(r && r.ok) { toast('Saved to registry'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); }); }
-  else toast('Registry full or already saved');
+  else toast(`Registry full (${foxRegistryCapacity()}) or already saved`);
 }
 
 async function removeFromRegistry(idx) {
@@ -1643,9 +2360,14 @@ function renderSky() {
         <div class="stat highlight"><div class="val" id="sDroneCount" style="color:var(--skyblue)">${state.droneCount||0}</div><div class="lbl">Drones</div></div>
         <div class="stat"><div class="val" id="sWifiCount" style="color:var(--cyan)">--</div><div class="lbl">WiFi RID</div></div>
         <div class="stat"><div class="val" id="sBleCount" style="color:var(--skyblue)">--</div><div class="lbl">BLE RID</div></div>
+        <div class="stat gps off" id="sGpsBlock"><div class="val" id="sGpsState">OFF</div><div class="lbl" id="sGpsLabel">GPS</div></div>
+      </div>
+      <div class="gps-toolbar" style="margin-top:10px">
+        <div class="gps-status" id="sGpsStatus"></div>
+        <button class="btn sm" id="sGpsToggleBtn" onclick="toggleGpsFeature()">GPS Off</button>
       </div>
       ${state.droneCount === 0 ? `
-        <div class="radar"><div class="radar-bg"></div><div class="radar-sweep"></div><div class="radar-dot"></div></div>
+        <div class="radar"><canvas id="skyRadarCanvas" width="120" height="120" style="width:120px;height:120px;display:block"></canvas></div>
         <div class="empty" style="padding:10px;color:var(--blue)"><div>Scanning WiFi ch6 + BLE...</div>
         <div style="margin-top:6px;display:flex;gap:12px;justify-content:center;font-size:11px">
           <span style="color:var(--cyan)">&#9679; WiFi Active</span>
@@ -1656,7 +2378,88 @@ function renderSky() {
     <div id="droneList"></div>
     ${state.droneCount > 0 ? '<div class="card"><button class="btn sm" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="fetchDrones().then(()=>renderDroneCards())">Refresh Details</button></div>' : ''}
   `;
+  renderSkyGpsWidgets();
+  if ((state.droneCount || 0) === 0) {
+    startSkyRadarAnimation();
+  } else {
+    stopSkyRadarAnimation();
+  }
   renderDroneCards();
+}
+
+function stopSkyRadarAnimation() {
+  if (skyRadarAnimId) {
+    cancelAnimationFrame(skyRadarAnimId);
+    skyRadarAnimId = 0;
+  }
+}
+
+function startSkyRadarAnimation() {
+  const canvas = $('#skyRadarCanvas');
+  if (!canvas) {
+    stopSkyRadarAnimation();
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  stopSkyRadarAnimation();
+  const size = canvas.width;
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = (size / 2) - 2;
+
+  const draw = () => {
+    if (!$('#skyRadarCanvas')) {
+      stopSkyRadarAnimation();
+      return;
+    }
+
+    skyRadarAngle = (skyRadarAngle + 1.6) % 360;
+    const a0 = (skyRadarAngle - 18) * Math.PI / 180;
+    const a1 = (skyRadarAngle + 18) * Math.PI / 180;
+
+    ctx.clearRect(0, 0, size, size);
+
+    ctx.fillStyle = 'rgba(56,189,248,0.05)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(63,63,70,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(63,63,70,0.45)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.66, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.33, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, radius);
+    grad.addColorStop(0, 'rgba(56,189,248,0.26)');
+    grad.addColorStop(1, 'rgba(56,189,248,0.00)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, a0, a1);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(248,113,113,0.95)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    skyRadarAnimId = requestAnimationFrame(draw);
+  };
+
+  skyRadarAnimId = requestAnimationFrame(draw);
 }
 function renderDroneCards() {
   const el = $('#droneList'); if(!el) return;
@@ -1688,6 +2491,8 @@ function renderDroneCards() {
 }
 function updateSkyLive() {
   const el = $('#sDroneCount'); if(el) el.textContent = state.droneCount || 0;
+  renderSkyGpsWidgets();
+  if ((state.droneCount || 0) > 0) stopSkyRadarAnimation();
   if(state.droneCount > 0 && !drones.length) fetchDrones().then(() => renderSky());
 }
 
@@ -1770,6 +2575,10 @@ function renderSettings() {
           </select>
         </div>
         <div class="setting-row">
+          <label>GPS Tagging</label>
+          <label class="toggle"><input type="checkbox" ${state.gpsTagging?'checked':''} onchange="updateSetting('gpsTagging',this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
           <label>Use microSD for logs</label>
           <label class="toggle"><input type="checkbox" ${state.useMicrosdLogs?'checked':''} onchange="updateSetting('useMicrosdLogs',this.checked)"><span class="slider"></span></label>
         </div>
@@ -1777,16 +2586,31 @@ function renderSettings() {
     </div>
     <div class="card">
       <h2>System Info</h2>
-      <div style="font-size:12px;line-height:1.8">
-        <div>Free Heap: <strong>${Math.round((state.heap||0)/1024)} kB</strong></div>
-        <div>Uptime: <strong>${fmtTime(state.uptime||0)}</strong></div>
-        <div>WiFi Clients: <strong>${state.clients||0}</strong></div>
-        <div>Mode: <strong>${modeNames[state.mode||0] || 'Unknown'}</strong></div>
-        <div>Flock Devices: <strong>${state.deviceCount||0}</strong></div>
-        <div>Drones Tracked: <strong>${state.droneCount||0}</strong></div>
-        <div>Log Capacity: <strong>${state.logCapacityKb||768} kB</strong></div>
-        <div>microSD Status: <strong>${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
+      <div style="font-size:12px;line-height:1.8" id="settingsSystemInfo">
+        <div>Free Heap: <strong id="settingsHeap">${Math.round((state.heap||0)/1024)} kB</strong></div>
+        <div>Uptime: <strong id="settingsUptime">${fmtTime(state.uptime||0)}</strong></div>
+        <div>WiFi Clients: <strong id="settingsClients">${state.clients||0}</strong></div>
+        <div>Mode: <strong id="settingsMode">${modeNames[state.mode||0] || 'Unknown'}</strong></div>
+        <div>Flock Devices: <strong id="settingsDevices">${state.deviceCount||0}</strong></div>
+        <div>Drones Tracked: <strong id="settingsDrones">${state.droneCount||0}</strong></div>
+        <div>Log Capacity: <strong id="settingsLogCapacity">${state.logCapacityKb||768} kB</strong></div>
+        <div>Logging Status: <strong id="settingsLoggingStatus">${loggingStatusText()}</strong></div>
+        <div>microSD Status: <strong id="settingsMicrosd">${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
+        <div>GPS Status: <strong id="settingsGpsStatus">${state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled')}</strong></div>
       </div>
+    </div>
+    <div class="card">
+      <h2>Logs</h2>
+      <div class="log-toolbar">
+        <div class="gps-status" id="settingsLogSummary">${state.loggingActive ? 'microSD logging is active and recent entries are visible below.' : (state.loggingBlocked ? 'Logging is enabled but waiting for a mounted microSD card.' : 'Logging is currently off.')}</div>
+        <div class="log-filter-row">
+          <button class="btn sm" id="logFilterAll" onclick="setLogFilter('all')">All</button>
+          <button class="btn sm" id="logFilterEvents" onclick="setLogFilter('events')">Events</button>
+          <button class="btn sm" id="logFilterIdentity" onclick="setLogFilter('identity')">Identity</button>
+          <button class="btn sm" onclick="refreshLogs(true)">Refresh</button>
+        </div>
+      </div>
+      <div id="settingsLogs"></div>
     </div>
     <div class="card">
       <h2>Quick Actions</h2>
@@ -1806,6 +2630,8 @@ function renderSettings() {
         See the HARDWARE.md file for wiring instructions.
       </p>
     </div>`;
+  renderSettingsLogs();
+  refreshLogs(false);
 }
 function updateSetting(key, val) {
   const body = {};
@@ -1822,22 +2648,105 @@ function updateSetting(key, val) {
   else if(key==='shortcutModeBtn') body.shortcutModeBtn = parseInt(val);
   else if(key==='shortcutActionBtn') body.shortcutActionBtn = parseInt(val);
   else if(key==='shortcutBackBtn') body.shortcutBackBtn = parseInt(val);
+  else if(key==='gpsTagging') body.gpsTagging = !!val;
   else if(key==='useMicrosdLogs') body.useMicrosdLogs = !!val;
+  if (key === 'gpsTagging') {
+    gpsToggleEnabled = !!val;
+    saveGpsToggleEnabled();
+  }
   api('/api/settings', body);
+}
+
+function setLogFilter(nextFilter) {
+  logFilter = nextFilter;
+  renderSettingsLogs();
+}
+
+async function refreshLogs(showToast) {
+  if (logsRefreshInFlight) return;
+  logsRefreshInFlight = true;
+  const result = await fetchLogs();
+  logsRefreshInFlight = false;
+  renderSettingsLogs();
+  if (showToast) {
+    toast(result ? 'Logs refreshed' : 'Log refresh failed');
+  }
+}
+
+function renderSettingsLogs() {
+  const host = $('#settingsLogs');
+  if (!host) return;
+
+  const allBtn = $('#logFilterAll');
+  const eventsBtn = $('#logFilterEvents');
+  const identityBtn = $('#logFilterIdentity');
+  if (allBtn) allBtn.classList.toggle('primary', logFilter === 'all');
+  if (eventsBtn) eventsBtn.classList.toggle('primary', logFilter === 'events');
+  if (identityBtn) identityBtn.classList.toggle('primary', logFilter === 'identity');
+
+  const summary = $('#settingsLogSummary');
+  if (summary) {
+    summary.textContent = state.loggingActive
+      ? 'microSD logging is active and recent entries are visible below.'
+      : (state.loggingBlocked ? 'Logging is enabled but waiting for a mounted microSD card.' : 'Logging is currently off.');
+  }
+
+  if (!logsData) {
+    host.innerHTML = '<div class="empty"><div class="icon">📝</div>Loading recent logs...</div>';
+    return;
+  }
+
+  const entries = Array.isArray(logsData[logFilter]) ? logsData[logFilter] : [];
+  if (!entries.length) {
+    host.innerHTML = '<div class="empty"><div class="icon">🗂️</div>No log entries available for this filter.</div>';
+    return;
+  }
+
+  host.innerHTML = `<div class="log-list">${entries.map(entry => `
+    <div class="log-entry">
+      <div class="log-entry-top">
+        <div class="log-entry-meta">
+          <span class="log-source ${htmlEsc(entry.source)}">${htmlEsc(entry.source)}</span>
+          <span class="log-kind">${htmlEsc(entry.kind)}</span>
+        </div>
+        <span class="log-time">${logBootStamp(entry.ts)} · ${logAgeLabel(entry.ts)}</span>
+      </div>
+      <div class="log-msg">${htmlEsc(entry.message)}</div>
+    </div>`).join('')}</div>`;
+}
+
+function updateSettingsLive() {
+  const modeNames = ['Select','Flock You','Fox Hunter','Sky Spy','Settings'];
+  const heap = $('#settingsHeap'); if (heap) heap.textContent = Math.round((state.heap||0)/1024) + ' kB';
+  const uptime = $('#settingsUptime'); if (uptime) uptime.textContent = fmtTime(state.uptime||0);
+  const clients = $('#settingsClients'); if (clients) clients.textContent = state.clients||0;
+  const mode = $('#settingsMode'); if (mode) mode.textContent = modeNames[state.mode||0] || 'Unknown';
+  const devs = $('#settingsDevices'); if (devs) devs.textContent = state.deviceCount||0;
+  const dronesEl = $('#settingsDrones'); if (dronesEl) dronesEl.textContent = state.droneCount||0;
+  const cap = $('#settingsLogCapacity'); if (cap) cap.textContent = (state.logCapacityKb||768) + ' kB';
+  const logStatus = $('#settingsLoggingStatus'); if (logStatus) logStatus.textContent = loggingStatusText();
+  const sd = $('#settingsMicrosd'); if (sd) sd.textContent = state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found');
+  const gps = $('#settingsGpsStatus');
+  if (gps) gps.textContent = state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled');
+  renderSettingsLogs();
+  if ((++logsRefreshCounter % 4) === 0) {
+    refreshLogs(false);
+  }
 }
 
 // ── Init ──
 wsConnect();
-setInterval(() => { if(ws && ws.readyState===1) ws.send('ping'); }, 3000);
+setInterval(() => { if(ws && ws.readyState===1) ws.send('ping'); }, 5000);
 // Also poll state in case WS is slow
 setInterval(async () => {
+  if (ws && ws.readyState === 1) return;
   const s = await api('/api/state');
   if(s) applyIncomingState(s);
-}, 2000);
+}, 3500);
 
 setInterval(() => {
   pushGpsClientStatus(false);
-}, 2500);
+}, 8000);
 </script>
 </body>
 </html>
