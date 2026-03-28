@@ -511,8 +511,8 @@ void sky_spy_start(void)
 
     g_app.drone_count = 0;
 
-    /* Breathing orange LED for Sky Spy scan state */
-    led_ctrl_breathe(255, 140, 0, 3000);
+    /* Breathing green LED for Sky Spy scan state */
+    led_ctrl_breathe(8, 140, 30, 3000);
 
     /* Start WiFi sniffer (promiscuous on current AP channel) */
     sniffer_start(sky_wifi_cb);

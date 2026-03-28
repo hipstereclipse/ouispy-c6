@@ -57,7 +57,7 @@ Dual-protocol passive drone detection with a Naval CIC-inspired radar display.
 - Animated phosphor-green radar with rotating sweep, concentric range rings, cardinal labels, and fading trail
 - Detected drones appear as amber blips on the radar, positioned by RSSI (distance) and MAC hash (angle) with a blinking animation
 - Contact list sidebar with protocol color bars (green = ASTM, red = DJI)
-- Orange breathing LED while scanning, with orange flash on new drone ping
+- Green breathing LED while scanning, with orange flash on new drone ping
 - Tracks up to 16 simultaneous drones with 30-second automatic expiry
 
 ---
@@ -91,7 +91,7 @@ A modern single-page dark-themed web UI served directly from the device. Connect
 | Fox Hunter — Detector (target detected) | Blinking red (speed = proximity) |
 | Fox Hunter — Sting (no target / searching) | Off |
 | Fox Hunter — Sting (target detected) | Solid blue (brightness = proximity) |
-| Sky Spy | Breathing orange |
+| Sky Spy | Breathing green |
 | Reset warning (hold 3.5s) | Triple orange flash |
 
 ### On-Device Controls
