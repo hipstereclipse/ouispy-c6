@@ -61,6 +61,7 @@ void app_state_init(void)
     g_app.gps_tagging_enabled = false;
     g_app.gps_client_ready = false;
     g_app.gps_client_ready_ms = 0;
+    g_app.sky_tracked_drone_idx = -1;
     g_app.last_input_ms = uptime_ms();
     g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();

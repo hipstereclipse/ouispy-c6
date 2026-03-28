@@ -756,6 +756,89 @@ static esp_err_t get_fox_nearby(httpd_req_t *req)
     return ret;
 }
 
+static esp_err_t post_target_gps(httpd_req_t *req)
+{
+    char buf[256];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(root, "type"));
+    double lat = cJSON_GetObjectItem(root, "lat") ? cJSON_GetObjectItem(root, "lat")->valuedouble : 0;
+    double lon = cJSON_GetObjectItem(root, "lon") ? cJSON_GetObjectItem(root, "lon")->valuedouble : 0;
+    uint8_t mac[6] = {0};
+
+    cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
+    if (mac_item && cJSON_IsString(mac_item)) {
+        mac_from_str(mac_item->valuestring, mac);
+    }
+
+    if (type && lat != 0 && lon != 0) {
+        char log_msg[128];
+        if (strcmp(type, "fox") == 0) {
+            g_app.fox_target_lat = lat;
+            g_app.fox_target_lon = lon;
+            snprintf(log_msg, sizeof(log_msg), "gps_captured mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], lat, lon);
+            storage_ext_append_log("fox", log_msg);
+        } else if (strcmp(type, "sky") == 0) {
+            g_app.sky_tracked_lat = lat;
+            g_app.sky_tracked_lon = lon;
+            snprintf(log_msg, sizeof(log_msg), "gps_captured mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], lat, lon);
+            storage_ext_append_log("sky", log_msg);
+        }
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t post_sky_track(httpd_req_t *req)
+{
+    char buf[256];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+
+    double lat = cJSON_GetObjectItem(root, "lat") ? cJSON_GetObjectItem(root, "lat")->valuedouble : 0;
+    double lon = cJSON_GetObjectItem(root, "lon") ? cJSON_GetObjectItem(root, "lon")->valuedouble : 0;
+    uint8_t mac[6] = {0};
+
+    cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
+    cJSON *idx_item = cJSON_GetObjectItem(root, "index");
+    if (mac_item && cJSON_IsString(mac_item)) {
+        mac_from_str(mac_item->valuestring, mac);
+    }
+    if (idx_item && cJSON_IsNumber(idx_item)) {
+        if (idx_item->valueint >= 0 && idx_item->valueint < g_app.drone_count) {
+            memcpy(mac, g_app.drones[idx_item->valueint].mac, 6);
+            g_app.sky_tracked_drone_idx = idx_item->valueint;
+        }
+    }
+
+    // Log GPS if provided
+    if (lat != 0 && lon != 0) {
+        char log_msg[128];
+        snprintf(log_msg, sizeof(log_msg), "gps_captured mac=%02X:%02X:%02X:%02X:%02X:%02X lat=%.6f lon=%.6f",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], lat, lon);
+        storage_ext_append_log("sky", log_msg);
+        g_app.sky_tracked_lat = lat;
+        g_app.sky_tracked_lon = lon;
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
 /* ── Register routes and start server ── */
 static void web_register_routes(httpd_handle_t srv)
 {
@@ -778,6 +861,12 @@ static void web_register_routes(httpd_handle_t srv)
 
     httpd_uri_t uri_gps_status = { .uri="/api/gps/status", .method=HTTP_POST, .handler=post_gps_status };
     httpd_register_uri_handler(srv, &uri_gps_status);
+
+    httpd_uri_t uri_target_gps = { .uri="/api/target/gps", .method=HTTP_POST, .handler=post_target_gps };
+    httpd_register_uri_handler(srv, &uri_target_gps);
+
+    httpd_uri_t uri_sky_track = { .uri="/api/sky/track", .method=HTTP_POST, .handler=post_sky_track };
+    httpd_register_uri_handler(srv, &uri_sky_track);
 
     httpd_uri_t uri_fox = { .uri="/api/fox/target", .method=HTTP_POST, .handler=post_fox_target };
     httpd_register_uri_handler(srv, &uri_fox);

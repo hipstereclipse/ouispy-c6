@@ -974,10 +974,49 @@ function flagsStr(f) {
   if(f&8) parts.push('UUID');
   return parts.join('+') || 'BLE';
 }
-function trackDevice(i) {
+async function trackDevice(i) {
+  const device = devices[i];
   api('/api/fox/target', {index: i});
+  
+  // Capture GPS if enabled and available
+  if (gpsToggleEnabled && gpsSecureAvailable()) {
+    try {
+      const pos = await getCurrentPosition();
+      await api('/api/target/gps', {
+        type: 'fox',
+        mac: device.mac,
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude
+      });
+    } catch (e) {
+      // GPS capture failed, proceed without it
+    }
+  }
+  
   setMode(2);
   toast('Target set → Fox Hunter');
+}
+
+async function trackDrone(mac) {
+  // Capture GPS if enabled and available
+  if (gpsToggleEnabled && gpsSecureAvailable()) {
+    try {
+      const pos = await getCurrentPosition();
+      await api('/api/sky/track', {
+        mac: mac,
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude
+      });
+    } catch (e) {
+      // GPS capture failed, proceed without it
+      api('/api/sky/track', {mac: mac});
+    }
+  } else {
+    api('/api/sky/track', {mac: mac});
+  }
+  
+  setMode(2);
+  toast('Tracking drone signal');
 }
 
 // ── Fox Hunter View ──
@@ -1606,7 +1645,7 @@ function renderDroneCards() {
         ${d.opId ? `<dt>Operator</dt><dd>${d.opId}</dd>` : ''}
       </dl>
       <div style="margin-top:8px">
-        <button class="btn sm" onclick="api('/api/fox/target',{mac:'${d.mac}'});setMode(2);toast('Tracking drone signal')">🎯 Track Signal</button>
+        <button class="btn sm" onclick="trackDrone('${d.mac}')">🎯 Track Signal</button>
       </div>
     </div>`;
   });

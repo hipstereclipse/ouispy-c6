@@ -250,6 +250,12 @@ static void render_mode_select_screen(int cursor)
     display_draw_text(44, 67, ap_pass, text_main, card_bg);
     display_draw_text(14, 81, g_app.ap_broadcast_enabled ? "AP:":"AP:", text_dim, card_bg);
     display_draw_text(44, 81, g_app.ap_broadcast_enabled ? "Broadcast" : "Hidden", text_link, card_bg);
+    
+    /* microSD card status */
+    bool microsd_avail = storage_ext_is_available();
+    uint16_t microsd_color = microsd_avail ? rgb565(52, 211, 153) : rgb565(249, 115, 22);
+    const char *microsd_text = microsd_avail ? "microSD: Available" : "microSD: Not found";
+    display_draw_text(14, 95, microsd_text, microsd_color, card_bg);
 
     display_draw_text_centered(116, "Select a mode", text_dim, bg);
 

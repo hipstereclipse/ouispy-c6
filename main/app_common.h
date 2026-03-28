@@ -205,6 +205,9 @@ typedef struct {
     fox_nearby_t    fox_nearby[FOX_NEARBY_MAX];
     int             fox_nearby_count;
 
+    /* Fox target GPS (captured when target selected with GPS enabled) */
+    double          fox_target_lat, fox_target_lon;
+
     /* WiFi AP connected client MACs */
     uint8_t         wifi_client_macs[WIFI_MAX_AP_CLIENTS][6];
 
@@ -212,6 +215,10 @@ typedef struct {
     drone_info_t    drones[MAX_DRONES];
     int             drone_count;
     SemaphoreHandle_t drone_mutex;
+
+    /* Currently tracked sky spy drone GPS (captured when selected with GPS enabled) */
+    int             sky_tracked_drone_idx;  /* -1 if none */
+    double          sky_tracked_lat, sky_tracked_lon;
 
     /* Hardware preferences (persisted via NVS) */
     uint8_t         lcd_brightness;   /* 0-255 */
@@ -239,6 +246,7 @@ typedef struct {
     uint32_t        uptime_sec;
     uint32_t        free_heap;
     uint8_t         wifi_clients;
+    bool            microsd_available;
 
     /* UI navigation (button-driven cursor) */
     int             ui_cursor;        /* current selection index  */
