@@ -349,6 +349,30 @@ static void render_settings_screen(int cursor)
     }
 }
 
+static void render_boot_splash(void)
+{
+    uint16_t bg = rgb565(12, 10, 16);
+    uint16_t panel = rgb565(24, 20, 32);
+    uint16_t border = rgb565(63, 63, 70);
+    uint16_t gold = rgb565(251, 191, 36);
+    uint16_t violet = rgb565(168, 85, 247);
+    uint16_t text_dim = rgb565(161, 161, 170);
+    uint16_t text_faint = rgb565(113, 113, 122);
+
+    display_fill(bg);
+
+    /* Framed boot card keeps the logo centered and avoids clipping artifacts. */
+    display_draw_bordered_rect(8, 52, LCD_H_RES - 16, 110, border, panel);
+    display_draw_rect(8, 52, LCD_H_RES - 16, 3, gold);
+
+    display_draw_text_scaled_centered(74, "OUI-SPY", gold, panel, 2);
+    display_draw_text_scaled_centered(96, "C6", violet, panel, 2);
+
+    display_draw_hline(20, 128, LCD_H_RES - 40, border);
+    display_draw_text_centered(140, "RF Intelligence Tool", text_dim, panel);
+    display_draw_text_centered(176, "Initializing...", text_faint, bg);
+}
+
 static void mode_select_task(void *arg)
 {
     int last_cursor = -1;
@@ -752,12 +776,7 @@ void app_main(void)
     buzzer_init();
     button_init(on_button_event);
 
-    display_fill(rgb565(12, 10, 16));
-    display_draw_text_scaled_centered(80, "OUI-SPY", rgb565(251, 191, 36), rgb565(12, 10, 16), 3);
-    display_draw_text_scaled_centered(110, "C6", rgb565(168, 85, 247), rgb565(12, 10, 16), 3);
-    display_draw_hline(30, 145, LCD_H_RES - 60, rgb565(63, 63, 70));
-    display_draw_text_centered(158, "RF Intelligence Tool", rgb565(161, 161, 170), rgb565(12, 10, 16));
-    display_draw_text_centered(175, "Initializing...", rgb565(113, 113, 122), rgb565(12, 10, 16));
+    render_boot_splash();
     buzzer_melody_boot();
     set_init_phase_led(LED_PHASE_BOOT_SPLASH);
     vTaskDelay(pdMS_TO_TICKS(1000));

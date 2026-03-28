@@ -299,10 +299,10 @@ static void fox_beep_task(void *arg)
                 char mac_str[18];
                 mac_to_str(g_app.fox_target_mac, mac_str, sizeof(mac_str));
 
-                display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 28, border_col, panel_bg);
-                display_draw_text(8, 40, "TARGET LOCKED", text_main, panel_bg);
-                display_draw_text(8, 52, mac_str, rgb565(253, 186, 116), panel_bg);
-                display_draw_hline(4, 70, LCD_H_RES - 8, accent);
+                display_draw_bordered_rect(4, 42, LCD_H_RES - 8, 34, border_col, panel_bg);
+                display_draw_text(8, 46, "TARGET LOCKED", text_main, panel_bg);
+                display_draw_text(8, 60, mac_str, rgb565(253, 186, 116), panel_bg);
+                display_draw_hline(4, 82, LCD_H_RES - 8, accent);
 
                 if (target_visible) {
                     char buf[32];
@@ -311,20 +311,20 @@ static void fox_beep_task(void *arg)
                     uint16_t rssi_col = rgb565(cr, cg, cb);
 
                     snprintf(buf, sizeof(buf), "%d", g_app.fox_rssi);
-                    display_draw_text_scaled(20, 78, buf, rssi_col, bg, 3);
-                    display_draw_text(LCD_H_RES - 40, 86, "dBm", text_dim, bg);
+                    display_draw_text_scaled(20, 92, buf, rssi_col, bg, 3);
+                    display_draw_text(LCD_H_RES - 40, 102, "dBm", text_dim, bg);
 
                     snprintf(buf, sizeof(buf), "Best: %d dBm", g_app.fox_rssi_best);
-                    display_draw_text(8, 106, buf, text_main, bg);
+                    display_draw_text(8, 124, buf, text_main, bg);
 
                     snprintf(buf, sizeof(buf), "Seen: now");
-                    display_draw_text(96, 106, buf, text_dim, bg);
+                    display_draw_text(8, 136, buf, text_dim, bg);
 
-                    display_draw_rect(4, 122, 2, 6, accent);
-                    display_draw_rect(LCD_H_RES - 6, 122, 2, 6, accent);
+                    display_draw_rect(4, 146, 2, 6, accent);
+                    display_draw_rect(LCD_H_RES - 6, 146, 2, 6, accent);
                     int bar_w = rssi_to_bar(g_app.fox_rssi);
-                    display_draw_rect(8, 124, bar_w, 16, rssi_col);
-                    display_draw_rect(8 + bar_w, 124, LCD_H_RES - 16 - bar_w, 16, rgb565(39, 39, 42));
+                    display_draw_rect(8, 148, bar_w, 16, rssi_col);
+                    display_draw_rect(8 + bar_w, 148, LCD_H_RES - 16 - bar_w, 16, rgb565(39, 39, 42));
 
                     int pct = (g_app.fox_rssi + 100) * 100 / 80;
                     if (pct < 0) pct = 0;
@@ -334,32 +334,32 @@ static void fox_beep_task(void *arg)
                         int bx = 8 + i * 8;
                         bool active = (i * 5) < pct;
                         uint16_t bar_col = active ? rssi_col : rgb565(39, 39, 42);
-                        display_draw_rect(bx, 152 + (24 - bar_h), 6, bar_h, bar_col);
+                        display_draw_rect(bx, 176 + (24 - bar_h), 6, bar_h, bar_col);
                     }
 
                     snprintf(buf, sizeof(buf), "%d%%", pct);
-                    display_draw_text(72, 180, buf, text_main, bg);
+                    display_draw_text(72, 208, buf, text_main, bg);
 
                     snprintf(buf, sizeof(buf), "Prox: %s", rssi_to_proximity_label(g_app.fox_rssi));
-                    display_draw_text_centered(191, buf, text_main, bg);
+                    display_draw_text_centered(220, buf, text_main, bg);
 
-                    display_draw_bordered_rect(20, 196, LCD_H_RES - 40, 20, status_border, status_fill);
-                    display_draw_text(40, 202, "TRACKING", status_text, status_fill);
+                    display_draw_bordered_rect(20, 236, LCD_H_RES - 40, 24, status_border, status_fill);
+                    display_draw_text(40, 244, "TRACKING", status_text, status_fill);
                 } else {
                     char buf[36];
                     uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now > g_app.fox_last_seen)
                         ? (now - g_app.fox_last_seen) / 1000U
                         : 0;
 
-                    display_draw_bordered_rect(20, 90, LCD_H_RES - 40, 50, rgb565(127, 29, 29), rgb565(30, 10, 10));
-                    display_draw_text(40, 100, "SIGNAL LOST", rgb565(248, 113, 113), rgb565(30, 10, 10));
-                    display_draw_text(30, 120, "Searching...", text_dim, rgb565(30, 10, 10));
+                    display_draw_bordered_rect(20, 100, LCD_H_RES - 40, 58, rgb565(127, 29, 29), rgb565(30, 10, 10));
+                    display_draw_text(40, 112, "SIGNAL LOST", rgb565(248, 113, 113), rgb565(30, 10, 10));
+                    display_draw_text(30, 130, "Searching...", text_dim, rgb565(30, 10, 10));
                     snprintf(buf, sizeof(buf), "Seen %lus ago", (unsigned long)last_seen_sec);
-                    display_draw_text(30, 132, buf, text_dim, rgb565(30, 10, 10));
+                    display_draw_text(30, 142, buf, text_dim, rgb565(30, 10, 10));
                     snprintf(buf, sizeof(buf), "Last prox: %s", rssi_to_proximity_label(g_app.fox_rssi));
-                    display_draw_text(22, 146, buf, text_dim, bg);
+                    display_draw_text(22, 172, buf, text_dim, bg);
 
-                    int cx = LCD_H_RES / 2, cy = 180;
+                    int cx = LCD_H_RES / 2, cy = 212;
                     display_draw_rect(cx - 20, cy, 40, 2, dim_accent);
                     display_draw_rect(cx, cy - 20, 2, 40, dim_accent);
                 }
