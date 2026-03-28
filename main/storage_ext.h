@@ -21,5 +21,6 @@ storage_status_t storage_ext_get_status(void);
 const char *storage_ext_status_str(storage_status_t status);
 bool storage_ext_status_is_present(storage_status_t status);
 uint32_t storage_ext_log_capacity_kb(void);
+uint32_t storage_ext_free_kb(void);
 esp_err_t storage_ext_append_log(const char *kind, const char *message);
 esp_err_t storage_ext_format(void);

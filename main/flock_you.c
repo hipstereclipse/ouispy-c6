@@ -358,14 +358,12 @@ static void flock_scan_cb(const uint8_t *addr, int8_t rssi,
 /* LCD status update task — Terracotta surveillance aesthetic */
 static void flock_display_task(void *arg)
 {
-    int frame = 0;
     int last_device_count = -1;
     int last_cursor = -1;
     int last_wifi_clients = -1;
     int last_gps_active = -1;
 
     while (g_app.current_mode == MODE_FLOCK_YOU) {
-        frame++;
         uint32_t now_ms = uptime_ms();
         bool gps_tag_active = flock_gps_tag_active(now_ms);
 
@@ -375,10 +373,7 @@ static void flock_display_task(void *arg)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || ((int)gps_tag_active != last_gps_active);
 
-        /* Redraw scanning animation every 4 frames even when idle */
-        bool anim_tick = (frame % 4 == 0);
-
-        if (!dirty && !anim_tick) {
+        if (!dirty) {
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }
@@ -442,9 +437,8 @@ static void flock_display_task(void *arg)
         /* Accent divider line */
         display_draw_hline(4, 78, LCD_H_RES - 8, accent);
 
-        /* Scanning animation */
-        const char *scan_frames[] = {"[ SCANNING ]", "[ SCANNING. ]", "[ SCANNING.. ]", "[ SCANNING...]"};
-        display_draw_text(8, 84, scan_frames[frame % 4], text_dim, bg);
+        /* Scanning indicator intentionally omitted to avoid periodic UI flicker.
+         * Scan activity is conveyed by LED behavior and web interface updates. */
 
         /* Keep UI cursor in range for device list */
         g_app.ui_item_count = g_app.device_count;
@@ -464,7 +458,7 @@ static void flock_display_task(void *arg)
 
             if (selected) {
                 uint16_t sel_bg = rgb565(39, 39, 42);
-                display_draw_rect(4, y_pos, 3, 24, (frame % 2) ? rgb565(63, 63, 70) : indicator);
+                display_draw_rect(4, y_pos, 3, 24, indicator);
                 display_draw_rect(10, y_pos, LCD_H_RES - 16, 24, sel_bg);
 
                 char mac_str[18];

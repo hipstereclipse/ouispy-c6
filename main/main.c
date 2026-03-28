@@ -293,10 +293,21 @@ static void render_mode_select_screen(int cursor)
                                  ? rgb565(52, 211, 153)
                                  : (microsd_status == STORAGE_STATUS_NEEDS_FORMAT ? rgb565(251, 191, 36)
                                                                                    : rgb565(249, 115, 22));
-    const char *microsd_text = microsd_status == STORAGE_STATUS_AVAILABLE
-                                   ? "microSD: Available"
-                                   : (microsd_status == STORAGE_STATUS_NEEDS_FORMAT ? "microSD: Needs format"
-                                                                                    : "microSD: Not found");
+    char microsd_text[40];
+    if (microsd_status == STORAGE_STATUS_AVAILABLE) {
+        uint32_t free_kb = storage_ext_free_kb();
+        if (free_kb >= 1024) {
+            snprintf(microsd_text, sizeof(microsd_text), "microSD: %lu MB free", (unsigned long)((free_kb + 512U) / 1024U));
+        } else if (free_kb > 0) {
+            snprintf(microsd_text, sizeof(microsd_text), "microSD: %lu KB free", (unsigned long)free_kb);
+        } else {
+            snprintf(microsd_text, sizeof(microsd_text), "microSD: Mounted");
+        }
+    } else if (microsd_status == STORAGE_STATUS_NEEDS_FORMAT) {
+        snprintf(microsd_text, sizeof(microsd_text), "microSD: Needs format");
+    } else {
+        snprintf(microsd_text, sizeof(microsd_text), "microSD: Not found");
+    }
     display_draw_text_centered(246, microsd_text, microsd_color, bg);
 
     display_draw_text_centered(258, "Click next   DblClk prev", text_dim, bg);

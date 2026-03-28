@@ -16,6 +16,11 @@ static const char *TAG = "storage_ext";
 static bool s_sd_ready = false;
 static storage_status_t s_sd_status = STORAGE_STATUS_NOT_FOUND;
 static sdmmc_card_t *s_card = NULL;
+static int64_t s_last_probe_us = 0;
+
+#define SD_RUNTIME_PROBE_INTERVAL_US (2000000LL)
+
+static void ensure_log_dir(void);
 
 static void refresh_storage_dependent_limits(void)
 {
@@ -36,6 +41,52 @@ static storage_status_t classify_mount_error(esp_err_t err)
     }
 }
 
+static esp_err_t mount_sd_card(bool format_if_mount_failed, bool log_result)
+{
+    esp_vfs_fat_mount_config_t mount_cfg = {
+        .format_if_mount_failed = format_if_mount_failed,
+        .max_files = 4,
+        .allocation_unit_size = 16 * 1024,
+        .disk_status_check_enable = true,
+        .use_one_fat = false,
+    };
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.slot = SPI2_HOST;
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+
+    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_cfg.host_id = SPI2_HOST;
+    slot_cfg.gpio_cs = PIN_SD_CS;
+    slot_cfg.gpio_cd = SDSPI_SLOT_NO_CD;
+    slot_cfg.gpio_wp = SDSPI_SLOT_NO_WP;
+
+    esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_cfg, &mount_cfg, &s_card);
+    if (err == ESP_OK) {
+        s_sd_ready = true;
+        s_sd_status = STORAGE_STATUS_AVAILABLE;
+        refresh_storage_dependent_limits();
+        ensure_log_dir();
+        if (log_result) {
+            ESP_LOGI(TAG, "microSD mounted");
+        }
+        return ESP_OK;
+    }
+
+    s_sd_ready = false;
+    s_card = NULL;
+    s_sd_status = classify_mount_error(err);
+    refresh_storage_dependent_limits();
+    if (log_result) {
+        if (s_sd_status == STORAGE_STATUS_NEEDS_FORMAT) {
+            ESP_LOGW(TAG, "microSD card detected but mount failed: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGW(TAG, "microSD card not found");
+        }
+    }
+    return err;
+}
+
 static void mark_card_missing(void)
 {
     if (s_card) {
@@ -49,7 +100,13 @@ static void mark_card_missing(void)
 
 static void refresh_card_runtime_status(void)
 {
+    int64_t now_us = esp_timer_get_time();
+
     if (!s_sd_ready || !s_card) {
+        if ((now_us - s_last_probe_us) >= SD_RUNTIME_PROBE_INTERVAL_US) {
+            s_last_probe_us = now_us;
+            mount_sd_card(false, false);
+        }
         return;
     }
 
@@ -77,45 +134,10 @@ void storage_ext_init(void)
     s_sd_ready = false;
     s_sd_status = STORAGE_STATUS_NOT_FOUND;
     s_card = NULL;
+    s_last_probe_us = 0;
     refresh_storage_dependent_limits();
 
-    esp_vfs_fat_mount_config_t mount_cfg = {
-        .format_if_mount_failed = false,
-        .max_files = 4,
-        .allocation_unit_size = 16 * 1024,
-        .disk_status_check_enable = true,
-        .use_one_fat = false,
-    };
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI2_HOST;
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
-
-    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_cfg.host_id = SPI2_HOST;
-    slot_cfg.gpio_cs = PIN_SD_CS;
-    slot_cfg.gpio_cd = SDSPI_SLOT_NO_CD;
-    slot_cfg.gpio_wp = SDSPI_SLOT_NO_WP;
-
-    esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_cfg, &mount_cfg, &s_card);
-    if (err == ESP_OK) {
-        s_sd_ready = true;
-        s_sd_status = STORAGE_STATUS_AVAILABLE;
-        refresh_storage_dependent_limits();
-        ensure_log_dir();
-        ESP_LOGI(TAG, "microSD mounted");
-        return;
-    }
-
-    s_sd_ready = false;
-    s_card = NULL;
-    s_sd_status = classify_mount_error(err);
-    refresh_storage_dependent_limits();
-    if (s_sd_status == STORAGE_STATUS_NEEDS_FORMAT) {
-        ESP_LOGW(TAG, "microSD card detected but mount failed: %s", esp_err_to_name(err));
-    } else {
-        ESP_LOGW(TAG, "microSD card not found");
-    }
+    mount_sd_card(false, true);
 }
 
 bool storage_ext_is_available(void)
@@ -157,6 +179,22 @@ uint32_t storage_ext_log_capacity_kb(void)
     return 768;
 }
 
+uint32_t storage_ext_free_kb(void)
+{
+    refresh_card_runtime_status();
+    if (!s_sd_ready) {
+        return 0;
+    }
+
+    uint64_t total_bytes = 0;
+    uint64_t free_bytes = 0;
+    if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
+        return 0;
+    }
+
+    return (uint32_t)((uint64_t)free_bytes / 1024ULL);
+}
+
 esp_err_t storage_ext_append_log(const char *kind, const char *message)
 {
     if (!kind || !message) return ESP_ERR_INVALID_ARG;
@@ -190,39 +228,13 @@ esp_err_t storage_ext_format(void)
 
     ESP_LOGI(TAG, "Starting microSD format...");
 
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI2_HOST;
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
-
-    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_cfg.host_id = SPI2_HOST;
-    slot_cfg.gpio_cs = PIN_SD_CS;
-    slot_cfg.gpio_cd = SDSPI_SLOT_NO_CD;
-    slot_cfg.gpio_wp = SDSPI_SLOT_NO_WP;
-
     /* Format with automatic mount on success */
-    esp_vfs_fat_mount_config_t mount_cfg = {
-        .format_if_mount_failed = true,  /* Format if FAT mount fails */
-        .max_files = 4,
-        .allocation_unit_size = 16 * 1024,
-        .disk_status_check_enable = true,
-        .use_one_fat = false,
-    };
-
-    esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_cfg, &mount_cfg, &s_card);
+    esp_err_t err = mount_sd_card(true, false);
     if (err == ESP_OK) {
-        s_sd_ready = true;
-        s_sd_status = STORAGE_STATUS_AVAILABLE;
-        refresh_storage_dependent_limits();
-        ensure_log_dir();
         ESP_LOGI(TAG, "microSD formatted and mounted successfully");
         return ESP_OK;
     }
 
-    s_sd_ready = false;
-    s_card = NULL;
-    s_sd_status = classify_mount_error(err);
-    refresh_storage_dependent_limits();
     ESP_LOGE(TAG, "microSD format failed: %s", esp_err_to_name(err));
     return err;
 }
