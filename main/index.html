@@ -414,29 +414,48 @@ function gpsSecureAvailable(caps) {
 async function computeGpsClientReady() {
   const caps = gpsCaps();
   if (!gpsToggleEnabled || !caps.supported || !caps.secure) return false;
-  if (!ws || ws.readyState !== 1) return false;
 
+  // On Safari/iPhone, Permissions API may not support geolocation query.
+  // Use a real getCurrentPosition probe as the definitive check.
   if (navigator.permissions && navigator.permissions.query) {
     try {
       const perm = await navigator.permissions.query({name:'geolocation'});
       if (perm.state === 'denied') return false;
       return true;
     } catch (e) {
-      return true;
+      // Safari throws for geolocation query — fall through to probe
     }
   }
 
-  return true;
+  // Probe actual geolocation to detect permission (triggers prompt on first use)
+  try {
+    await new Promise((res, rej) => {
+      navigator.geolocation.getCurrentPosition(res, rej, {timeout:3000, maximumAge:60000});
+    });
+    return true;
+  } catch (e) {
+    // PERMISSION_DENIED = 1
+    if (e && e.code === 1) return false;
+    // Timeout or position unavailable — permission wasn't denied, just slow
+    return true;
+  }
 }
 
 async function pushGpsClientStatus(force) {
   const ready = await computeGpsClientReady();
+  const changed = (gpsClientReady !== ready);
   gpsClientReady = ready;
 
+  // Re-render GPS UI whenever readiness changes
+  if (changed) {
+    renderGpsStatus();
+    renderGpsToggleBlock();
+  }
+
   const now = Date.now();
-  const changed = (gpsReadyLastSent !== ready);
+  const sendChanged = (gpsReadyLastSent !== ready);
   const stale = (now - gpsReadyLastPushMs) > 4000;
-  if (!force && !changed && !stale) return;
+  if (!force && !sendChanged && !stale) return;
   if (gpsReadyPushInFlight) return;
 
   gpsReadyPushInFlight = true;
@@ -557,7 +576,7 @@ function renderGpsStatus() {
     return;
   }
   if (!gpsClientReady) {
-    el.innerHTML = '<span class="gps-chip bad">GPS waiting</span> Phone is connected but not currently allowed to transmit GPS (check location permission).';
+    el.innerHTML = '<span class="gps-chip bad">GPS waiting</span> Waiting for location access. If prompted, tap Allow to share GPS with the device.';
     return;
   }
   el.innerHTML = '<span class="gps-chip">GPS ready</span> Phone is connected and allowed to transmit GPS to the device.';
