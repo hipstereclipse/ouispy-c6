@@ -249,11 +249,6 @@ static void render_mode_select_screen(int cursor)
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y + 30, LCD_H_RES, 2, gold);
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 7, "OUI-SPY C6", gold, purple_dim);
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "MAIN MENU", rgb565(216, 180, 254), purple_dim);
-    display_draw_text(120, DISPLAY_STATUS_BAR_Y + 7, "GPS", text_dim, purple_dim);
-    display_draw_text(140, DISPLAY_STATUS_BAR_Y + 7,
-                      gps_tag_active ? "ON" : "OFF",
-                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                      purple_dim);
 
     display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, card_bg);
     display_draw_text(14, 53, "WiFi:", text_dim, card_bg);
@@ -299,7 +294,11 @@ static void render_mode_select_screen(int cursor)
                                                                                     : "microSD: Not found");
     display_draw_text_centered(240, microsd_text, microsd_color, bg);
 
-    display_draw_hline(14, 252, LCD_H_RES - 28, purple_dim);
+    display_draw_rect(14, 250, LCD_H_RES - 28, 10, purple_dim);
+    display_draw_text_centered(252,
+                               gps_tag_active ? "GPS TAG: ON" : "GPS TAG: OFF",
+                               gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                               purple_dim);
     display_draw_text_centered(262, "Click next   DblClk prev", text_dim, bg);
     display_draw_text_centered(274, "Hold select  Hold 5s reset", text_dim, bg);
 }

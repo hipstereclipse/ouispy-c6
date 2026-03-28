@@ -576,10 +576,6 @@ static void fox_beep_task(void *arg)
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
             display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
             display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FOX HUNTER", text_main, dim_accent);
-            display_draw_text(120, DISPLAY_STATUS_TEXT_Y,
-                              gps_tag_active ? "GPS ON" : "GPS OFF",
-                              gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                              dim_accent);
             display_draw_text_centered(DISPLAY_STATUS_SUB_Y,
                                        target_header[0] ? target_header : ap_ssid,
                                        rgb565(228, 228, 231), dim_accent);
@@ -881,6 +877,12 @@ static void fox_beep_task(void *arg)
                 /* Clear full label lane so shorter text never leaves stale pixels behind. */
                 display_draw_rect(4, DISPLAY_FOOTER_BAR_Y - 12, 96, 10, bg);
                 display_draw_text(4, DISPLAY_FOOTER_BAR_Y - 12, mode_label, mode_col, bg);
+
+                display_draw_rect(102, DISPLAY_FOOTER_BAR_Y - 12, 66, 10, bg);
+                display_draw_text(104, DISPLAY_FOOTER_BAR_Y - 12,
+                                  gps_tag_active ? "GPS ON" : "GPS OFF",
+                                  gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                                  bg);
             }
 
             /* Bottom bar with WiFi info */

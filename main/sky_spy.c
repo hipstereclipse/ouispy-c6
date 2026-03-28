@@ -349,10 +349,6 @@ static void sky_display_task(void *arg)
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, rgb565(0, 12, 0));
             display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, phos_mid);
             display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", phosphor, rgb565(0, 12, 0));
-            display_draw_text(118, DISPLAY_STATUS_TEXT_Y,
-                              gps_tag_active ? "GPS ON" : "GPS OFF",
-                              gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                              rgb565(0, 12, 0));
             display_draw_text_centered(DISPLAY_STATUS_SUB_Y, ap_ssid, phos_mid, rgb565(0, 12, 0));
         }
 
@@ -510,6 +506,11 @@ static void sky_display_task(void *arg)
             /* Footer — WiFi info */
             display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
             display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
+            display_draw_rect(0, DISPLAY_FOOTER_BAR_Y - 12, LCD_H_RES, 10, bg);
+            display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 10,
+                                       gps_tag_active ? "GPS TAG: ON" : "GPS TAG: OFF",
+                                       gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                                       bg);
             snprintf(buf, sizeof(buf), "%s  %dCli  %lukB",
                      ap_pass,
                      g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
