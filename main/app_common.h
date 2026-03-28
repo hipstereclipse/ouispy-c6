@@ -138,6 +138,7 @@ typedef struct {
     int8_t          fox_rssi_best;
     bool            fox_target_found;
     uint32_t        fox_last_seen;
+    uint8_t         fox_led_mode;      /* 0=Detector, 1=Sting */
 
     /* Sky Spy drone list */
     drone_info_t    drones[MAX_DRONES];
@@ -174,6 +175,11 @@ void     mac_to_str(const uint8_t mac[6], char *buf, size_t buf_len);
 bool     mac_equal(const uint8_t a[6], const uint8_t b[6]);
 int      mac_from_str(const char *str, uint8_t mac[6]);
 uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b);
+
+/* Compile-time RGB565 with byte-swap for static const initializers */
+#define RGB565_CONST(r, g, b) ((uint16_t)(                    \
+    (((r) & 0xF8) | (((g) >> 5) & 0x07)) |                    \
+    (((((g) & 0x1C) << 3) | (((b) >> 3) & 0x1F)) << 8)))
 
 #ifdef __cplusplus
 }

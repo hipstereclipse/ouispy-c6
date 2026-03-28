@@ -65,6 +65,7 @@ static char *build_state_json(void)
     cJSON_AddNumberToObject(fox, "rssi", g_app.fox_rssi);
     cJSON_AddNumberToObject(fox, "bestRssi", g_app.fox_rssi_best);
     cJSON_AddBoolToObject(fox, "found", g_app.fox_target_found);
+    cJSON_AddNumberToObject(fox, "ledMode", g_app.fox_led_mode);
 
     char *str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -217,6 +218,15 @@ static esp_err_t post_fox_target(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t post_fox_ledmode(httpd_req_t *req)
+{
+    g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
+    char resp[32];
+    snprintf(resp, sizeof(resp), "{\"ledMode\":%d}", g_app.fox_led_mode);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, resp);
+}
+
 static esp_err_t post_settings(httpd_req_t *req)
 {
     char buf[128];
@@ -367,6 +377,9 @@ void web_server_start(void)
 
     httpd_uri_t uri_fox = { .uri="/api/fox/target", .method=HTTP_POST, .handler=post_fox_target };
     httpd_register_uri_handler(g_app.http_server, &uri_fox);
+
+    httpd_uri_t uri_fox_led = { .uri="/api/fox/ledmode", .method=HTTP_POST, .handler=post_fox_ledmode };
+    httpd_register_uri_handler(g_app.http_server, &uri_fox_led);
 
     httpd_uri_t uri_settings = { .uri="/api/settings", .method=HTTP_POST, .handler=post_settings };
     httpd_register_uri_handler(g_app.http_server, &uri_settings);

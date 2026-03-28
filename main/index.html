@@ -7,111 +7,112 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0a0a14;--card:#12132a;--border:#1e2040;
-  --text:#e0e0f0;--dim:#707090;--accent:#6c63ff;
-  --red:#ff4060;--green:#00e676;--orange:#ff9100;--blue:#40c4ff;
-  --cyan:#00e5ff;
+  --bg:#09090b;--card:#18181b;--card2:#27272a;--border:#3f3f46;
+  --text:#fafafa;--dim:#a1a1aa;--accent:#818cf8;
+  --rose:#fb7185;--green:#4ade80;--amber:#fbbf24;--sky:#38bdf8;
+  --cyan:#22d3ee;--flock:#f87171;--fox:#fb923c;--skyblue:#38bdf8;
 }
-body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;
-  font-size:14px;min-height:100vh;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,'Inter','Segoe UI',system-ui,sans-serif;
+  font-size:14px;min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 a{color:var(--accent);text-decoration:none}
+a:hover{color:#a5b4fc}
 
 /* Header */
 .hdr{border-bottom:1px solid var(--border);
-  padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;
-  transition:background .5s}
-.hdr.mode-flock{background:linear-gradient(135deg,#2a1018,#1a0810)}
-.hdr.mode-fox{background:linear-gradient(135deg,#2a1a08,#1a1005)}
-.hdr.mode-sky{background:linear-gradient(135deg,#081a2a,#050e1a)}
-.hdr.mode-settings,.hdr.mode-select{background:linear-gradient(135deg,#1a1b3a,#0d0e28)}
-.hdr h1{font-size:18px;font-weight:700;letter-spacing:1px}
+  padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;
+  transition:background .4s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.hdr.mode-flock{background:rgba(248,113,113,.05)}
+.hdr.mode-fox{background:rgba(251,146,60,.05)}
+.hdr.mode-sky{background:rgba(56,189,248,.05)}
+.hdr.mode-settings,.hdr.mode-select{background:rgba(129,140,248,.05)}
+.hdr h1{font-size:17px;font-weight:700;letter-spacing:.5px}
 .hdr h1 span{color:var(--accent)}
 .hdr .status{display:flex;gap:10px;font-size:11px;color:var(--dim)}
-.hdr .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
-.dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
-.dot.off{background:var(--red)}
+.hdr .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
+.dot.on{background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.5)}
+.dot.off{background:var(--rose);opacity:.7}
 
 /* Mode tabs */
-.tabs{display:flex;gap:2px;padding:8px 12px;background:#0e0f22}
-.tab{flex:1;padding:10px 6px;text-align:center;border-radius:8px;cursor:pointer;
-  font-weight:600;font-size:12px;transition:all .2s;border:1px solid transparent;
-  text-transform:uppercase;letter-spacing:.5px}
-.tab:hover{border-color:var(--border);background:#181938}
-.tab.active{border-color:var(--accent);background:rgba(108,99,255,.15);color:var(--accent)}
-.tab.t-flock{--tc:var(--red)}.tab.t-flock.active{border-color:var(--red);color:var(--red);background:rgba(255,64,96,.1)}
-.tab.t-fox{--tc:var(--orange)}.tab.t-fox.active{border-color:var(--orange);color:var(--orange);background:rgba(255,145,0,.1)}
-.tab.t-sky{--tc:var(--blue)}.tab.t-sky.active{border-color:var(--blue);color:var(--blue);background:rgba(64,196,255,.1)}
+.tabs{display:flex;gap:4px;padding:8px 12px;background:rgba(17,17,19,.9)}
+.tab{flex:1;padding:10px 6px;text-align:center;border-radius:10px;cursor:pointer;
+  font-weight:600;font-size:11px;transition:all .2s;border:1px solid transparent;
+  text-transform:uppercase;letter-spacing:.8px;color:var(--dim)}
+.tab:hover{background:var(--card);color:var(--text)}
+.tab.active{border-color:var(--accent);background:rgba(129,140,248,.1);color:var(--accent)}
+.tab.t-flock.active{border-color:var(--flock);color:var(--flock);background:rgba(248,113,113,.08)}
+.tab.t-fox.active{border-color:var(--fox);color:var(--fox);background:rgba(251,146,60,.08)}
+.tab.t-sky.active{border-color:var(--skyblue);color:var(--skyblue);background:rgba(56,189,248,.08)}
 
 /* Content area */
-.content{padding:12px;transition:background .5s}
-.content.mode-flock{background:linear-gradient(180deg,rgba(255,40,60,.04),transparent 40%)}
-.content.mode-fox{background:linear-gradient(180deg,rgba(255,145,0,.04),transparent 40%)}
-.content.mode-sky{background:linear-gradient(180deg,rgba(64,196,255,.04),transparent 40%)}
-.content.mode-settings{background:linear-gradient(180deg,rgba(108,99,255,.04),transparent 40%)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:10px;
-  padding:14px;margin-bottom:10px}
-.card h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);margin-bottom:10px}
+.content{padding:12px;transition:background .4s}
+.content.mode-flock{background:linear-gradient(180deg,rgba(248,113,113,.03),transparent 50%)}
+.content.mode-fox{background:linear-gradient(180deg,rgba(251,146,60,.03),transparent 50%)}
+.content.mode-sky{background:linear-gradient(180deg,rgba(56,189,248,.03),transparent 50%)}
+.content.mode-settings{background:linear-gradient(180deg,rgba(129,140,248,.03),transparent 50%)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:16px;margin-bottom:10px}
+.card h2{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:12px;font-weight:600}
 
 /* Stats row */
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.stat{text-align:center;padding:10px 6px;background:#0d0e24;border-radius:8px;border:1px solid var(--border)}
+.stat{text-align:center;padding:12px 6px;background:var(--card2);border-radius:10px;border:1px solid var(--border)}
 .stat .val{font-size:24px;font-weight:700;line-height:1.2}
-.stat .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+.stat .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
 .stat.highlight .val{color:var(--accent)}
 
 /* Mode-specific card accents */
-.mode-flock .card{border-left:3px solid var(--red)}
-.mode-flock .stat.highlight .val{color:var(--red)}
-.mode-flock .card h2{color:var(--red)}
-.mode-fox .card{border-left:3px solid var(--orange)}
-.mode-fox .stat.highlight .val{color:var(--orange)}
-.mode-fox .card h2{color:var(--orange)}
-.mode-sky .card{border-left:3px solid var(--blue)}
-.mode-sky .stat.highlight .val{color:var(--blue)}
-.mode-sky .card h2{color:var(--blue)}
+.mode-flock .card{border-left:3px solid var(--flock)}
+.mode-flock .stat.highlight .val{color:var(--flock)}
+.mode-flock .card h2{color:var(--flock)}
+.mode-fox .card{border-left:3px solid var(--fox)}
+.mode-fox .stat.highlight .val{color:var(--fox)}
+.mode-fox .card h2{color:var(--fox)}
+.mode-sky .card{border-left:3px solid var(--skyblue)}
+.mode-sky .stat.highlight .val{color:var(--skyblue)}
+.mode-sky .card h2{color:var(--skyblue)}
 .mode-settings .card{border-left:3px solid var(--accent)}
 .mode-settings .card h2{color:var(--accent)}
 
 /* Device list */
 .dev-list{max-height:50vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-.dev-item{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid var(--border);
-  cursor:pointer;transition:background .15s}
-.dev-item:hover{background:rgba(108,99,255,.06)}
+.dev-item{display:flex;align-items:center;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .15s;border-radius:6px;margin:2px 0}
+.dev-item:hover{background:rgba(129,140,248,.06)}
 .dev-item:last-child{border-bottom:none}
-.dev-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;
+.dev-icon{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;
   justify-content:center;font-size:16px;flex-shrink:0}
-.dev-icon.flock{background:rgba(255,64,96,.15);color:var(--red)}
-.dev-icon.raven{background:rgba(255,145,0,.15);color:var(--orange)}
-.dev-icon.drone{background:rgba(64,196,255,.15);color:var(--blue)}
-.dev-icon.dji{background:rgba(255,145,0,.15);color:var(--orange)}
+.dev-icon.flock{background:rgba(248,113,113,.12);color:var(--flock)}
+.dev-icon.raven{background:rgba(251,146,60,.12);color:var(--fox)}
+.dev-icon.drone{background:rgba(56,189,248,.12);color:var(--skyblue)}
+.dev-icon.dji{background:rgba(251,146,60,.12);color:var(--fox)}
 .dev-info{flex:1;min-width:0}
-.dev-mac{font-family:'Consolas','Courier New',monospace;font-size:12px;font-weight:600}
+.dev-mac{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:12px;font-weight:600}
 .dev-name{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dev-rssi{text-align:right;font-weight:700;font-size:13px}
-.dev-rssi.strong{color:var(--green)}.dev-rssi.medium{color:var(--orange)}.dev-rssi.weak{color:var(--red)}
+.dev-rssi.strong{color:var(--green)}.dev-rssi.medium{color:var(--amber)}.dev-rssi.weak{color:var(--rose)}
 .dev-actions{display:flex;gap:4px}
 
 /* Buttons */
-.btn{padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:var(--card);
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:10px;background:var(--card);
   color:var(--text);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;
   text-transform:uppercase;letter-spacing:.5px}
-.btn:hover{border-color:var(--accent);background:rgba(108,99,255,.12)}
+.btn:hover{border-color:var(--accent);background:rgba(129,140,248,.1)}
 .btn:active{transform:scale(.97)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn.primary:hover{background:#5a52e0}
-.btn.danger{border-color:var(--red);color:var(--red)}
-.btn.danger:hover{background:rgba(255,64,96,.12)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#111}
+.btn.primary:hover{background:#a5b4fc}
+.btn.danger{border-color:var(--rose);color:var(--rose)}
+.btn.danger:hover{background:rgba(240,113,139,.1)}
 .btn.sm{padding:5px 10px;font-size:11px}
 
 /* Proximity bar */
-.prox-wrap{position:relative;height:28px;background:#0d0e24;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
-.prox-bar{height:100%;transition:width .3s,background .3s;border-radius:8px}
+.prox-wrap{position:relative;height:28px;background:var(--card2);border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.prox-bar{height:100%;transition:width .3s,background .3s;border-radius:10px}
 .prox-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  font-weight:700;font-size:13px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+  font-weight:700;font-size:13px;text-shadow:0 1px 4px rgba(0,0,0,.6)}
 
 /* Fox hunter proximity */
 .fox-target{text-align:center;padding:20px 0}
-.fox-target .mac{font-family:monospace;font-size:20px;font-weight:700;color:var(--orange);margin:8px 0}
+.fox-target .mac{font-family:monospace;font-size:18px;font-weight:700;color:var(--fox);margin:8px 0;letter-spacing:.5px}
 .fox-target .rssi-big{font-size:48px;font-weight:800;line-height:1}
 .fox-target .unit{font-size:14px;color:var(--dim)}
 .fox-target .best{font-size:12px;color:var(--dim);margin-top:4px}
@@ -119,58 +120,66 @@ a{color:var(--accent);text-decoration:none}
 .fox-signal .bar{width:6px;border-radius:3px;transition:height .3s,background .3s}
 
 /* Drone cards */
-.drone-card{background:#0d0e24;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px}
+.drone-card{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:8px}
 .drone-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.drone-proto{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;text-transform:uppercase}
-.drone-proto.wifi{background:rgba(64,196,255,.15);color:var(--blue)}
-.drone-proto.ble{background:rgba(0,229,255,.15);color:var(--cyan)}
-.drone-proto.dji{background:rgba(255,145,0,.15);color:var(--orange)}
+.drone-proto{font-size:10px;padding:3px 10px;border-radius:6px;font-weight:700;text-transform:uppercase}
+.drone-proto.wifi{background:rgba(56,189,248,.12);color:var(--skyblue)}
+.drone-proto.ble{background:rgba(34,211,238,.12);color:var(--cyan)}
+.drone-proto.dji{background:rgba(251,146,60,.12);color:var(--fox)}
 .drone-fields{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12px}
 .drone-fields dt{color:var(--dim)}.drone-fields dd{font-weight:600}
 
 /* Radar animation */
 .radar{width:120px;height:120px;margin:20px auto;position:relative}
 .radar-bg{width:100%;height:100%;border-radius:50%;border:1px solid var(--border);
-  background:radial-gradient(circle,rgba(64,196,255,.05),transparent)}
+  background:radial-gradient(circle,rgba(56,189,248,.06),transparent)}
 .radar-sweep{position:absolute;inset:0;border-radius:50%;
-  background:conic-gradient(from 0deg,transparent 0deg,rgba(64,196,255,.2) 30deg,transparent 60deg);
+  background:conic-gradient(from 0deg,transparent 0deg,rgba(56,189,248,.18) 30deg,transparent 60deg);
   animation:sweep 3s linear infinite}
-.radar-dot{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--red);
-  box-shadow:0 0 8px var(--red);top:50%;left:50%;transform:translate(-50%,-50%)}
+.radar-dot{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--flock);
+  box-shadow:0 0 8px rgba(248,113,113,.6);top:50%;left:50%;transform:translate(-50%,-50%)}
 @keyframes sweep{to{transform:rotate(360deg)}}
 
 /* Settings panel */
 .settings{display:grid;gap:10px}
-.setting-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
 .setting-row:last-child{border-bottom:none}
 .setting-row label{font-size:13px}
 .toggle{position:relative;width:42px;height:24px;cursor:pointer}
 .toggle input{display:none}
-.toggle .slider{position:absolute;inset:0;background:#333;border-radius:12px;transition:background .2s}
+.toggle .slider{position:absolute;inset:0;background:#3f3f46;border-radius:12px;transition:background .2s}
 .toggle .slider:before{content:'';position:absolute;width:18px;height:18px;left:3px;bottom:3px;
   background:#fff;border-radius:50%;transition:transform .2s}
 .toggle input:checked+.slider{background:var(--accent)}
 .toggle input:checked+.slider:before{transform:translateX(18px)}
 input[type=range]{width:100%;accent-color:var(--accent)}
-.input-mac{background:#0d0e24;border:1px solid var(--border);border-radius:6px;padding:8px 12px;
-  color:var(--text);font-family:monospace;font-size:14px;width:100%;outline:none}
-.input-mac:focus{border-color:var(--accent)}
+.input-mac{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;
+  color:var(--text);font-family:monospace;font-size:14px;width:100%;outline:none;transition:border-color .2s}
+.input-mac:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(129,140,248,.1)}
 
 /* Footer */
 .ftr{text-align:center;padding:16px;font-size:11px;color:var(--dim);border-top:1px solid var(--border)}
 
 /* Toast notifications */
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--accent);
-  color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;
-  box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:200;opacity:0;transition:opacity .3s}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--card);
+  color:var(--text);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;
+  box-shadow:0 4px 24px rgba(0,0,0,.4);border:1px solid var(--accent);z-index:200;opacity:0;transition:opacity .3s}
 .toast.show{opacity:1}
 
 /* No data state */
 .empty{text-align:center;padding:30px 20px;color:var(--dim)}
-.empty .icon{font-size:36px;margin-bottom:8px}
+.empty .icon{font-size:36px;margin-bottom:8px;opacity:.7}
+
+/* WiFi info bar */
+.wifi-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;margin:0 12px 8px;border-radius:10px;
+  background:var(--card);border:1px solid var(--border);font-size:11px;color:var(--dim)}
+.wifi-bar .wifi-icon{font-size:15px;flex-shrink:0}
+.wifi-bar .wifi-detail{display:flex;flex-wrap:wrap;gap:4px 14px;flex:1}
+.wifi-bar .wifi-lbl{font-weight:700;color:var(--text);letter-spacing:.3px}
+.wifi-bar code{font-family:'SF Mono','Consolas','Courier New',monospace;color:var(--accent);font-size:11px}
 
 /* Animations */
-@keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .card{animation:fadein .3s ease}
 
 /* Mobile optimizations */
@@ -199,6 +208,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   <div class="tab" data-mode="0" onclick="setMode(0)">&#9881;</div>
 </div>
 
+<div id="wifiBar"></div>
 <div class="content" id="main">
   <!-- Dynamic content injected by JS -->
 </div>
@@ -248,13 +258,35 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
+// ── WiFi info per mode ──
+const WIFI_CFG = [
+  {ssid:'ouispy-c6',   pass:'ouispy123'},
+  {ssid:'flockyou-c6', pass:'flockyou123'},
+  {ssid:'foxhunt-c6',  pass:'foxhunt123'},
+  {ssid:'skyspy-c6',   pass:'skyspy1234'}
+];
+function wifiInfoHtml() {
+  const w = WIFI_CFG[state.mode] || WIFI_CFG[0];
+  return `<div class="wifi-bar">
+    <span class="wifi-icon">&#128246;</span>
+    <div class="wifi-detail">
+      <span><span class="wifi-lbl">SSID:</span> <code>${w.ssid}</code></span>
+      <span><span class="wifi-lbl">Pass:</span> <code>${w.pass}</code></span>
+      <span><span class="wifi-lbl">IP:</span> <code>192.168.4.1</code></span>
+      <span><span class="wifi-lbl">Clients:</span> <code>${state.clients||0}</code></span>
+    </div>
+  </div>`;
+}
+
 // ── RSSI helpers ──
 function rssiClass(r) { return r > -55 ? 'strong' : r > -75 ? 'medium' : 'weak'; }
 function rssiColor(r) {
   const t = Math.min(1, Math.max(0, (r + 100) / 80));
-  const red = Math.round(255 * (1 - t));
-  const grn = Math.round(255 * t);
-  return `rgb(${red},${grn},0)`;
+  /* rose → amber → green gradient */
+  const red = Math.round(251 - t * 177);
+  const grn = Math.round(113 + t * 109);
+  const blu = Math.round(113 * (1 - t) + 128 * t);
+  return `rgb(${red},${grn},${blu})`;
 }
 function rssiPct(r) { return Math.min(100, Math.max(0, (r + 100) * 100 / 80)); }
 function fmtTime(s) { const m = Math.floor(s/60), h = Math.floor(m/60); return h > 0 ? h+'h '+m%60+'m' : m+'m '+s%60+'s'; }
@@ -289,6 +321,8 @@ function updateUI() {
     else if (m === 2) updateFoxLive();
     else if (m === 3) updateSkyLive();
   }
+  // Always refresh WiFi bar (clients count is dynamic)
+  $('#wifiBar').innerHTML = wifiInfoHtml();
 }
 
 // ── Flock You View ──
@@ -300,14 +334,14 @@ function renderFlock() {
       <h2>Surveillance Hardware Scanner</h2>
       <div class="stats">
         <div class="stat highlight"><div class="val" id="fDevCount">${state.deviceCount||0}</div><div class="lbl">Detected</div></div>
-        <div class="stat"><div class="val" id="fFlockCount" style="color:var(--red)">--</div><div class="lbl">Flock</div></div>
-        <div class="stat"><div class="val" id="fRavenCount" style="color:var(--orange)">--</div><div class="lbl">Raven</div></div>
+        <div class="stat"><div class="val" id="fFlockCount" style="color:var(--flock)">--</div><div class="lbl">Flock</div></div>
+        <div class="stat"><div class="val" id="fRavenCount" style="color:var(--fox)">--</div><div class="lbl">Raven</div></div>
       </div>
     </div>
     <div class="card">
       <h2>Detected Devices</h2>
       <div style="display:flex;gap:6px;margin-bottom:10px">
-        <button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="fetchDevices().then(()=>renderDevList())">Refresh</button>
+        <button class="btn sm" style="border-color:var(--flock);color:var(--flock)" onclick="fetchDevices().then(()=>renderDevList())">Refresh</button>
         <a class="btn sm" href="/api/export/csv" target="_blank">Export CSV</a>
       </div>
       <div id="devList" class="dev-list"></div>
@@ -365,27 +399,34 @@ function renderFox() {
       <h2>Proximity Tracker</h2>
       <div class="fox-target" id="foxTarget">
         ${f.hasTarget ? `
-          <div style="font-size:10px;color:var(--orange);letter-spacing:2px;text-transform:uppercase;font-weight:700">&#9678; TARGET LOCKED</div>
+          <div style="font-size:10px;color:var(--fox);letter-spacing:2px;text-transform:uppercase;font-weight:700">&#9678; TARGET LOCKED</div>
           <div class="mac" id="foxMac">${f.target}</div>
           <div class="rssi-big" id="foxRssi" style="color:${rssiColor(f.rssi)}">${f.found ? f.rssi : '--'}</div>
           <div class="unit">dBm</div>
           <div class="best" id="foxBest">Best: ${f.bestRssi} dBm</div>
           <div class="fox-signal" id="foxBars"></div>
-          <div class="prox-wrap" style="margin-top:12px;border-color:var(--orange)">
+          <div class="prox-wrap" style="margin-top:12px;border-color:var(--fox)">
             <div class="prox-bar" id="foxBar" style="width:${rssiPct(f.rssi)}%;background:${rssiColor(f.rssi)}"></div>
             <div class="prox-label" id="foxPct">${Math.round(rssiPct(f.rssi))}%</div>
           </div>
-          <div style="margin-top:12px;font-size:13px;font-weight:700;letter-spacing:1px;color:${f.found?'var(--green)':'var(--red)'}">${f.found?'&#9679; TRACKING':'&#9675; SIGNAL LOST'}</div>
+          <div style="margin-top:12px;font-size:13px;font-weight:700;letter-spacing:1px;color:${f.found?'var(--green)':'var(--rose)'}">${f.found?'&#9679; TRACKING':'&#9675; SIGNAL LOST'}</div>
         ` : `
-          <div class="empty"><div class="icon" style="color:var(--orange)">&#9678;</div>No target selected<br><small style="color:var(--orange)">Use Flock You to find devices, or enter MAC below</small></div>
+          <div class="empty"><div class="icon" style="color:var(--fox)">&#9678;</div>No target selected<br><small style="color:var(--fox)">Use Flock You to find devices, or enter MAC below</small></div>
         `}
       </div>
     </div>
     <div class="card">
+      <h2>LED Mode</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn" id="foxLedBtn" onclick="toggleFoxLed()" style="flex:1;font-weight:700;letter-spacing:1px;padding:10px 0;border-radius:8px;border:2px solid ${f.ledMode?'var(--skyblue)':'var(--green)'};color:${f.ledMode?'var(--skyblue)':'var(--green)'};background:${f.ledMode?'rgba(56,189,248,.08)':'rgba(74,222,128,.08)'}">${f.ledMode?'&#9889; STING':'&#9673; DETECTOR'}</button>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:var(--dim)">${f.ledMode?'Blue LED brightness = signal strength':'Green LED → blinking red when detected (faster = closer)'}</div>
+    </div>
+    <div class="card">
       <h2>Set Target</h2>
       <div style="display:flex;gap:8px">
-        <input type="text" class="input-mac" id="macInput" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" style="border-color:rgba(255,145,0,.3)">
-        <button class="btn primary" style="background:var(--orange);border-color:var(--orange)" onclick="setFoxTarget()">Lock</button>
+        <input type="text" class="input-mac" id="macInput" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" style="border-color:rgba(251,146,60,.3)">
+        <button class="btn primary" style="background:var(--fox);border-color:var(--fox)" onclick="setFoxTarget()">Lock</button>
       </div>
       ${devices.length ? `<div style="margin-top:10px"><h2>From Flock You (${devices.length})</h2>
         <div class="dev-list" style="max-height:30vh">${devices.map((d,i) => `
@@ -405,7 +446,7 @@ function renderFoxBars(rssi) {
   for(let i = 0; i < 20; i++) {
     const active = (i / 20 * 100) < pct;
     const h = 10 + i * 1.5;
-    html += `<div class="bar" style="height:${h}px;background:${active ? rssiColor(rssi) : '#222'}"></div>`;
+    html += `<div class="bar" style="height:${h}px;background:${active ? rssiColor(rssi) : '#27272a'}"></div>`;
   }
   el.innerHTML = html;
 }
@@ -416,6 +457,9 @@ function updateFoxLive() {
   const bar = $('#foxBar'); if(bar) { bar.style.width = rssiPct(f.rssi) + '%'; bar.style.background = rssiColor(f.rssi); }
   const pct = $('#foxPct'); if(pct) pct.textContent = Math.round(rssiPct(f.rssi)) + '%';
   renderFoxBars(f.rssi || -100);
+}
+function toggleFoxLed() {
+  api('/api/fox/ledmode',{}).then(()=>{ setTimeout(poll,200); });
 }
 function setFoxTarget() {
   const mac = ($('#macInput') || {}).value;
@@ -430,21 +474,21 @@ function renderSky() {
     <div class="card">
       <h2>Drone Detection Radar</h2>
       <div class="stats">
-        <div class="stat highlight"><div class="val" id="sDroneCount" style="color:var(--blue)">${state.droneCount||0}</div><div class="lbl">Drones</div></div>
+        <div class="stat highlight"><div class="val" id="sDroneCount" style="color:var(--skyblue)">${state.droneCount||0}</div><div class="lbl">Drones</div></div>
         <div class="stat"><div class="val" id="sWifiCount" style="color:var(--cyan)">--</div><div class="lbl">WiFi RID</div></div>
-        <div class="stat"><div class="val" id="sBleCount" style="color:var(--blue)">--</div><div class="lbl">BLE RID</div></div>
+        <div class="stat"><div class="val" id="sBleCount" style="color:var(--skyblue)">--</div><div class="lbl">BLE RID</div></div>
       </div>
       ${state.droneCount === 0 ? `
         <div class="radar"><div class="radar-bg"></div><div class="radar-sweep"></div><div class="radar-dot"></div></div>
         <div class="empty" style="padding:10px;color:var(--blue)"><div>Scanning WiFi ch6 + BLE...</div>
         <div style="margin-top:6px;display:flex;gap:12px;justify-content:center;font-size:11px">
           <span style="color:var(--cyan)">&#9679; WiFi Active</span>
-          <span style="color:var(--blue)">&#9679; BLE Active</span>
+          <span style="color:var(--skyblue)">&#9679; BLE Active</span>
         </div></div>
       ` : ''}
     </div>
     <div id="droneList"></div>
-    ${state.droneCount > 0 ? '<div class="card"><button class="btn sm" style="border-color:var(--blue);color:var(--blue)" onclick="fetchDrones().then(()=>renderDroneCards())">Refresh Details</button></div>' : ''}
+    ${state.droneCount > 0 ? '<div class="card"><button class="btn sm" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="fetchDrones().then(()=>renderDroneCards())">Refresh Details</button></div>' : ''}
   `;
   renderDroneCards();
 }
@@ -516,9 +560,9 @@ function renderSettings() {
     <div class="card">
       <h2>Quick Actions</h2>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
-        <button class="btn" style="border-color:var(--red);color:var(--red)" onclick="setMode(1)">Start Flock You</button>
-        <button class="btn" style="border-color:var(--orange);color:var(--orange)" onclick="setMode(2)">Start Fox Hunter</button>
-        <button class="btn" style="border-color:var(--blue);color:var(--blue)" onclick="setMode(3)">Start Sky Spy</button>
+        <button class="btn" style="border-color:var(--flock);color:var(--flock)" onclick="setMode(1)">Start Flock You</button>
+        <button class="btn" style="border-color:var(--fox);color:var(--fox)" onclick="setMode(2)">Start Fox Hunter</button>
+        <button class="btn" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="setMode(3)">Start Sky Spy</button>
       </div>
     </div>
     <div class="card">

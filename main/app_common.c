@@ -53,5 +53,6 @@ int mac_from_str(const char *str, uint8_t mac[6])
 
 uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
 {
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    uint16_t c = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    return (c >> 8) | (c << 8);   /* byte-swap: ESP32-C6 LE → ST7789 BE */
 }

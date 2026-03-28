@@ -285,7 +285,7 @@ static void expire_drones(void)
     xSemaphoreGive(g_app.drone_mutex);
 }
 
-/* ── Display task — Navy aerospace aesthetic ── */
+/* ── Display task -- Naval CIC radar aesthetic ── */
 static void sky_display_task(void *arg)
 {
     int frame = 0;
@@ -293,153 +293,195 @@ static void sky_display_task(void *arg)
         frame++;
         expire_drones();
 
-        /* Mist, slate, and natural blue palette */
-        uint16_t bg = rgb565(226, 233, 235);
-        uint16_t accent = rgb565(76, 103, 130);
-        uint16_t dim_blue = rgb565(160, 179, 188);
-        uint16_t cyan = rgb565(79, 132, 145);
-        uint16_t panel_bg = rgb565(243, 247, 247);
-        uint16_t panel_alt = rgb565(231, 238, 240);
-        uint16_t text_main = rgb565(39, 55, 67);
-        uint16_t text_dim = rgb565(92, 110, 122);
-        uint16_t footer = rgb565(197, 208, 212);
+        /* Naval CIC palette — near-black with phosphor green */
+        uint16_t bg        = rgb565(2, 4, 2);
+        uint16_t phosphor  = rgb565(20, 255, 0);
+        uint16_t phos_mid  = rgb565(10, 148, 0);
+        uint16_t phos_dim  = rgb565(5, 72, 0);
+        uint16_t phos_faint= rgb565(2, 36, 0);
+        uint16_t grid_col  = rgb565(0, 24, 0);
+        uint16_t amber     = rgb565(255, 176, 0);
+        uint16_t amber_dim = rgb565(120, 82, 0);
+        uint16_t red_alert = rgb565(255, 48, 32);
+        uint16_t text_main = rgb565(15, 220, 0);
+        uint16_t text_dim  = rgb565(8, 110, 0);
+        uint16_t panel_bg  = rgb565(2, 10, 0);
+        uint16_t border_col= rgb565(0, 48, 0);
+        uint16_t footer_bg = rgb565(2, 4, 2);
 
-        /* Status bar: electric blue */
-        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, accent);
-        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, rgb565(105, 130, 153));
-        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", 0xFFFF, accent);
-        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "192.168.4.1", rgb565(214, 227, 232), accent);
+        /* Status bar — dark navy with green type */
+        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, rgb565(0, 12, 0));
+        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, phos_mid);
+        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", phosphor, rgb565(0, 12, 0));
+        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "skyspy-c6", phos_mid, rgb565(0, 12, 0));
 
         /* Content area */
         display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
 
         char buf[64];
+
+        /* ── Radar scope — always visible ── */
+        int cx = LCD_H_RES / 2;   /* 86 */
+        int cy = 120;
+        int r_outer = 62;
+
+        /* Range rings (concentric circles drawn as pixel arcs) */
+        for (int ring = 1; ring <= 3; ring++) {
+            int rr = ring * r_outer / 3;
+            uint16_t ring_col = (ring == 3) ? phos_dim : grid_col;
+            /* Draw ring as short horizontal segments around circumference */
+            for (int a = 0; a < 32; a++) {
+                float angle = (float)a * 6.2831853f / 32.0f;
+                int px = cx + (int)(rr * sinf(angle));
+                int py = cy - (int)(rr * cosf(angle));
+                if (px >= 1 && px < LCD_H_RES - 1 && py >= 38 && py < DISPLAY_FOOTER_BAR_Y - 2)
+                    display_draw_rect(px, py, 2, 2, ring_col);
+            }
+        }
+
+        /* Crosshair */
+        display_draw_rect(cx - r_outer, cy, r_outer * 2 + 1, 1, phos_faint);
+        display_draw_rect(cx, cy - r_outer, 1, r_outer * 2 + 1, phos_faint);
+
+        /* Rotating sweep line (8 segments along the line) */
+        float sweep_angle = (float)(frame % 60) * 6.2831853f / 60.0f;
+        for (int s = 8; s <= r_outer; s += 3) {
+            int sx = cx + (int)(s * sinf(sweep_angle));
+            int sy = cy - (int)(s * cosf(sweep_angle));
+            if (sx >= 0 && sx < LCD_H_RES && sy >= 38 && sy < DISPLAY_FOOTER_BAR_Y - 2) {
+                uint16_t sc = (s > r_outer * 2 / 3) ? phos_dim : phos_mid;
+                display_draw_rect(sx, sy, 2, 2, sc);
+            }
+        }
+        /* Bright tip of sweep */
+        {
+            int tx = cx + (int)(r_outer * sinf(sweep_angle));
+            int ty = cy - (int)(r_outer * cosf(sweep_angle));
+            if (tx >= 1 && tx < LCD_H_RES - 2 && ty >= 38 && ty < DISPLAY_FOOTER_BAR_Y - 4)
+                display_draw_rect(tx - 1, ty - 1, 3, 3, phosphor);
+        }
+
+        /* Fading trail (two previous positions) */
+        for (int t = 1; t <= 2; t++) {
+            float ta = (float)((frame - t * 3 + 60) % 60) * 6.2831853f / 60.0f;
+            uint16_t trail_col = (t == 1) ? phos_faint : grid_col;
+            for (int s = 12; s <= r_outer; s += 6) {
+                int sx = cx + (int)(s * sinf(ta));
+                int sy = cy - (int)(s * cosf(ta));
+                if (sx >= 0 && sx < LCD_H_RES && sy >= 38 && sy < DISPLAY_FOOTER_BAR_Y - 2)
+                    display_draw_rect(sx, sy, 2, 2, trail_col);
+            }
+        }
+
+        /* Cardinal labels */
+        display_draw_text(cx - 2, cy - r_outer - 10, "N", phos_dim, bg);
+        display_draw_text(cx - 2, cy + r_outer + 3,  "S", phos_dim, bg);
+
         if (g_app.drone_count == 0) {
-            /* No drones: animated radar display */
+            /* No contacts — show scanning status */
+            display_draw_text_centered(196, "NO CONTACTS", text_main, bg);
 
-            /* Radar grid lines — horizontal */
-            for (int gy = 60; gy < 200; gy += 35) {
-                display_draw_hline(20, gy, LCD_H_RES - 40, dim_blue);
-            }
-            /* Vertical grid lines */
-            for (int gx = 30; gx < LCD_H_RES - 20; gx += 28) {
-                display_draw_rect(gx, 50, 1, 150, dim_blue);
-            }
+            const char *scan_anim[] = {"SCANNING .", "SCANNING ..", "SCANNING ...", "SCANNING ...."};
+            display_draw_text_centered(208, scan_anim[frame % 4], text_dim, bg);
 
-            /* Radar circle area */
-            int cx = LCD_H_RES / 2;
-            int cy = 120;
-            /* Crosshair through center */
-            display_draw_rect(cx - 30, cy, 60, 1, dim_blue);
-            display_draw_rect(cx, cy - 30, 1, 60, dim_blue);
+            /* Protocol readiness */
+            display_draw_bordered_rect(4, 224, 78, 16, border_col, panel_bg);
+            display_draw_text(8, 228, "WiFi RDY", phos_mid, panel_bg);
+            display_draw_bordered_rect(88, 224, 78, 16, border_col, panel_bg);
+            display_draw_text(92, 228, "BLE  RDY", phos_mid, panel_bg);
 
-            /* Animated sweep dot */
-            static const int8_t sweep_x[] = {0,10,18,24,26,24,18,10,0,-10,-18,-24,-26,-24,-18,-10};
-            static const int8_t sweep_y[] = {-26,-24,-18,-10,0,10,18,24,26,24,18,10,0,-10,-18,-24};
-            int si = frame % 16;
-            display_draw_rect(cx + sweep_x[si] - 2, cy + sweep_y[si] - 2, 5, 5, cyan);
-            /* Trail dots */
-            int si2 = (frame + 14) % 16;
-            display_draw_rect(cx + sweep_x[si2] - 1, cy + sweep_y[si2] - 1, 3, 3, rgb565(145, 170, 180));
-
-            /* Scanning text */
-            display_draw_text(30, 170, "SCANNING AIRSPACE", text_main, bg);
-
-            const char *scan_anim[] = {"WiFi ch6 + BLE .", "WiFi ch6 + BLE ..", "WiFi ch6 + BLE ...", "WiFi ch6 + BLE ...."};
-            display_draw_text(12, 185, scan_anim[frame % 4], text_dim, bg);
-
-            /* Protocol status indicators */
-            display_draw_bordered_rect(4, 210, 78, 16, dim_blue, panel_bg);
-            display_draw_text(8, 214, "WiFi: ON", text_main, panel_bg);
-            display_draw_bordered_rect(88, 210, 78, 16, dim_blue, panel_bg);
-            display_draw_text(92, 214, "BLE: ON", text_main, panel_bg);
-
-            /* Gentle blue LED pulse while scanning */
-            if (frame % 6 < 3) {
-                led_ctrl_set(0, 20, 60);
-            } else {
-                led_ctrl_off();
-            }
+            display_draw_text(4, 248, "THREAT LEVEL:", text_dim, bg);
+            display_draw_text(86, 248, "CLEAR", phos_mid, bg);
         } else {
-            /* Drones detected */
-            snprintf(buf, sizeof(buf), "DRONES: %d", g_app.drone_count);
-            display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 20, accent, panel_bg);
-            display_draw_text(8, 44, buf, text_main, panel_bg);
+            /* ── Contacts detected — plot blips on radar + list below ── */
 
-            /* Blue divider */
-            display_draw_hline(4, 62, LCD_H_RES - 8, accent);
+            /* Draw drone blips on the radar scope as amber squares */
+            for (int i = 0; i < g_app.drone_count; i++) {
+                drone_info_t *d = &g_app.drones[i];
+                /* Place blip based on RSSI as distance from center;
+                   angle from MAC hash to spread them around */
+                uint8_t hash = d->mac[4] ^ d->mac[5] ^ d->mac[3];
+                float blip_angle = (float)hash * 6.2831853f / 256.0f;
+                /* RSSI -30 = close (center), -100 = far (edge) */
+                int dist = r_outer - ((d->rssi + 100) * r_outer / 70);
+                if (dist < 6) dist = 6;
+                if (dist > r_outer) dist = r_outer;
+                int bx = cx + (int)(dist * sinf(blip_angle));
+                int by = cy - (int)(dist * cosf(blip_angle));
+                if (bx >= 2 && bx < LCD_H_RES - 4 && by >= 40 && by < DISPLAY_FOOTER_BAR_Y - 6) {
+                    /* Blinking blip */
+                    uint16_t blip_col = ((frame + i) % 3) ? amber : amber_dim;
+                    display_draw_rect(bx - 2, by - 2, 5, 5, blip_col);
+                    display_draw_rect(bx - 1, by - 1, 3, 3, amber);
+                }
+            }
 
-            /* Keep UI cursor in range for drone list */
+            /* Contact count */
+            snprintf(buf, sizeof(buf), "CONTACTS: %d", g_app.drone_count);
+            display_draw_text(4, 196, buf, amber, bg);
+
+            display_draw_text(4, 208, "THREAT LEVEL:", text_dim, bg);
+            if (g_app.drone_count >= 3) {
+                display_draw_text(86, 208, "HIGH", red_alert, bg);
+            } else {
+                display_draw_text(86, 208, "ACTIVE", amber, bg);
+            }
+
             g_app.ui_item_count = g_app.drone_count;
             if (g_app.ui_cursor >= g_app.drone_count)
                 g_app.ui_cursor = g_app.drone_count > 0 ? g_app.drone_count - 1 : 0;
 
-            /* Drone cards with protocol color bands + cursor */
-            for (int i = 0; i < g_app.drone_count && i < 4; i++) {
-                drone_info_t *d = &g_app.drones[i];
+            /* Compact drone list below radar */
+            int max_show = 3;
+            int start = 0;
+            if (g_app.ui_cursor >= max_show) start = g_app.ui_cursor - max_show + 1;
+
+            for (int idx = start, row = 0; idx < g_app.drone_count && row < max_show; idx++, row++) {
+                drone_info_t *d = &g_app.drones[idx];
                 char mac_str[18];
                 mac_to_str(d->mac, mac_str, sizeof(mac_str));
 
-                int y_base = 68 + i * 52;
-                bool selected = (i == g_app.ui_cursor && g_app.drone_count > 0);
-                uint16_t card_bg = selected ? rgb565(214, 225, 229) : panel_alt;
+                int y_base = 222 + row * 22;
+                bool selected = (idx == g_app.ui_cursor);
 
-                /* Protocol color band on left */
-                uint16_t proto_color;
                 const char *proto_label;
+                uint16_t proto_col;
                 if (d->protocol == PROTO_DJI) {
-                    proto_color = rgb565(160, 120, 60);
-                    proto_label = "DJI";
+                    proto_col = amber; proto_label = "DJI";
                 } else if (d->protocol == PROTO_ASTM_BLE) {
-                    proto_color = cyan;
-                    proto_label = "BLE";
+                    proto_col = phos_mid; proto_label = "BLE";
                 } else {
-                    proto_color = rgb565(92, 124, 150);
-                    proto_label = "WiFi";
+                    proto_col = phos_dim; proto_label = "WFI";
                 }
 
-                /* Card background */
-                display_draw_rect(4, y_base, LCD_H_RES - 8, 46, card_bg);
-                /* Protocol accent bar — pulses on selection */
-                uint16_t bar_col = (selected && (frame % 2)) ? rgb565(247, 249, 249) : proto_color;
-                display_draw_rect(4, y_base, 4, 46, bar_col);
-                /* Top border */
-                uint16_t border = selected ? accent : dim_blue;
-                display_draw_rect(4, y_base, LCD_H_RES - 8, 1, border);
+                uint16_t row_bg = selected ? rgb565(8, 20, 8) : bg;
+                uint16_t row_border = selected ? phos_mid : border_col;
+                display_draw_rect(4, y_base, LCD_H_RES - 8, 18, row_bg);
+                display_draw_rect(4, y_base, LCD_H_RES - 8, 1, row_border);
+                display_draw_rect(4, y_base, 3, 18, proto_col);
 
-                /* Protocol tag + RSSI */
-                snprintf(buf, sizeof(buf), "%s  %ddBm", proto_label, d->rssi);
-                display_draw_text(12, y_base + 4, buf, proto_color, card_bg);
+                snprintf(buf, sizeof(buf), "%s %ddB", proto_label, d->rssi);
+                display_draw_text(10, y_base + 2, buf, proto_col, row_bg);
 
-                /* ID or MAC */
-                if (d->basic_id[0]) {
-                    display_draw_text(12, y_base + 16, d->basic_id, text_main, card_bg);
-                } else {
-                    display_draw_text(12, y_base + 16, mac_str, text_main, card_bg);
-                }
-
-                /* Location / speed */
-                if (d->has_location) {
-                    snprintf(buf, sizeof(buf), "%.4f, %.4f", d->lat, d->lon);
-                    display_draw_text(12, y_base + 28, buf, rgb565(71, 119, 83), card_bg);
-                }
-                if (d->speed > 0.1f) {
-                    snprintf(buf, sizeof(buf), "%.0fm/s %.0fm", d->speed, d->altitude);
-                    display_draw_text(12, y_base + 36, buf, text_dim, card_bg);
-                }
+                const char *id_str = d->basic_id[0] ? d->basic_id : mac_str;
+                /* Truncate to fit */
+                char id_short[20];
+                strncpy(id_short, id_str, 16);
+                id_short[16] = '\0';
+                display_draw_text(10, y_base + 10, id_short, selected ? phosphor : text_dim, row_bg);
             }
 
-            /* Bright blue LED pulse when drones active */
-            led_ctrl_pulse(0, 100, 255, 500);
+            g_app.ui_item_count = g_app.drone_count;
         }
 
-        /* Bottom bar */
-        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
-        snprintf(buf, sizeof(buf), "Heap:%lukB  Drones:%d",
-                 (unsigned long)(g_app.free_heap / 1024), g_app.drone_count);
-        display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_main, footer);
+        /* Footer — WiFi info */
+        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
+        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
+        snprintf(buf, sizeof(buf), "skyspy1234  %dCli  %lukB",
+                 g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
+        display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer_bg);
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
     vTaskDelete(NULL);
 }
@@ -447,9 +489,13 @@ static void sky_display_task(void *arg)
 void sky_spy_start(void)
 {
     ESP_LOGI(TAG, "Starting Sky Spy mode");
+    led_ctrl_breathe_stop();
     buzzer_melody_sky();
 
     g_app.drone_count = 0;
+
+    /* Breathing green LED like Flock You */
+    led_ctrl_breathe(8, 140, 30, 3000);
 
     /* Start WiFi sniffer (promiscuous on current AP channel) */
     sniffer_start(sky_wifi_cb);
@@ -466,6 +512,7 @@ void sky_spy_stop(void)
 {
     sniffer_stop();
     ble_scanner_stop();
+    led_ctrl_breathe_stop();
     led_ctrl_off();
     buzzer_off();
     ESP_LOGI(TAG, "Sky Spy stopped");

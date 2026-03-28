@@ -22,9 +22,9 @@ static button_event_cb_t s_event_cb = NULL;
 
 #define DEBOUNCE_MS         50
 #define DOUBLE_CLICK_MS     300
-#define HOLD_SELECT_MS      1000
-#define HOLD_WARN_MS        5000
-#define HOLD_RESET_MS       7000
+#define HOLD_SELECT_MS      500
+#define HOLD_WARN_MS        3500
+#define HOLD_RESET_MS       5000
 #define POLL_MS             20
 
 typedef enum {

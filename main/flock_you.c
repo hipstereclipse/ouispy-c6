@@ -18,6 +18,7 @@
 #include "display.h"
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 
 static const char *TAG = "flock";
 
@@ -118,7 +119,27 @@ static void flock_led_apply_warning(uint32_t now)
 static void flock_led_apply_heartbeat(int8_t rssi, uint32_t now)
 {
     if (rssi <= -120) {
-        led_ctrl_off();
+        /* No active signal — breathing indicates scan state */
+        uint32_t period = 2800;
+        uint32_t phase = now % period;
+        /* Cosine curve 0→1→0 for smooth breathing */
+        float t = (float)phase / (float)period;
+        float breath = (1.0f - cosf(t * 2.0f * 3.14159265f)) * 0.5f;
+        breath = breath * breath;                 /* gamma */
+        float floor = 0.06f;
+        breath = floor + breath * (1.0f - floor);
+
+        if (g_app.device_count == 0) {
+            /* Nothing detected yet: visible green pulse */
+            led_ctrl_set((uint8_t)(8  * breath),
+                         (uint8_t)(140 * breath),
+                         (uint8_t)(30  * breath));
+        } else {
+            /* Something was detected previously: purple breathing */
+            led_ctrl_set((uint8_t)(80 * breath),
+                         (uint8_t)(15 * breath),
+                         (uint8_t)(100 * breath));
+        }
         return;
     }
 
@@ -325,37 +346,38 @@ static void flock_scan_cb(const uint8_t *addr, int8_t rssi,
     xSemaphoreGive(g_app.device_mutex);
 }
 
-/* LCD status update task — Crimson surveillance aesthetic */
+/* LCD status update task — Terracotta surveillance aesthetic */
 static void flock_display_task(void *arg)
 {
     int frame = 0;
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         frame++;
 
-        /* Sand background with burgundy accents */
-        uint16_t bg = rgb565(235, 225, 205);
-        uint16_t accent = rgb565(123, 47, 58);
-        uint16_t dim_red = rgb565(163, 112, 108);
-        uint16_t raven_col = rgb565(150, 111, 62);
-        uint16_t panel_bg = rgb565(246, 238, 223);
-        uint16_t panel_alt = rgb565(236, 226, 208);
-        uint16_t text_main = rgb565(66, 42, 36);
-        uint16_t text_dim = rgb565(103, 74, 67);
-        uint16_t text_soft = rgb565(130, 99, 90);
-        uint16_t footer = rgb565(213, 198, 175);
+        /* Dark zinc base with vivid red accent */
+        uint16_t bg = rgb565(9, 9, 11);
+        uint16_t accent = rgb565(248, 113, 113);
+        uint16_t dim_accent = rgb565(153, 27, 27);
+        uint16_t raven_col = rgb565(251, 146, 60);
+        uint16_t panel_bg = rgb565(24, 24, 27);
+        uint16_t panel_alt = rgb565(20, 20, 22);
+        uint16_t text_main = rgb565(250, 250, 250);
+        uint16_t text_dim = rgb565(161, 161, 170);
+        uint16_t text_soft = rgb565(113, 113, 122);
+        uint16_t footer = rgb565(9, 9, 11);
+        uint16_t border_col = rgb565(63, 63, 70);
 
-        /* Status bar: burgundy */
-        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, accent);
-        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, rgb565(155, 79, 91));
-        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FLOCK YOU", 0xFFFF, accent);
-        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "192.168.4.1", rgb565(243, 230, 223), accent);
+        /* Status bar */
+        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
+        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
+        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FLOCK YOU", text_main, dim_accent);
+        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "flockyou-c6", rgb565(228, 228, 231), dim_accent);
 
         /* Content area */
         display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
 
         /* Device counter section */
         char buf[64];
-        display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 36, dim_red, panel_bg);
+        display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 36, border_col, panel_bg);
         display_draw_text(10, 42, "DETECTED TARGETS", text_main, panel_bg);
         snprintf(buf, sizeof(buf), "%d", g_app.device_count);
         display_draw_text_scaled(10, 54, buf, accent, panel_bg, 2);
@@ -370,7 +392,7 @@ static void flock_display_task(void *arg)
         int x_off = 10 + (g_app.device_count >= 10 ? 30 : 18);
         display_draw_text(x_off, 58, buf, text_soft, panel_bg);
 
-        /* Red divider line */
+        /* Accent divider line */
         display_draw_hline(4, 78, LCD_H_RES - 8, accent);
 
         /* Scanning animation */
@@ -384,7 +406,6 @@ static void flock_display_task(void *arg)
 
         /* Device list — last 5 with left accent bar + cursor highlight */
         int start = (g_app.device_count > 5) ? g_app.device_count - 5 : 0;
-        /* If cursor is outside visible window, shift window to include it */
         if (g_app.ui_cursor < start) start = g_app.ui_cursor;
         if (g_app.ui_cursor >= start + 5) start = g_app.ui_cursor - 4;
 
@@ -392,21 +413,17 @@ static void flock_display_task(void *arg)
             int y_pos = 98 + row * 30;
             bool selected = (i == g_app.ui_cursor && g_app.device_count > 0);
 
-            /* Left color indicator bar */
             uint16_t indicator = g_app.devices[i].is_raven ? raven_col : accent;
 
             if (selected) {
-                /* Highlighted row: brighter bar + background */
-                uint16_t sel_bg = rgb565(230, 212, 198);
-                display_draw_rect(4, y_pos, 3, 24, (frame % 2) ? rgb565(248, 244, 240) : indicator);
+                uint16_t sel_bg = rgb565(39, 39, 42);
+                display_draw_rect(4, y_pos, 3, 24, (frame % 2) ? rgb565(63, 63, 70) : indicator);
                 display_draw_rect(10, y_pos, LCD_H_RES - 16, 24, sel_bg);
 
-                /* MAC address */
                 char mac_str[18];
                 mac_to_str(g_app.devices[i].mac, mac_str, sizeof(mac_str));
                 display_draw_text(14, y_pos + 2, mac_str, text_main, sel_bg);
 
-                /* RSSI + hits */
                 snprintf(buf, sizeof(buf), "%ddBm x%d",
                          g_app.devices[i].rssi, g_app.devices[i].hit_count);
                 display_draw_text(14, y_pos + 12, buf, accent, sel_bg);
@@ -414,26 +431,24 @@ static void flock_display_task(void *arg)
                 display_draw_rect(4, y_pos, 3, 24, indicator);
                 display_draw_rect(10, y_pos, LCD_H_RES - 16, 24, panel_alt);
 
-                /* MAC address */
                 char mac_str[18];
                 mac_to_str(g_app.devices[i].mac, mac_str, sizeof(mac_str));
                 display_draw_text(14, y_pos + 2, mac_str,
                                   g_app.devices[i].is_raven ? raven_col : text_main,
                                   panel_alt);
 
-                /* RSSI + hits */
                 snprintf(buf, sizeof(buf), "%ddBm x%d",
                          g_app.devices[i].rssi, g_app.devices[i].hit_count);
-                display_draw_text(14, y_pos + 12, buf,
-                                  text_dim, panel_alt);
+                display_draw_text(14, y_pos + 12, buf, text_dim, panel_alt);
             }
         }
 
-        /* Bottom bar */
+        /* Bottom bar with WiFi info */
         display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
-        snprintf(buf, sizeof(buf), "Heap:%lukB  Clients:%d",
-                 (unsigned long)(g_app.free_heap / 1024), g_app.wifi_clients);
-        display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, accent, footer);
+        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
+        snprintf(buf, sizeof(buf), "flockyou123  %dCli  %lukB",
+                 g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
+        display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -443,6 +458,7 @@ static void flock_display_task(void *arg)
 void flock_you_start(void)
 {
     ESP_LOGI(TAG, "Starting Flock You mode");
+    led_ctrl_breathe_stop();
     buzzer_melody_flock();
 
     /* Start BLE scan: 100ms interval, 50ms window for coexistence */

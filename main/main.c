@@ -28,13 +28,13 @@
 
 static const char *TAG = "main";
 
-#define LED_PHASE_CORE_READY   255, 255, 255
-#define LED_PHASE_BOOT_SPLASH  108,  99, 255
-#define LED_PHASE_WIFI_INIT    255, 180,   0
-#define LED_PHASE_BLE_INIT       0,  64, 255
-#define LED_PHASE_SNIFFER_INIT   0, 220, 220
-#define LED_PHASE_MODE_START   255,   0, 180
-#define LED_PHASE_MAIN_LOOP      0, 255,   0
+#define LED_PHASE_CORE_READY    80,  78,  72
+#define LED_PHASE_BOOT_SPLASH   40,  55,  38
+#define LED_PHASE_WIFI_INIT     60,  45,  10
+#define LED_PHASE_BLE_INIT      15,  35,  65
+#define LED_PHASE_SNIFFER_INIT  15,  50,  55
+#define LED_PHASE_MODE_START    30,  42,  28
+#define LED_PHASE_MAIN_LOOP     40,  55,  38
 
 /* ── Mode-select display task handle ── */
 static TaskHandle_t s_select_task = NULL;
@@ -67,10 +67,10 @@ typedef struct {
 } mode_config_t;
 
 static const mode_config_t MODE_CFG[MODE_COUNT] = {
-    [MODE_SELECT]    = {"ouispy-c6",   "ouispy123",   6, 0x6A6F}, /* plum */
-    [MODE_FLOCK_YOU] = {"flockyou-c6", "flockyou123", 6, 0x7928}, /* burgundy */
-    [MODE_FOX_HUNTER]= {"foxhunt-c6",  "foxhunt123",  6, 0xA3C7}, /* bronze */
-    [MODE_SKY_SPY]   = {"skyspy-c6",   "skyspy1234",  6, 0xD48C}, /* light tan */
+    [MODE_SELECT]    = {"ouispy-c6",   "ouispy123",   6, RGB565_CONST(88, 28, 135)},  /* purple dim */
+    [MODE_FLOCK_YOU] = {"flockyou-c6", "flockyou123", 6, RGB565_CONST(200, 60, 60)}, /* red dim    */
+    [MODE_FOX_HUNTER]= {"foxhunt-c6",  "foxhunt123",  6, RGB565_CONST(200, 100, 20)},/* orange dim */
+    [MODE_SKY_SPY]   = {"skyspy-c6",   "skyspy1234",  6, RGB565_CONST(20, 120, 40)}, /* navy green */
 };
 
 /* ── Stop current mode ── */
@@ -89,26 +89,28 @@ static void stop_current_mode(void)
 
 static void render_mode_select_screen(int cursor)
 {
-    uint16_t bg          = rgb565(224, 224, 224);
-    uint16_t panel_bg    = rgb565(246, 246, 244);
-    uint16_t panel_alt   = rgb565(236, 236, 234);
-    uint16_t accent      = rgb565(118, 118, 118);
-    uint16_t accent_div  = rgb565(154, 154, 154);
-    uint16_t border      = rgb565(170, 170, 166);
-    uint16_t text_main   = rgb565(42, 42, 42);
-    uint16_t text_dim    = rgb565(92, 92, 92);
-    uint16_t selected_bg = rgb565(216, 216, 214);
-    uint16_t selected_fg = rgb565(28, 28, 28);
-    uint16_t text_link   = rgb565(80, 80, 80);
+    /* Dark base with gold & purple accent */
+    uint16_t bg          = rgb565(12, 10, 16);
+    uint16_t card_bg     = rgb565(24, 20, 32);
+    uint16_t card_alt    = rgb565(20, 18, 28);
+    uint16_t gold        = rgb565(251, 191, 36);
+    uint16_t gold_dim    = rgb565(120, 90, 18);
+    uint16_t purple      = rgb565(168, 85, 247);
+    uint16_t purple_dim  = rgb565(88, 28, 135);
+    uint16_t border      = rgb565(55, 48, 70);
+    uint16_t text_main   = rgb565(250, 250, 250);
+    uint16_t text_dim    = rgb565(161, 161, 170);
+    uint16_t selected_bg = rgb565(38, 30, 52);
+    uint16_t text_link   = rgb565(196, 168, 255);
 
     struct {
         const char *label;
         const char *desc;
         uint16_t accent_col;
     } entries[] = {
-        {"1: FLOCK YOU",  "ALPR scanner",   rgb565(126, 78, 82)},
-        {"2: FOX HUNTER", "BLE tracker",    rgb565(142, 118, 88)},
-        {"3: SKY SPY",    "Drone detector", rgb565(164, 150, 130)},
+        {"1: FLOCK YOU",  "ALPR scanner",   rgb565(248, 113, 113)},
+        {"2: FOX HUNTER", "BLE tracker",    rgb565(251, 146, 60)},
+        {"3: SKY SPY",    "Drone detector", rgb565(56, 189, 248)},
     };
 
     if (cursor < 0) cursor = 0;
@@ -116,41 +118,41 @@ static void render_mode_select_screen(int cursor)
 
     display_fill(bg);
 
-    display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, accent);
-    display_draw_rect(0, DISPLAY_STATUS_BAR_Y + 30, LCD_H_RES, 2, accent_div);
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 7, "OUI-SPY C6", 0xFFFF, accent);
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "MODE SELECT", rgb565(240, 240, 238), accent);
+    display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, purple_dim);
+    display_draw_rect(0, DISPLAY_STATUS_BAR_Y + 30, LCD_H_RES, 2, gold);
+    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 7, "OUI-SPY C6", gold, purple_dim);
+    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "MODE SELECT", rgb565(216, 180, 254), purple_dim);
 
-    display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, panel_bg);
-    display_draw_text(14, 53, "WiFi:", text_dim, panel_bg);
-    display_draw_text(44, 53, MODE_CFG[MODE_SELECT].ssid, text_main, panel_bg);
-    display_draw_text(14, 67, "Pass:", text_dim, panel_bg);
-    display_draw_text(44, 67, MODE_CFG[MODE_SELECT].pass, text_main, panel_bg);
-    display_draw_text(14, 81, "Open:", text_dim, panel_bg);
-    display_draw_text(44, 81, "192.168.4.1", text_link, panel_bg);
+    display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, card_bg);
+    display_draw_text(14, 53, "WiFi:", text_dim, card_bg);
+    display_draw_text(44, 53, MODE_CFG[MODE_SELECT].ssid, text_main, card_bg);
+    display_draw_text(14, 67, "Pass:", text_dim, card_bg);
+    display_draw_text(44, 67, MODE_CFG[MODE_SELECT].pass, text_main, card_bg);
+    display_draw_text(14, 81, "Open:", text_dim, card_bg);
+    display_draw_text(44, 81, "192.168.4.1", text_link, card_bg);
 
     display_draw_text_centered(116, "Select a mode", text_dim, bg);
 
     for (int i = 0; i < 3; i++) {
         int y = 132 + i * 34;
         bool selected = (i == cursor);
-        uint16_t row_bg = selected ? selected_bg : panel_alt;
-        uint16_t row_fg = selected ? selected_fg : text_main;
-        uint16_t row_desc = selected ? rgb565(78, 78, 78) : text_dim;
+        uint16_t row_bg = selected ? selected_bg : card_alt;
+        uint16_t row_fg = selected ? rgb565(248, 245, 240) : text_main;
+        uint16_t row_desc = selected ? rgb565(178, 175, 168) : text_dim;
         uint16_t row_border = selected ? entries[i].accent_col : border;
 
         display_draw_bordered_rect(8, y, LCD_H_RES - 16, 26, row_border, row_bg);
         display_draw_rect(12, y + 3, 5, 20, entries[i].accent_col);
         if (selected) {
-            display_draw_text(LCD_H_RES - 34, y + 9, "GO", selected_fg, row_bg);
+            display_draw_text(LCD_H_RES - 34, y + 9, "GO", entries[i].accent_col, row_bg);
         }
         display_draw_text(24, y + 5, entries[i].label, row_fg, row_bg);
         display_draw_text(24, y + 15, entries[i].desc, row_desc, row_bg);
     }
 
-    display_draw_hline(14, 248, LCD_H_RES - 28, border);
-    display_draw_text_centered(258, "Click next   DblClk prev", text_main, bg);
-    display_draw_text_centered(270, "Hold 1s select   Hold 7s reset", text_main, bg);
+    display_draw_hline(14, 248, LCD_H_RES - 28, purple_dim);
+    display_draw_text_centered(258, "Click next   DblClk prev", text_dim, bg);
+    display_draw_text_centered(270, "Hold .5s select  Hold 5s reset", text_dim, bg);
 }
 
 /* ── Mode Select display task — redraw only on cursor changes ── */
@@ -158,7 +160,7 @@ static void mode_select_task(void *arg)
 {
     int last_cursor = -1;
 
-    led_ctrl_set(40, 30, 80);
+    led_ctrl_set(0, 180, 0);
 
     while (g_app.current_mode == MODE_SELECT) {
         if (g_app.ui_cursor >= 3) g_app.ui_cursor = 2;
@@ -283,8 +285,11 @@ static void on_button_event(button_id_t btn, button_event_t evt)
                 fox_hunter_set_target_from_flock(g_app.ui_cursor);
                 buzzer_tone(1200, 120);
             }
+        } else if (g_app.current_mode == MODE_FOX_HUNTER) {
+            /* Toggle LED mode: Detector ↔ Sting */
+            g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
+            buzzer_tone(g_app.fox_led_mode ? 1400 : 900, 60);
         }
-        /* Fox Hunter / Sky Spy: no item selection needed */
         break;
 
     case BTN_EVT_LONG_HOLD_WARN:
@@ -325,11 +330,11 @@ void app_main(void)
     buzzer_init();
     button_init(on_button_event);
 
-    /* Boot splash */
-    display_fill(rgb565(232, 226, 217));
-    display_draw_text_scaled_centered(100, "OUI-SPY", rgb565(111, 81, 123), rgb565(232, 226, 217), 2);
-    display_draw_text_scaled_centered(126, "C6", rgb565(72, 58, 74), rgb565(232, 226, 217), 2);
-    display_draw_text_centered(160, "Initializing...", rgb565(117, 104, 103), rgb565(232, 226, 217));
+    /* Boot splash -- gold & purple */
+    display_fill(rgb565(12, 10, 16));
+    display_draw_text_scaled_centered(100, "OUI-SPY", rgb565(251, 191, 36), rgb565(12, 10, 16), 2);
+    display_draw_text_scaled_centered(126, "C6", rgb565(168, 85, 247), rgb565(12, 10, 16), 2);
+    display_draw_text_centered(160, "Initializing...", rgb565(161, 161, 170), rgb565(12, 10, 16));
     buzzer_melody_boot();
     set_init_phase_led(LED_PHASE_BOOT_SPLASH);
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -356,11 +361,12 @@ void app_main(void)
     app_mode_t saved_mode = nvs_store_load_mode();
     ESP_LOGI(TAG, "Phase 4: starting saved mode %d", saved_mode);
     set_init_phase_led(LED_PHASE_MODE_START);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    led_ctrl_off();
     start_mode(saved_mode);
 
     /* ── Phase 5: Main loop ── */
     ESP_LOGI(TAG, "Entering main loop");
-    set_init_phase_led(LED_PHASE_MAIN_LOOP);
     vTaskDelay(pdMS_TO_TICKS(150));
     while (1) {
         /* Handle mode transitions */

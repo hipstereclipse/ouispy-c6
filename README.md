@@ -2,59 +2,128 @@
 
 **Open-source RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47**
 
-OUI-Spy C6 is a native ESP-IDF C port of the OUI-Spy Unified Blue project, built specifically for the Waveshare ESP32-C6-LCD-1.47 development board. It consolidates three passive RF intelligence modes into a single flash image with a modern web-based interface and on-device display.
+> This project is a from-scratch C rewrite and hardware-specific spinoff of [**OUI-Spy Unified Blue**](https://github.com/colonelpanichacks/oui-spy-unified-blue) by [ColonelPanicHacks](https://github.com/colonelpanichacks). The original project pioneered the concept of passive BLE surveillance hardware detection and drone monitoring on ESP32 — this version ports and extends those ideas natively to the ESP32-C6 platform with a custom display UI, hardware buzzer integration, and a modern web interface.
+
+OUI-Spy C6 consolidates three passive RF intelligence modes into a single flash image running on the Waveshare ESP32-C6-LCD-1.47 dev board. Pure ESP-IDF C, no Arduino — just bare metal and radio waves.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
 ---
 
-## Features
+## Modes
 
 ### Flock You — Surveillance Hardware Detector
-- Passive BLE scanner identifying Flock Safety ALPR cameras and ShotSpotter Raven sensors
-- **5 detection heuristics**: OUI prefix matching (20 prefixes), device name patterns, manufacturer Company ID (0x09C8), Raven GATT UUID fingerprinting, and firmware version estimation
-- Real-time device list with RSSI, hit count, and detection method indicators
-- New detections flash the RGB LED orange as a warning, then transition into a red heartbeat whose intensity and tempo track signal strength
-- Tracks up to 200 unique devices with deduplication by MAC
-- CSV export of all detections
 
-### Fox Hunter — Proximity Tracker
-- Locks onto a single BLE MAC and maps RSSI to a variable-rate buzzer cadence
-- Functions like a Geiger counter for Bluetooth — beeps faster as you get closer
-- 7-zone RSSI-to-cadence mapping (-25 dBm = machine gun, below -85 dBm = slow pulse)
-- Targets can be imported directly from Flock You detections with one tap
-- Visual proximity bar with color gradient (red→yellow→green)
-- Persists target across reboots via NVS
+Passively scans for Flock Safety ALPR cameras and ShotSpotter Raven acoustic sensors using BLE advertisements.
+
+- **5 detection heuristics**: OUI prefix matching (20 known prefixes), device name pattern matching, Manufacturer Company ID (0x09C8 / XUNTONG), Raven GATT service UUID fingerprinting, and firmware version estimation
+- Real-time scrollable device list on the LCD showing RSSI, hit count, and detection method
+- New detections trigger an orange LED warning flash, then transition to a breathing red/purple heartbeat whose intensity tracks signal strength
+- Green breathing LED when idle (no devices found), purple breathing when devices are present
+- Tracks up to 200 unique devices with MAC deduplication
+- CSV export of all detections via web UI
+
+### Fox Hunter — BLE Proximity Tracker
+
+Locks onto a single BLE MAC address and acts as a Geiger counter for Bluetooth — the buzzer beeps faster and the display updates as you physically close in on the target.
+
+- **7-zone RSSI-to-cadence mapping**: from 15ms (machine gun, >-35 dBm) down to 800ms (slow pulse, <-85 dBm)
+- Color-mapped proximity bar and signal strength visualization on LCD
+- Targets can be set via the web UI, or imported directly from Flock You detections with a single button hold
+- Target MAC persists across reboots via NVS flash storage
+- Two toggleable LED tracking modes:
+
+  **Detector Mode:**
+  - Solid **orange** LED when no target is set (standing by)
+  - Solid **green** LED once a target is selected (hunting)
+  - **Blinking red** when the target is detected — blink rate is proportional to signal strength (slow blinks = far away, rapid blinking = right on top of it)
+
+  **Sting Mode:**
+  *"...and the light of Eärendil shone upon it." One does not simply walk into range without being noticed.*
+  - LED off when no target is set or signal is lost
+  - Solid **blue** glow when the target is detected, with brightness proportional to signal strength — dim blue when far, blazing bright blue at close range
+
+  Toggle between Detector and Sting with a button hold  while in Fox Hunter mode, or via the web UI toggle button.
 
 ### Sky Spy — Drone Detector
-- Dual-protocol ASTM F3411 Remote ID detection (WiFi NAN + BLE)
-- DJI proprietary DroneID detection (beacon vendor IEs + BLE Company ID 0x2CA3)
-- Parses OpenDroneID message types: Basic ID, Location, System, Operator ID
-- Displays drone position, altitude, speed, pilot location, and operator ID
-- Animated radar UI when scanning, detailed drone cards when detected
-- Tracks up to 16 simultaneous drones with automatic expiry
 
-### Web Interface
-- Modern single-page application served directly from the device
-- Real-time updates via WebSocket (500ms push interval)
-- Mode switching, device lists, proximity visualization, drone cards
-- Settings panel (brightness, sound, LED toggle)
-- CSV data export
-- Mobile-optimized responsive design
+Dual-protocol passive drone detection with a Naval CIC-inspired radar display.
 
-### Hardware Integration
-- **172×320 IPS LCD**: Safe-area-aware headers and footers, improved contrast, device lists, proximity indicators per mode
-- **WS2812 RGB LED**: Mode-aware alerts including Flock warning flashes + heartbeat tracking, Fox Hunter strength feedback, and Sky Spy scan pulse
-- **Buzzer/Speaker**: Distinct startup melodies per mode, proximity cadence, detection alerts
-- **Physical Buttons**: Click/double-click navigation, 1-second select hold, 5-second reset warning flash, 7-second return-to-selector hold
+- **ASTM F3411 Remote ID** detection via WiFi NAN action frames and BLE Service Data (UUID 0xFFFA)
+- **DJI proprietary DroneID** detection via beacon vendor IEs and BLE Company ID (0x2CA3)
+- **Parrot** detection via OUI prefix matching
+- Parses OpenDroneID message types 0–5: Basic ID, Location, Authentication, Self-ID, System, and Operator ID
+- Displays drone serial number, position, altitude, speed, pilot location, and operator info
+- Animated phosphor-green radar with rotating sweep, concentric range rings, cardinal labels, and fading trail
+- Detected drones appear as amber blips on the radar, positioned by RSSI (distance) and MAC hash (angle) with a blinking animation
+- Contact list sidebar with protocol color bars (green = ASTM, red = DJI)
+- Green breathing LED while scanning
+- Tracks up to 16 simultaneous drones with 30-second automatic expiry
 
 ---
 
-## Hardware Requirements
+## Web Interface
+
+A modern single-page dark-themed web UI served directly from the device. Connect to the device's WiFi AP and open **http://192.168.4.1** in any browser.
+
+- Real-time state updates via WebSocket (500ms push interval)
+- Mode switching with animated tab navigation
+- Per-mode device lists, proximity visualization, and drone cards
+- Fox Hunter target selection and LED mode toggle
+- Settings panel: LCD brightness, sound enable/disable, LED enable/disable
+- CSV data export for Flock You detections
+- Mobile-optimized responsive Tailwind CSS design
+
+---
+
+## Hardware
+
+### LED Behavior Summary
+
+| Mode | LED State |
+|------|-----------|
+| Boot / Init | Phase-colored init sequence |
+| Mode Select | Solid green |
+| Flock You (idle) | Breathing green |
+| Flock You (devices found) | Breathing purple |
+| Fox Hunter — Detector (no target) | Solid orange |
+| Fox Hunter — Detector (target set, searching) | Solid green |
+| Fox Hunter — Detector (target detected) | Blinking red (speed = proximity) |
+| Fox Hunter — Sting (no target / searching) | Off |
+| Fox Hunter — Sting (target detected) | Solid blue (brightness = proximity) |
+| Sky Spy | Breathing green |
+| Reset warning (hold 3.5s) | Triple orange flash |
+
+### On-Device Controls
+
+- **Click**: Navigate to next item
+- **Double-click**: Navigate to previous item
+- **Hold 0.5s**: Select / activate current item
+- **Hold 3.5s**: Orange LED warning flash (reset imminent)
+- **Hold 5s**: Return to mode selector
+
+In Fox Hunter mode, holding the button toggles between Detector and Sting LED modes.
+
+### Hardware Requirements
 
 - **Waveshare ESP32-C6-LCD-1.47** (ASIN B0DK5J6LX3)
 - USB-C cable for power and flashing
-- Optional: Push buttons, piezo buzzer/speaker (see [HARDWARE.md](HARDWARE.md))
+- Optional: 3 push buttons + piezo buzzer/speaker (see [HARDWARE.md](HARDWARE.md))
+
+---
+
+## WiFi Access Points
+
+Each mode runs its own dedicated WiFi AP:
+
+| Mode | SSID | Password | Channel |
+|------|------|----------|---------|
+| Mode Select | `ouispy-c6` | `ouispy123` | 6 |
+| Flock You | `flockyou-c6` | `flockyou123` | 6 |
+| Fox Hunter | `foxhunt-c6` | `foxhunt123` | 6 |
+| Sky Spy | `skyspy-c6` | `skyspy1234` | 6 |
+
+All modes use channel 6 for optimal alignment with Remote ID NAN detection.
 
 ---
 
@@ -63,7 +132,7 @@ OUI-Spy C6 is a native ESP-IDF C port of the OUI-Spy Unified Blue project, built
 ### Prerequisites
 
 - [ESP-IDF v5.3.2](https://docs.espressif.com/projects/esp-idf/en/v5.3.2/esp32c6/get-started/) on Windows
-- Python 3.11 for the ESP-IDF environment on this project
+- Python 3.11 for the ESP-IDF build environment
 
 ### Build
 
@@ -73,56 +142,31 @@ idf.py set-target esp32c6
 idf.py build
 ```
 
-On Windows, this project has been validated with the ESP-IDF export script and a Python 3.11 environment.
-
 ### One-Step Flash + Monitor
 
 ```bash
 python flash.py --port COMx
 ```
 
-`flash.py` builds the firmware, flashes the board, starts a serial monitor, and saves crash logs under `logs/`.
+`flash.py` builds the firmware, flashes the board, starts a serial monitor, and saves timestamped crash logs under `logs/`.
 
-### Flash
+### Manual Flash
 
 ```bash
+# If the board doesn't enter flash mode automatically:
 # Hold BOOT → press RESET → release RESET → release BOOT
 idf.py -p COMx flash monitor
-# Press RESET after flashing to run
 ```
 
 Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on Linux).
 
-### On-Device Controls
-
-- `Click`: move to the next item
-- `Double-click`: move to the previous item
-- `Hold 1s`: select the current item
-- `Hold 5s`: LED warning that reset-to-selector is imminent
-- `Hold 7s`: return to mode selector
-
 ### First Boot
 
-1. The LCD shows the OUI-SPY boot splash
-2. The device starts a WiFi access point
-3. Connect your phone/laptop to the AP:
-   - **SSID**: `ouispy-c6`
-   - **Password**: `ouispy123`
-4. Open a browser to **http://192.168.4.1**
-5. Select a mode from the web interface or press the mode button
-
----
-
-## WiFi Access Points Per Mode
-
-| Mode | SSID | Password | Channel |
-|------|------|----------|---------|
-| Mode Select | `ouispy-c6` | `ouispy123` | 6 |
-| Flock You | `flockyou-c6` | `flockyou123` | 6 |
-| Fox Hunter | `foxhunt-c6` | `foxhunt123` | 6 |
-| Sky Spy | `skyspy-c6` | `skyspy1234` | 6 |
-
-All modes use channel 6 for optimal Remote ID NAN detection alignment.
+1. LCD shows the gold & purple OUI-SPY boot splash with startup melody
+2. Device starts a WiFi AP (`ouispy-c6` / `ouispy123`)
+3. Connect your phone or laptop to the AP
+4. Open **http://192.168.4.1** in a browser
+5. Select a mode from the on-screen selector or web UI
 
 ---
 
@@ -137,6 +181,7 @@ All modes use channel 6 for optimal Remote ID NAN detection alignment.
 | GET | `/api/export/csv` | Download Flock detections as CSV |
 | POST | `/api/mode` | Change mode: `{"mode": 0-3}` |
 | POST | `/api/fox/target` | Set Fox target: `{"mac":"AA:BB:CC:DD:EE:FF"}` or `{"index":0}` |
+| POST | `/api/fox/ledmode` | Toggle Fox Hunter LED mode (Detector / Sting) |
 | POST | `/api/settings` | Update prefs: `{"brightness":200,"sound":true,"led":true}` |
 | WS | `/ws` | WebSocket for real-time push updates |
 
@@ -145,38 +190,38 @@ All modes use channel 6 for optimal Remote ID NAN detection alignment.
 ## Architecture
 
 ```
-main.c              — Boot, mode transitions, main loop
-app_common.c/h      — Shared types, state, utility functions
+main.c              — Boot flow, mode transitions, main loop
+app_common.c/h      — Shared types, global state, utility functions
 display.c/h         — ST7789V3 LCD driver (esp_lcd + LEDC backlight)
-led_ctrl.c/h        — WS2812 RGB LED (RMT, no DMA on C6)
+led_ctrl.c/h        — WS2812 RGB LED with sine-wave breathing (RMT backend)
 buzzer.c/h          — Piezo buzzer via LEDC PWM
-button.c/h          — GPIO buttons with debounce + long press
-nvs_store.c/h       — NVS persistent storage
-wifi_manager.c/h    — SoftAP management
+button.c/h          — Multi-gesture button state machine (click, double-click, hold, long-hold)
+nvs_store.c/h       — NVS persistent storage for mode + preferences
+wifi_manager.c/h    — SoftAP management with per-mode SSID
 ble_scanner.c/h     — NimBLE BLE scanner
 sniffer.c/h         — WiFi promiscuous sniffer for drone detection
-flock_you.c/h       — Flock Safety / Raven detector
-fox_hunter.c/h      — BLE proximity tracker with buzzer cadence
-sky_spy.c/h         — ASTM F3411 + DJI drone detector
+flock_you.c/h       — Flock Safety / ShotSpotter Raven detector
+fox_hunter.c/h      — BLE proximity tracker with buzzer cadence + dual LED modes
+sky_spy.c/h         — ASTM F3411 + DJI drone detector with radar UI
 web_server.c/h      — HTTP + WebSocket server (esp_http_server)
-index.html          — Single-page web UI (embedded in flash)
-font5x7.h           — Minimal bitmap font for LCD text
+index.html          — Single-page web UI (Tailwind dark theme, embedded in flash)
+font5x7.h           — Minimal 5×7 bitmap font for LCD text rendering
 ```
 
 ### Radio Coexistence
 
-The ESP32-C6 shares a single 2.4 GHz radio between WiFi and BLE via time-division multiplexing. The firmware uses:
+The ESP32-C6 shares a single 2.4 GHz radio between WiFi and BLE via time-division multiplexing:
 - **WiFi AP**: Fixed on channel 6 (aligned with NAN Remote ID)
-- **BLE Scan**: 50ms window / 100ms interval (50% duty) for balanced coexistence
-- **Promiscuous mode**: Management frame filter, queue-based processing
+- **BLE Scan**: 50ms window / 100ms interval (50% duty cycle)
+- **Promiscuous mode**: Management frame filter with queue-based processing
 
 ### Memory Budget
 
-Target profile on ESP32-C6FH4 (512KB SRAM, 4MB Flash, no PSRAM):
+Target profile on ESP32-C6FH4 (512KB SRAM, 4MB/8MB Flash, no PSRAM):
 - Stack: ~28KB across all tasks
 - Device tracking: ~50KB (200 × 252 bytes)
 - Drone tracking: ~6KB (16 × 384 bytes)
-- Display buffers: DMA-allocated, freed after each draw
+- Display buffers: DMA-allocated, freed after each draw operation
 - Web UI: Embedded in flash, zero RAM overhead at rest
 
 ---
@@ -188,14 +233,13 @@ ouispy-c6/
 ├── CMakeLists.txt          — Top-level project cmake
 ├── flash.py                — Build, flash, and serial-monitor helper
 ├── flash.bat               — Windows wrapper for flash.py
-├── logs/                   — Timestamped serial monitor captures
+├── HARDWARE.md             — Wiring guide for buttons and buzzer
 ├── partitions.csv          — Custom partition table (3.4MB app + 512KB storage)
 ├── sdkconfig.defaults      — ESP-IDF config defaults
-├── HARDWARE.md             — Wiring guide for external hardware
-├── README.md               — This file
+├── logs/                   — Timestamped serial monitor captures
 └── main/
     ├── CMakeLists.txt      — Component cmake with EMBED_TXTFILES
-    ├── idf_component.yml   — Managed component dependencies
+    ├── idf_component.yml   — Managed component dependencies (led_strip v3.0.3)
     ├── main.c
     ├── app_common.c/h
     ├── display.c/h
@@ -218,13 +262,13 @@ ouispy-c6/
 
 ## License
 
-MIT License. See individual source files for SPDX identifiers.
+MIT License. See [LICENSE](LICENSE) and individual source file SPDX identifiers.
 
 ---
 
 ## Acknowledgments
 
-- Original [OUI-Spy Unified Blue](https://github.com/colonelpanichacks/oui-spy-unified-blue) by ColonelPanicHacks
+- **[ColonelPanicHacks](https://github.com/colonelpanichacks)** — Original [OUI-Spy Unified Blue](https://github.com/colonelpanichacks/oui-spy-unified-blue) project. This firmware is a spinoff and from-scratch C rewrite of their work.
 - [opendroneid-core-c](https://github.com/opendroneid/opendroneid-core-c) reference library
 - Waveshare for the ESP32-C6-LCD-1.47 hardware platform
-- Espressif ESP-IDF framework
+- Espressif ESP-IDF framework and NimBLE stack
