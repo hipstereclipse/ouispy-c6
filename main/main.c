@@ -297,10 +297,10 @@ static void render_mode_select_screen(int cursor)
                                    ? "microSD: Available"
                                    : (microsd_status == STORAGE_STATUS_NEEDS_FORMAT ? "microSD: Needs format"
                                                                                     : "microSD: Not found");
-    display_draw_text_centered(240, microsd_text, microsd_color, bg);
+    display_draw_text_centered(246, microsd_text, microsd_color, bg);
 
-    display_draw_text_centered(262, "Click next   DblClk prev", text_dim, bg);
-    display_draw_text_centered(274, "Hold select  Hold 5s reset", text_dim, bg);
+    display_draw_text_centered(258, "Click next   DblClk prev", text_dim, bg);
+    display_draw_text_centered(270, "Hold select  Hold 5s reset", text_dim, bg);
 }
 
 static void render_settings_screen(int cursor)
