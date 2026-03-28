@@ -262,6 +262,11 @@ static void render_mode_select_screen(int cursor)
     display_draw_text(44, 67, ap_pass, text_main, card_bg);
     display_draw_text(14, 81, g_app.ap_broadcast_enabled ? "AP:":"AP:", text_dim, card_bg);
     display_draw_text(44, 81, g_app.ap_broadcast_enabled ? "Broadcast" : "Hidden", text_link, card_bg);
+    display_draw_text(14, 93, "GPS:", text_dim, card_bg);
+    display_draw_text(44, 93,
+                      gps_tag_active ? "TAG ON" : "TAG OFF",
+                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                      card_bg);
 
     display_draw_text_centered(116, "Select a mode", text_dim, bg);
 
@@ -294,11 +299,6 @@ static void render_mode_select_screen(int cursor)
                                                                                     : "microSD: Not found");
     display_draw_text_centered(240, microsd_text, microsd_color, bg);
 
-    display_draw_rect(14, 250, LCD_H_RES - 28, 10, purple_dim);
-    display_draw_text_centered(252,
-                               gps_tag_active ? "GPS TAG: ON" : "GPS TAG: OFF",
-                               gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                               purple_dim);
     display_draw_text_centered(262, "Click next   DblClk prev", text_dim, bg);
     display_draw_text_centered(274, "Hold select  Hold 5s reset", text_dim, bg);
 }
