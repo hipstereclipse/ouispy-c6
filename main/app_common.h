@@ -229,6 +229,8 @@ typedef struct {
     uint8_t         shortcut_back_btn;
     bool            use_microsd_logs;
     bool            gps_tagging_enabled;
+    bool            gps_client_ready;      /* phone/browser currently able to send GPS */
+    uint32_t        gps_client_ready_ms;   /* last readiness update timestamp */
 
     /* Web server handle */
     httpd_handle_t  http_server;

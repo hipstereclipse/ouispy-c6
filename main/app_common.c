@@ -59,6 +59,8 @@ void app_state_init(void)
     g_app.shortcut_back_btn = SHORTCUT_MODE_SELECT;
     g_app.use_microsd_logs = false;
     g_app.gps_tagging_enabled = false;
+    g_app.gps_client_ready = false;
+    g_app.gps_client_ready_ms = 0;
     g_app.last_input_ms = uptime_ms();
     g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();

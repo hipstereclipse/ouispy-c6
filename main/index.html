@@ -313,6 +313,10 @@ let pageSwitchPending = false;
 let modeSwitchInFlight = false;
 let foxLedToggleInFlight = false;
 let foxLedOptimistic = null;
+let gpsClientReady = false;
+let gpsReadyLastPushMs = 0;
+let gpsReadyLastSent = null;
+let gpsReadyPushInFlight = false;
 const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
 const GPS_TOGGLE_STORE_KEY = 'ouispy_gps_toggle_v1';
 let cameraLocations = loadCameraLocations();
@@ -346,6 +350,9 @@ function applyIncomingState(nextState) {
   state = nextState || {};
   if (typeof state.gpsTagging === 'boolean') {
     gpsToggleEnabled = !!state.gpsTagging;
+  }
+  if (typeof state.gpsClientReady === 'boolean') {
+    gpsClientReady = !!state.gpsClientReady;
   }
   if (foxLedOptimistic !== null) {
     const serverLed = !!((state.fox || {}).ledMode);
@@ -403,6 +410,42 @@ function gpsSecureAvailable(caps) {
   return c.supported && c.secure;
 }
 
+
+async function computeGpsClientReady() {
+  const caps = gpsCaps();
+  if (!gpsToggleEnabled || !caps.supported || !caps.secure) return false;
+  if (!ws || ws.readyState !== 1) return false;
+
+  if (navigator.permissions && navigator.permissions.query) {
+    try {
+      const perm = await navigator.permissions.query({name:'geolocation'});
+      if (perm.state === 'denied') return false;
+      if (perm.state === 'granted') return true;
+      return false;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  return true;
+}
+
+async function pushGpsClientStatus(force) {
+  const ready = await computeGpsClientReady();
+  gpsClientReady = ready;
+
+  const now = Date.now();
+  const changed = (gpsReadyLastSent !== ready);
+  const stale = (now - gpsReadyLastPushMs) > 4000;
+  if (!force && !changed && !stale) return;
+  if (gpsReadyPushInFlight) return;
+
+  gpsReadyPushInFlight = true;
+  await api('/api/gps/status', {ready: !!ready});
+  gpsReadyPushInFlight = false;
+  gpsReadyLastSent = ready;
+  gpsReadyLastPushMs = now;
+}
 function gpsEffectiveEnabled() {
   return gpsToggleEnabled && gpsSecureAvailable();
 }
@@ -414,6 +457,7 @@ function setGpsToggle(enabled) {
     saveGpsToggleEnabled();
     state.gpsTagging = false;
     api('/api/settings', {gpsTagging:false});
+    pushGpsClientStatus(true);
     if (!caps.supported) toast('GPS unavailable in this browser');
     else if (caps.iphone && !caps.secure) toast('iPhone GPS requires HTTPS');
     else toast('GPS requires HTTPS');
@@ -426,6 +470,7 @@ function setGpsToggle(enabled) {
   saveGpsToggleEnabled();
   state.gpsTagging = gpsToggleEnabled;
   api('/api/settings', {gpsTagging:gpsToggleEnabled});
+  pushGpsClientStatus(true);
   renderGpsStatus();
   renderGpsToggleBlock();
   if (Number(state.mode) === 1) renderDevList();
@@ -442,7 +487,8 @@ function renderGpsToggleBlock() {
   const btn = $('#fGpsToggleBtn');
   const caps = gpsCaps();
   const allowed = gpsSecureAvailable(caps);
-  const on = gpsToggleEnabled && allowed;
+  const activeFromDevice = (typeof state.gpsTagActive === 'boolean') ? !!state.gpsTagActive : (gpsToggleEnabled && gpsClientReady && allowed);
+  const on = gpsToggleEnabled && allowed && activeFromDevice;
 
   if (block) block.className = 'stat gps ' + (on ? 'on' : 'off');
   if (stateEl) stateEl.textContent = on ? 'ON' : 'OFF';
@@ -511,7 +557,11 @@ function renderGpsStatus() {
     }
     return;
   }
-  el.innerHTML = '<span class="gps-chip">GPS ready</span> Secure context detected. You can save current phone position for each camera.';
+  if (!gpsClientReady) {
+    el.innerHTML = '<span class="gps-chip bad">GPS waiting</span> Phone is connected but not currently allowed to transmit GPS (check location permission).';
+    return;
+  }
+  el.innerHTML = '<span class="gps-chip">GPS ready</span> Phone is connected and allowed to transmit GPS to the device.';
 }
 
 function saveCameraLocation(mac, lat, lon, source) {
@@ -584,7 +634,12 @@ function clearCameraLocation(mac) {
 function wsConnect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host + '/ws');
-  ws.onopen = () => { $('#wsDot').className = 'dot on'; wsRetryMs = 1500; ws.send('hi'); };
+  ws.onopen = () => {
+    $('#wsDot').className = 'dot on';
+    wsRetryMs = 1500;
+    ws.send('hi');
+    pushGpsClientStatus(true);
+  };
   ws.onclose = () => {
     $('#wsDot').className = 'dot off';
     setTimeout(wsConnect, wsRetryMs);
@@ -1689,6 +1744,10 @@ setInterval(async () => {
   const s = await api('/api/state');
   if(s) applyIncomingState(s);
 }, 2000);
+
+setInterval(() => {
+  pushGpsClientStatus(false);
+}, 2500);
 </script>
 </body>
 </html>

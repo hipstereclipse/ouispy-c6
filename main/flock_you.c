@@ -25,6 +25,7 @@ static const char *TAG = "flock";
 #define FLOCK_LED_WARNING_FLASH_MS   120
 #define FLOCK_LED_WARNING_FLASHES     3
 #define FLOCK_LED_STALE_MS          4000
+#define FLOCK_GPS_READY_TIMEOUT_MS  8000
 
 static TaskHandle_t s_led_task = NULL;
 static volatile uint32_t s_warning_started_ms = 0;
@@ -353,16 +354,21 @@ static void flock_display_task(void *arg)
     int last_device_count = -1;
     int last_cursor = -1;
     int last_wifi_clients = -1;
-    int last_gps_tagging = -1;
+    int last_gps_active = -1;
 
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         frame++;
+        uint32_t now_ms = uptime_ms();
+        bool gps_ready_fresh = g_app.gps_client_ready
+                            && (now_ms > g_app.gps_client_ready_ms)
+                            && ((now_ms - g_app.gps_client_ready_ms) <= FLOCK_GPS_READY_TIMEOUT_MS);
+        bool gps_tag_active = g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
 
         /* Check if anything worth redrawing has changed */
         bool dirty = (g_app.device_count != last_device_count)
                    || (g_app.ui_cursor != last_cursor)
                    || (g_app.wifi_clients != last_wifi_clients)
-                   || ((int)g_app.gps_tagging_enabled != last_gps_tagging);
+                   || ((int)gps_tag_active != last_gps_active);
 
         /* Redraw scanning animation every 4 frames even when idle */
         bool anim_tick = (frame % 4 == 0);
@@ -375,7 +381,7 @@ static void flock_display_task(void *arg)
         last_device_count = g_app.device_count;
         last_cursor = g_app.ui_cursor;
         last_wifi_clients = g_app.wifi_clients;
-        last_gps_tagging = (int)g_app.gps_tagging_enabled;
+        last_gps_active = (int)gps_tag_active;
 
         /* Dark zinc base with vivid red accent */
         uint16_t bg = rgb565(9, 9, 11);
@@ -420,10 +426,9 @@ static void flock_display_task(void *arg)
         display_draw_text(x_off, 58, buf, text_soft, panel_bg);
         display_draw_text(96, 42, "GPS TAG", text_soft, panel_bg);
         display_draw_text(96, 54,
-                  g_app.gps_tagging_enabled ? "ON" : "OFF",
-                  g_app.gps_tagging_enabled ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                  panel_bg);
-
+                          gps_tag_active ? "ON" : "OFF",
+                          gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                          panel_bg);
         /* Accent divider line */
         display_draw_hline(4, 78, LCD_H_RES - 8, accent);
 

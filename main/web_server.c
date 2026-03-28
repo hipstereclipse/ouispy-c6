@@ -34,6 +34,7 @@
 static const char *TAG = "websrv";
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
+#define GPS_READY_TIMEOUT_MS 8000
 
 /* Embedded index.html */
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -85,6 +86,12 @@ static char *build_state_json(void)
     cJSON_AddNumberToObject(root, "shortcutBackBtn", g_app.shortcut_back_btn);
     cJSON_AddBoolToObject(root, "useMicrosdLogs", g_app.use_microsd_logs);
     cJSON_AddBoolToObject(root, "gpsTagging", g_app.gps_tagging_enabled);
+    bool gps_ready_fresh = g_app.gps_client_ready &&
+                           (now_ms > g_app.gps_client_ready_ms) &&
+                           ((now_ms - g_app.gps_client_ready_ms) <= GPS_READY_TIMEOUT_MS);
+    bool gps_active = g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+    cJSON_AddBoolToObject(root, "gpsClientReady", gps_ready_fresh);
+    cJSON_AddBoolToObject(root, "gpsTagActive", gps_active);
     cJSON_AddBoolToObject(root, "microsdAvailable", storage_ext_is_available());
     cJSON_AddNumberToObject(root, "logCapacityKb", storage_ext_log_capacity_kb());
     cJSON_AddNumberToObject(root, "deviceCount", g_app.device_count);
@@ -480,6 +487,27 @@ static esp_err_t delete_fox_registry(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t post_gps_status(httpd_req_t *req)
+{
+    char buf[96];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+
+    cJSON *ready = cJSON_GetObjectItem(root, "ready");
+    if (ready) {
+        g_app.gps_client_ready = cJSON_IsTrue(ready);
+        g_app.gps_client_ready_ms = uptime_ms();
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 static esp_err_t post_settings(httpd_req_t *req)
 {
     char buf[512];
@@ -747,6 +775,9 @@ static void web_register_routes(httpd_handle_t srv)
 
     httpd_uri_t uri_mode = { .uri="/api/mode", .method=HTTP_POST, .handler=post_mode };
     httpd_register_uri_handler(srv, &uri_mode);
+
+    httpd_uri_t uri_gps_status = { .uri="/api/gps/status", .method=HTTP_POST, .handler=post_gps_status };
+    httpd_register_uri_handler(srv, &uri_gps_status);
 
     httpd_uri_t uri_fox = { .uri="/api/fox/target", .method=HTTP_POST, .handler=post_fox_target };
     httpd_register_uri_handler(srv, &uri_fox);
