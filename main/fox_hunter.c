@@ -83,173 +83,234 @@ static void fox_scan_cb(const uint8_t *addr, int8_t rssi,
 static void fox_beep_task(void *arg)
 {
     int frame = 0;
+
+    /* Snapshot state for dirty-check: avoid full redraw when nothing visual changed */
+    bool last_target_set = false;
+    bool last_target_visible = false;
+    int8_t last_rssi_zone = -128;   /* coarse RSSI bucket for display */
+    uint8_t last_led_mode = 0xFF;
+    int last_wifi_clients = -1;
+    bool last_registry_open = false;
+    int last_reg_cursor = -1;
+    int last_reg_count = -1;
+    bool display_drawn = false;     /* force first draw */
+
     while (g_app.current_mode == MODE_FOX_HUNTER) {
         frame++;
         uint32_t now = uptime_ms();
         bool target_visible = g_app.fox_target_found &&
                               (now - g_app.fox_last_seen < TARGET_LOST_MS);
 
-        /* Dark zinc base with vivid orange accent */
-        uint16_t bg = rgb565(9, 9, 11);
-        uint16_t accent = rgb565(251, 146, 60);
-        uint16_t dim_accent = rgb565(154, 52, 18);
-        uint16_t panel_bg = rgb565(24, 24, 27);
-        uint16_t text_main = rgb565(250, 250, 250);
-        uint16_t text_dim = rgb565(161, 161, 170);
-        uint16_t footer_bg = rgb565(9, 9, 11);
-        uint16_t border_col = rgb565(63, 63, 70);
-        uint16_t status_fill = rgb565(30, 20, 8);
-        uint16_t status_border = rgb565(251, 146, 60);
-        uint16_t status_text = rgb565(253, 186, 116);
+        /* Coarse RSSI bucket (5 dBm steps) — avoid redrawing for tiny fluctuations */
+        int8_t rssi_zone = target_visible ? (g_app.fox_rssi / 5) : -128;
 
-        /* Status bar */
-        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
-        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
-        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FOX HUNTER", text_main, dim_accent);
-        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "foxhunt-c6", rgb565(228, 228, 231), dim_accent);
+        bool dirty = !display_drawn
+                   || (g_app.fox_target_set != last_target_set)
+                   || (target_visible != last_target_visible)
+                   || (rssi_zone != last_rssi_zone)
+                   || (g_app.fox_led_mode != last_led_mode)
+                   || (g_app.wifi_clients != last_wifi_clients)
+                   || (g_app.fox_registry_open != last_registry_open)
+                   || (g_app.fox_registry_open && (g_app.ui_cursor != last_reg_cursor
+                       || g_app.fox_registry_count != last_reg_count));
 
-        /* Content area */
-        display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
+        /* ── Display: only redraw when visual state changed ── */
+        if (dirty) {
+            last_target_set = g_app.fox_target_set;
+            last_target_visible = target_visible;
+            last_rssi_zone = rssi_zone;
+            last_led_mode = g_app.fox_led_mode;
+            last_wifi_clients = g_app.wifi_clients;
+            last_registry_open = g_app.fox_registry_open;
+            last_reg_cursor = g_app.ui_cursor;
+            last_reg_count = g_app.fox_registry_count;
+            display_drawn = true;
 
-        /* LED mode label for footer area */
-        const char *led_mode_str = g_app.fox_led_mode ? "STING" : "DETECTOR";
+            /* Dark zinc base with vivid orange accent */
+            uint16_t bg = rgb565(9, 9, 11);
+            uint16_t accent = rgb565(251, 146, 60);
+            uint16_t dim_accent = rgb565(154, 52, 18);
+            uint16_t panel_bg = rgb565(24, 24, 27);
+            uint16_t text_main = rgb565(250, 250, 250);
+            uint16_t text_dim = rgb565(161, 161, 170);
+            uint16_t footer_bg = rgb565(9, 9, 11);
+            uint16_t border_col = rgb565(63, 63, 70);
+            uint16_t status_fill = rgb565(30, 20, 8);
+            uint16_t status_border = rgb565(251, 146, 60);
+            uint16_t status_text = rgb565(253, 186, 116);
 
+            /* Status bar */
+            display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
+            display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
+            display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FOX HUNTER", text_main, dim_accent);
+            display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "foxhunt-c6", rgb565(228, 228, 231), dim_accent);
+
+            /* Content area */
+            display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
+
+            if (g_app.fox_registry_open) {
+                /* ── Registry view ── */
+                display_draw_text_centered(DISPLAY_CONTENT_TOP + 2, "TARGET REGISTRY", accent, bg);
+                display_draw_hline(4, DISPLAY_CONTENT_TOP + 14, LCD_H_RES - 8, dim_accent);
+
+                if (g_app.fox_registry_count == 0) {
+                    display_draw_text_centered(100, "No saved targets", text_dim, bg);
+                    display_draw_text_centered(114, "Add via web UI", text_dim, bg);
+                } else {
+                    g_app.ui_item_count = g_app.fox_registry_count;
+                    if (g_app.ui_cursor >= g_app.fox_registry_count)
+                        g_app.ui_cursor = g_app.fox_registry_count - 1;
+
+                    int max_show = 6;
+                    int start = 0;
+                    if (g_app.ui_cursor >= max_show) start = g_app.ui_cursor - max_show + 1;
+
+                    for (int idx = start, row = 0; idx < g_app.fox_registry_count && row < max_show; idx++, row++) {
+                        fox_reg_entry_t *e = &g_app.fox_registry[idx];
+                        char mac_str[18];
+                        mac_to_str(e->mac, mac_str, sizeof(mac_str));
+
+                        int y_base = DISPLAY_CONTENT_TOP + 20 + row * 34;
+                        bool selected = (idx == g_app.ui_cursor);
+                        uint16_t row_bg = selected ? rgb565(30, 20, 8) : panel_bg;
+                        uint16_t row_border = selected ? accent : border_col;
+
+                        display_draw_bordered_rect(4, y_base, LCD_H_RES - 8, 30, row_border, row_bg);
+                        if (e->label[0]) {
+                            display_draw_text(10, y_base + 3, e->label, selected ? accent : text_main, row_bg);
+                            display_draw_text(10, y_base + 15, mac_str, text_dim, row_bg);
+                        } else {
+                            display_draw_text(10, y_base + 5, mac_str, selected ? accent : text_main, row_bg);
+                            display_draw_text(10, y_base + 17, "No label", text_dim, row_bg);
+                        }
+                        if (selected) {
+                            display_draw_text(LCD_H_RES - 24, y_base + 10, "GO", accent, row_bg);
+                        }
+                    }
+                }
+
+                display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 24, "Hold=Select  3xClk=Back", text_dim, bg);
+            } else {
+                /* ── Normal tracker view ── */
+                const char *led_mode_str = g_app.fox_led_mode ? "STING" : "DETECTOR";
+
+            if (!g_app.fox_target_set) {
+                display_draw_bordered_rect(20, 80, LCD_H_RES - 40, 80, border_col, panel_bg);
+                display_draw_text(28, 90, "NO TARGET SET", text_main, panel_bg);
+                display_draw_hline(20, 120, LCD_H_RES - 40, dim_accent);
+                display_draw_text(28, 126, "DblClk=Registry", text_dim, panel_bg);
+                display_draw_text(28, 138, "Web UI / Flock", text_dim, panel_bg);
+
+                int cx = LCD_H_RES / 2, cy = 190;
+                display_draw_rect(cx - 16, cy, 32, 2, dim_accent);
+                display_draw_rect(cx, cy - 16, 2, 32, dim_accent);
+            } else {
+                char mac_str[18];
+                mac_to_str(g_app.fox_target_mac, mac_str, sizeof(mac_str));
+
+                display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 28, border_col, panel_bg);
+                display_draw_text(8, 40, "TARGET LOCKED", text_main, panel_bg);
+                display_draw_text(8, 52, mac_str, rgb565(253, 186, 116), panel_bg);
+                display_draw_hline(4, 70, LCD_H_RES - 8, accent);
+
+                if (target_visible) {
+                    char buf[32];
+                    uint8_t cr, cg, cb;
+                    rssi_to_color(g_app.fox_rssi, &cr, &cg, &cb);
+                    uint16_t rssi_col = rgb565(cr, cg, cb);
+
+                    snprintf(buf, sizeof(buf), "%d", g_app.fox_rssi);
+                    display_draw_text_scaled(20, 78, buf, rssi_col, bg, 3);
+                    display_draw_text(LCD_H_RES - 40, 86, "dBm", text_dim, bg);
+
+                    snprintf(buf, sizeof(buf), "Best: %d dBm", g_app.fox_rssi_best);
+                    display_draw_text(8, 106, buf, text_main, bg);
+
+                    display_draw_rect(4, 122, 2, 6, accent);
+                    display_draw_rect(LCD_H_RES - 6, 122, 2, 6, accent);
+                    int bar_w = rssi_to_bar(g_app.fox_rssi);
+                    display_draw_rect(8, 124, bar_w, 16, rssi_col);
+                    display_draw_rect(8 + bar_w, 124, LCD_H_RES - 16 - bar_w, 16, rgb565(39, 39, 42));
+
+                    int pct = (g_app.fox_rssi + 100) * 100 / 80;
+                    if (pct < 0) pct = 0;
+                    if (pct > 100) pct = 100;
+                    for (int i = 0; i < 20; i++) {
+                        int bar_h = 4 + i;
+                        int bx = 8 + i * 8;
+                        bool active = (i * 5) < pct;
+                        uint16_t bar_col = active ? rssi_col : rgb565(39, 39, 42);
+                        display_draw_rect(bx, 152 + (24 - bar_h), 6, bar_h, bar_col);
+                    }
+
+                    snprintf(buf, sizeof(buf), "%d%%", pct);
+                    display_draw_text(72, 180, buf, text_main, bg);
+
+                    display_draw_bordered_rect(20, 196, LCD_H_RES - 40, 20, status_border, status_fill);
+                    display_draw_text(40, 202, "TRACKING", status_text, status_fill);
+                } else {
+                    display_draw_bordered_rect(20, 90, LCD_H_RES - 40, 50, rgb565(127, 29, 29), rgb565(30, 10, 10));
+                    display_draw_text(40, 100, "SIGNAL LOST", rgb565(248, 113, 113), rgb565(30, 10, 10));
+                    display_draw_text(30, 120, "Searching...", text_dim, rgb565(30, 10, 10));
+
+                    int cx = LCD_H_RES / 2, cy = 180;
+                    display_draw_rect(cx - 20, cy, 40, 2, dim_accent);
+                    display_draw_rect(cx, cy - 20, 2, 40, dim_accent);
+                }
+            }
+            } /* end else (normal tracker view) */
+
+            /* LED mode indicator above footer — always shown */
+            {
+                uint16_t mode_col = g_app.fox_led_mode ? rgb565(56, 189, 248) : rgb565(74, 222, 128);
+                const char *led_label = g_app.fox_led_mode ? "STING" : "DETECTOR";
+                char mode_label[24];
+                snprintf(mode_label, sizeof(mode_label), "LED: %s", led_label);
+                display_draw_text(4, DISPLAY_FOOTER_BAR_Y - 12, mode_label, mode_col, bg);
+            }
+
+            /* Bottom bar with WiFi info */
+            display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
+            display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
+            char info[64];
+            snprintf(info, sizeof(info), "foxhunt123  %dCli  %lukB",
+                     g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
+            display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, info, text_dim, footer_bg);
+        } /* end if (dirty) */
+
+        /* ── LED / buzzer: always runs regardless of display dirty ── */
         if (!g_app.fox_target_set) {
-            /* No target -- solid orange LED (Detector) or off (Sting) */
             if (g_app.fox_led_mode == 0) {
                 led_ctrl_set(255, 120, 0);
             } else {
                 led_ctrl_off();
             }
+            vTaskDelay(pdMS_TO_TICKS(500));
+        } else if (target_visible) {
+            int interval = rssi_to_interval(g_app.fox_rssi);
+            uint32_t freq = 800 + (uint32_t)((g_app.fox_rssi + 100) * 20);
+            buzzer_tone(freq, 20);
 
-            display_draw_bordered_rect(20, 80, LCD_H_RES - 40, 80, border_col, panel_bg);
-            display_draw_text(28, 90, "NO TARGET SET", text_main, panel_bg);
-            display_draw_hline(20, 120, LCD_H_RES - 40, dim_accent);
-            display_draw_text(28, 126, "Use web UI or", text_dim, panel_bg);
-            display_draw_text(28, 138, "Flock You list", text_dim, panel_bg);
-
-            /* Animated crosshair */
-            int cx = LCD_H_RES / 2, cy = 190;
-            int arm = 12 + (frame % 3) * 2;
-            display_draw_rect(cx - arm, cy, arm * 2, 2, dim_accent);
-            display_draw_rect(cx, cy - arm, 2, arm * 2, dim_accent);
-        } else {
-            char mac_str[18];
-            mac_to_str(g_app.fox_target_mac, mac_str, sizeof(mac_str));
-
-            /* Target info section */
-            display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 28, border_col, panel_bg);
-            display_draw_text(8, 40, "TARGET LOCKED", text_main, panel_bg);
-            display_draw_text(8, 52, mac_str, rgb565(253, 186, 116), panel_bg);
-
-            /* Amber divider */
-            display_draw_hline(4, 70, LCD_H_RES - 8, accent);
-
-            if (target_visible) {
-                char buf[32];
-
-                /* Large RSSI display */
-                uint8_t cr, cg, cb;
-                rssi_to_color(g_app.fox_rssi, &cr, &cg, &cb);
-                uint16_t rssi_col = rgb565(cr, cg, cb);
-
-                snprintf(buf, sizeof(buf), "%d", g_app.fox_rssi);
-                display_draw_text_scaled(20, 78, buf, rssi_col, bg, 3);
-                display_draw_text(LCD_H_RES - 40, 86, "dBm", text_dim, bg);
-
-                /* Best RSSI */
-                snprintf(buf, sizeof(buf), "Best: %d dBm", g_app.fox_rssi_best);
-                display_draw_text(8, 106, buf, text_main, bg);
-
-                /* Proximity bar */
-                display_draw_rect(4, 122, 2, 6, accent);
-                display_draw_rect(LCD_H_RES - 6, 122, 2, 6, accent);
-                int bar_w = rssi_to_bar(g_app.fox_rssi);
-                display_draw_rect(8, 124, bar_w, 16, rssi_col);
-                display_draw_rect(8 + bar_w, 124, LCD_H_RES - 16 - bar_w, 16, rgb565(39, 39, 42));
-
-                /* Signal strength bars */
-                int pct = (g_app.fox_rssi + 100) * 100 / 80;
-                if (pct < 0) pct = 0;
-                if (pct > 100) pct = 100;
-                for (int i = 0; i < 20; i++) {
-                    int bar_h = 4 + i;
-                    int bx = 8 + i * 8;
-                    bool active = (i * 5) < pct;
-                    uint16_t bar_col = active ? rssi_col : rgb565(39, 39, 42);
-                    display_draw_rect(bx, 152 + (24 - bar_h), 6, bar_h, bar_col);
-                }
-
-                /* Percentage */
-                snprintf(buf, sizeof(buf), "%d%%", pct);
-                display_draw_text(72, 180, buf, text_main, bg);
-
-                /* Status indicator */
-                display_draw_bordered_rect(20, 196, LCD_H_RES - 40, 20, status_border, status_fill);
-                display_draw_text(40, 202, "TRACKING", status_text, status_fill);
-
-                /* Beep and LED */
-                int interval = rssi_to_interval(g_app.fox_rssi);
-                uint32_t freq = 800 + (uint32_t)((g_app.fox_rssi + 100) * 20);
-                buzzer_tone(freq, 20);
-
-                if (g_app.fox_led_mode == 0) {
-                    /* Detector: blink red, speed = RSSI proximity */
-                    led_ctrl_set(220, 20, 10);
-                    vTaskDelay(pdMS_TO_TICKS(interval / 2));
-                    led_ctrl_off();
-                    vTaskDelay(pdMS_TO_TICKS(interval / 2));
-                } else {
-                    /* Sting: bright blue, brightness = signal strength */
-                    float str = (g_app.fox_rssi + 100.0f) / 80.0f;
-                    if (str < 0.0f) str = 0.0f;
-                    if (str > 1.0f) str = 1.0f;
-                    uint8_t br = (uint8_t)(30 + str * 225);
-                    led_ctrl_set(0, (uint8_t)(br / 4), br);
-                    vTaskDelay(pdMS_TO_TICKS(interval));
-                }
+            if (g_app.fox_led_mode == 0) {
+                led_ctrl_set(220, 20, 10);
+                vTaskDelay(pdMS_TO_TICKS(interval / 2));
+                led_ctrl_off();
+                vTaskDelay(pdMS_TO_TICKS(interval / 2));
             } else {
-                /* Signal lost -- LED shows green (Detector) or off (Sting) */
-                if (g_app.fox_led_mode == 0) {
-                    led_ctrl_set(0, 120, 0);
-                } else {
-                    led_ctrl_off();
-                }
-
-                display_draw_bordered_rect(20, 90, LCD_H_RES - 40, 50, rgb565(127, 29, 29), rgb565(30, 10, 10));
-                display_draw_text(40, 100, "SIGNAL LOST", rgb565(248, 113, 113), rgb565(30, 10, 10));
-
-                const char *search_anim[] = {"Searching.", "Searching..", "Searching..."};
-                display_draw_text(30, 120, search_anim[frame % 3], text_dim, rgb565(30, 10, 10));
-
-                /* Crosshair animation */
-                int cx = LCD_H_RES / 2, cy = 180;
-                uint16_t cross_col = (frame % 2) ? dim_accent : rgb565(82, 40, 12);
-                display_draw_rect(cx - 20, cy, 40, 2, cross_col);
-                display_draw_rect(cx, cy - 20, 2, 40, cross_col);
-
-                buzzer_off();
+                float str = (g_app.fox_rssi + 100.0f) / 80.0f;
+                if (str < 0.0f) str = 0.0f;
+                if (str > 1.0f) str = 1.0f;
+                uint8_t br = (uint8_t)(30 + str * 225);
+                led_ctrl_set(0, (uint8_t)(br / 4), br);
+                vTaskDelay(pdMS_TO_TICKS(interval));
             }
-        }
-
-        /* LED mode indicator above footer */
-        {
-            uint16_t mode_col = g_app.fox_led_mode ? rgb565(56, 189, 248) : rgb565(74, 222, 128);
-            char mode_label[24];
-            snprintf(mode_label, sizeof(mode_label), "LED: %s", led_mode_str);
-            display_draw_text(4, DISPLAY_FOOTER_BAR_Y - 12, mode_label, mode_col, bg);
-            display_draw_text(LCD_H_RES - 60, DISPLAY_FOOTER_BAR_Y - 12, "Hold=Tog", text_dim, bg);
-        }
-
-        /* Bottom bar with WiFi info */
-        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
-        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
-        char info[48];
-        snprintf(info, sizeof(info), "foxhunt123  %dCli  %lukB",
-                 g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
-        display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, info, text_dim, footer_bg);
-
-        if (!target_visible || !g_app.fox_target_set) {
+        } else {
+            if (g_app.fox_led_mode == 0) {
+                led_ctrl_set(0, 120, 0);
+            } else {
+                led_ctrl_off();
+            }
+            buzzer_off();
             vTaskDelay(pdMS_TO_TICKS(500));
         }
     }
@@ -315,4 +376,42 @@ void fox_hunter_set_target_from_flock(int device_index)
 bool fox_hunter_has_target(void)
 {
     return g_app.fox_target_set;
+}
+
+int fox_hunter_registry_add(const uint8_t mac[6], const char *label)
+{
+    /* Check for duplicate */
+    for (int i = 0; i < g_app.fox_registry_count; i++) {
+        if (mac_equal(g_app.fox_registry[i].mac, mac)) return i; /* already exists */
+    }
+    if (g_app.fox_registry_count >= FOX_REGISTRY_MAX) return -1; /* full */
+    fox_reg_entry_t *e = &g_app.fox_registry[g_app.fox_registry_count];
+    memcpy(e->mac, mac, 6);
+    memset(e->label, 0, FOX_REG_LABEL_LEN);
+    if (label && label[0]) {
+        strncpy(e->label, label, FOX_REG_LABEL_LEN - 1);
+    }
+    g_app.fox_registry_count++;
+    nvs_store_save_fox_registry();
+    ESP_LOGI(TAG, "Registry add [%d]: %s", g_app.fox_registry_count - 1, label ? label : "");
+    return g_app.fox_registry_count - 1;
+}
+
+int fox_hunter_registry_remove(int index)
+{
+    if (index < 0 || index >= g_app.fox_registry_count) return -1;
+    if (index < g_app.fox_registry_count - 1) {
+        memmove(&g_app.fox_registry[index], &g_app.fox_registry[index + 1],
+                (g_app.fox_registry_count - 1 - index) * sizeof(fox_reg_entry_t));
+    }
+    g_app.fox_registry_count--;
+    nvs_store_save_fox_registry();
+    return 0;
+}
+
+void fox_hunter_registry_select(int index)
+{
+    if (index < 0 || index >= g_app.fox_registry_count) return;
+    fox_hunter_set_target(g_app.fox_registry[index].mac);
+    g_app.fox_registry_open = false;
 }

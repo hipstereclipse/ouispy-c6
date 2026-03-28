@@ -391,7 +391,12 @@ function trackDevice(i) {
 }
 
 // ── Fox Hunter View ──
+let foxRegistry = [];
+async function fetchFoxRegistry() { foxRegistry = await api('/api/fox/registry') || []; }
 function renderFox() {
+  fetchFoxRegistry().then(() => renderFoxInner());
+}
+function renderFoxInner() {
   const f = state.fox || {};
   const c = $('#main');
   c.innerHTML = `
@@ -410,8 +415,9 @@ function renderFox() {
             <div class="prox-label" id="foxPct">${Math.round(rssiPct(f.rssi))}%</div>
           </div>
           <div style="margin-top:12px;font-size:13px;font-weight:700;letter-spacing:1px;color:${f.found?'var(--green)':'var(--rose)'}">${f.found?'&#9679; TRACKING':'&#9675; SIGNAL LOST'}</div>
+          <button class="btn sm" style="margin-top:8px;border-color:var(--fox);color:var(--fox)" onclick="saveTargetToRegistry()">&#128190; Save to Registry</button>
         ` : `
-          <div class="empty"><div class="icon" style="color:var(--fox)">&#9678;</div>No target selected<br><small style="color:var(--fox)">Use Flock You to find devices, or enter MAC below</small></div>
+          <div class="empty"><div class="icon" style="color:var(--fox)">&#9678;</div>No target selected<br><small style="color:var(--fox)">Use Flock You, enter MAC, or pick from registry</small></div>
         `}
       </div>
     </div>
@@ -428,6 +434,10 @@ function renderFox() {
         <input type="text" class="input-mac" id="macInput" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" style="border-color:rgba(251,146,60,.3)">
         <button class="btn primary" style="background:var(--fox);border-color:var(--fox)" onclick="setFoxTarget()">Lock</button>
       </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <input type="text" class="input-mac" id="regLabelInput" placeholder="Label (optional)" maxlength="15" style="flex:1;border-color:rgba(251,146,60,.2)">
+        <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="addMacToRegistry()">+ Registry</button>
+      </div>
       ${devices.length ? `<div style="margin-top:10px"><h2>From Flock You (${devices.length})</h2>
         <div class="dev-list" style="max-height:30vh">${devices.map((d,i) => `
           <div class="dev-item" onclick="api('/api/fox/target',{index:${i}});toast('Locked on '+${JSON.stringify(d.mac)})">
@@ -436,6 +446,10 @@ function renderFox() {
             <div class="dev-rssi ${rssiClass(d.rssi)}">${d.rssi}</div>
           </div>`).join('')}
         </div></div>` : ''}
+    </div>
+    <div class="card">
+      <h2>Target Registry (${foxRegistry.length}/${8})</h2>
+      <div id="foxRegList">${renderFoxRegList()}</div>
     </div>`;
   renderFoxBars(f.rssi || -100);
 }
@@ -465,6 +479,37 @@ function setFoxTarget() {
   const mac = ($('#macInput') || {}).value;
   if(mac && mac.length >= 17) { api('/api/fox/target', {mac}); toast('Target set: ' + mac); }
   else toast('Enter a valid MAC address');
+}
+function renderFoxRegList() {
+  if(!foxRegistry.length) return '<div class="empty" style="padding:10px"><div class="icon">📋</div>No saved targets</div>';
+  return foxRegistry.map((r,i) => `
+    <div class="dev-item" onclick="api('/api/fox/target',{mac:'${r.mac}'});toast('Locked: '+'${r.label||r.mac}')">
+      <div class="dev-icon raven">🎯</div>
+      <div class="dev-info"><div class="dev-mac">${r.mac}</div><div class="dev-name">${r.label||'No label'}</div></div>
+      <div class="dev-actions"><button class="btn sm" style="border-color:var(--rose);color:var(--rose)" onclick="event.stopPropagation();removeFromRegistry(${i})">✕</button></div>
+    </div>`).join('');
+}
+async function addMacToRegistry() {
+  const mac = ($('#macInput') || {}).value;
+  const label = ($('#regLabelInput') || {}).value || '';
+  if(!mac || mac.length < 17) { toast('Enter a valid MAC'); return; }
+  const r = await api('/api/fox/registry', {mac, label});
+  if(r && r.ok) { toast('Saved to registry'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); }); }
+  else toast('Registry full or error');
+}
+async function saveTargetToRegistry() {
+  const f = state.fox || {};
+  if(!f.hasTarget) return;
+  const label = prompt('Label for '+f.target+':', '') || '';
+  const r = await api('/api/fox/registry', {mac: f.target, label});
+  if(r && r.ok) { toast('Saved to registry'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); }); }
+  else toast('Registry full or already saved');
+}
+async function removeFromRegistry(idx) {
+  try {
+    await fetch('/api/fox/registry', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:idx})});
+    toast('Removed'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); });
+  } catch(e) { toast('Error removing'); }
 }
 
 // ── Sky Spy View ──

@@ -350,8 +350,29 @@ static void flock_scan_cb(const uint8_t *addr, int8_t rssi,
 static void flock_display_task(void *arg)
 {
     int frame = 0;
+    int last_device_count = -1;
+    int last_cursor = -1;
+    int last_wifi_clients = -1;
+
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         frame++;
+
+        /* Check if anything worth redrawing has changed */
+        bool dirty = (g_app.device_count != last_device_count)
+                   || (g_app.ui_cursor != last_cursor)
+                   || (g_app.wifi_clients != last_wifi_clients);
+
+        /* Redraw scanning animation every 4 frames even when idle */
+        bool anim_tick = (frame % 4 == 0);
+
+        if (!dirty && !anim_tick) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+        last_device_count = g_app.device_count;
+        last_cursor = g_app.ui_cursor;
+        last_wifi_clients = g_app.wifi_clients;
 
         /* Dark zinc base with vivid red accent */
         uint16_t bg = rgb565(9, 9, 11);
@@ -450,7 +471,7 @@ static void flock_display_task(void *arg)
                  g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
         display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer);
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
     vTaskDelete(NULL);
 }

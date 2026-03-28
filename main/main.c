@@ -259,12 +259,30 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_DOUBLE_CLICK:
+        if (g_app.current_mode == MODE_FOX_HUNTER && !g_app.fox_registry_open) {
+            /* Open the target registry overlay */
+            g_app.fox_registry_open = true;
+            g_app.ui_cursor = 0;
+            g_app.ui_item_count = g_app.fox_registry_count;
+            buzzer_tone(1200, 40);
+            break;
+        }
         /* Navigate backward */
         if (g_app.ui_item_count > 0) {
             g_app.ui_cursor = (g_app.ui_cursor - 1 + g_app.ui_item_count)
                               % g_app.ui_item_count;
         }
         buzzer_beep(20);
+        break;
+
+    case BTN_EVT_TRIPLE_CLICK:
+        if (g_app.current_mode == MODE_FOX_HUNTER && g_app.fox_registry_open) {
+            /* Close the registry overlay */
+            g_app.fox_registry_open = false;
+            g_app.ui_cursor = 0;
+            g_app.ui_item_count = 0;
+            buzzer_tone(800, 40);
+        }
         break;
 
     case BTN_EVT_HOLD:
@@ -286,9 +304,17 @@ static void on_button_event(button_id_t btn, button_event_t evt)
                 buzzer_tone(1200, 120);
             }
         } else if (g_app.current_mode == MODE_FOX_HUNTER) {
-            /* Toggle LED mode: Detector ↔ Sting */
-            g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
-            buzzer_tone(g_app.fox_led_mode ? 1400 : 900, 60);
+            if (g_app.fox_registry_open) {
+                /* Select target from registry */
+                if (g_app.fox_registry_count > 0 && g_app.ui_cursor < g_app.fox_registry_count) {
+                    fox_hunter_registry_select(g_app.ui_cursor);
+                    buzzer_tone(1400, 120);
+                }
+            } else {
+                /* Toggle LED mode: Detector ↔ Sting */
+                g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
+                buzzer_tone(g_app.fox_led_mode ? 1400 : 900, 60);
+            }
         }
         break;
 
@@ -316,6 +342,7 @@ void app_main(void)
     app_state_init();
     nvs_store_init();
     nvs_store_load_prefs();
+    nvs_store_load_fox_registry();
 
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "  OUI-Spy C6 — RF Intelligence Tool");
@@ -332,9 +359,11 @@ void app_main(void)
 
     /* Boot splash -- gold & purple */
     display_fill(rgb565(12, 10, 16));
-    display_draw_text_scaled_centered(100, "OUI-SPY", rgb565(251, 191, 36), rgb565(12, 10, 16), 2);
-    display_draw_text_scaled_centered(126, "C6", rgb565(168, 85, 247), rgb565(12, 10, 16), 2);
-    display_draw_text_centered(160, "Initializing...", rgb565(161, 161, 170), rgb565(12, 10, 16));
+    display_draw_text_scaled_centered(80, "OUI-SPY", rgb565(251, 191, 36), rgb565(12, 10, 16), 3);
+    display_draw_text_scaled_centered(110, "C6", rgb565(168, 85, 247), rgb565(12, 10, 16), 3);
+    display_draw_hline(30, 145, LCD_H_RES - 60, rgb565(63, 63, 70));
+    display_draw_text_centered(158, "RF Intelligence Tool", rgb565(161, 161, 170), rgb565(12, 10, 16));
+    display_draw_text_centered(175, "Initializing...", rgb565(113, 113, 122), rgb565(12, 10, 16));
     buzzer_melody_boot();
     set_init_phase_led(LED_PHASE_BOOT_SPLASH);
     vTaskDelay(pdMS_TO_TICKS(1000));

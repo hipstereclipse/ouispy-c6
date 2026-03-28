@@ -24,6 +24,7 @@ typedef enum {
 typedef enum {
     BTN_EVT_CLICK,          /* single click  */
     BTN_EVT_DOUBLE_CLICK,   /* double click   */
+    BTN_EVT_TRIPLE_CLICK,   /* triple click   */
     BTN_EVT_HOLD,           /* ~1 s hold      */
     BTN_EVT_LONG_HOLD_WARN, /* 5 s hold       */
     BTN_EVT_LONG_HOLD,      /* 7 s hold       */

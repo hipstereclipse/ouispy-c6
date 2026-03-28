@@ -107,7 +107,9 @@ static void button_poll_task(void *arg)
                 } else if ((now - s_state[i].release_time) >= DOUBLE_CLICK_MS) {
                     /* Timeout — dispatch accumulated clicks */
                     if (s_event_cb) {
-                        if (s_state[i].click_count >= 2)
+                        if (s_state[i].click_count >= 3)
+                            s_event_cb((button_id_t)i, BTN_EVT_TRIPLE_CLICK);
+                        else if (s_state[i].click_count >= 2)
                             s_event_cb((button_id_t)i, BTN_EVT_DOUBLE_CLICK);
                         else
                             s_event_cb((button_id_t)i, BTN_EVT_CLICK);

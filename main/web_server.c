@@ -66,6 +66,7 @@ static char *build_state_json(void)
     cJSON_AddNumberToObject(fox, "bestRssi", g_app.fox_rssi_best);
     cJSON_AddBoolToObject(fox, "found", g_app.fox_target_found);
     cJSON_AddNumberToObject(fox, "ledMode", g_app.fox_led_mode);
+    cJSON_AddNumberToObject(fox, "registryCount", g_app.fox_registry_count);
 
     char *str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -227,6 +228,88 @@ static esp_err_t post_fox_ledmode(httpd_req_t *req)
     return httpd_resp_sendstr(req, resp);
 }
 
+/* ── Fox registry endpoints ── */
+static esp_err_t get_fox_registry(httpd_req_t *req)
+{
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < g_app.fox_registry_count; i++) {
+        fox_reg_entry_t *e = &g_app.fox_registry[i];
+        cJSON *item = cJSON_CreateObject();
+        char mac_str[18];
+        mac_to_str(e->mac, mac_str, sizeof(mac_str));
+        cJSON_AddStringToObject(item, "mac", mac_str);
+        cJSON_AddStringToObject(item, "label", e->label);
+        cJSON_AddItemToArray(arr, item);
+    }
+    char *json = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
+    free(json);
+    return ret;
+}
+
+static esp_err_t post_fox_registry(httpd_req_t *req)
+{
+    char buf[128];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+
+    cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
+    if (!mac_item || !cJSON_IsString(mac_item)) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing mac");
+    }
+
+    uint8_t mac[6];
+    if (mac_from_str(mac_item->valuestring, mac) != 0) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid mac");
+    }
+
+    const char *label = "";
+    cJSON *label_item = cJSON_GetObjectItem(root, "label");
+    if (label_item && cJSON_IsString(label_item)) label = label_item->valuestring;
+
+    int idx = fox_hunter_registry_add(mac, label);
+    cJSON_Delete(root);
+
+    if (idx < 0) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Registry full");
+
+    char resp[32];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"index\":%d}", idx);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, resp);
+}
+
+static esp_err_t delete_fox_registry(httpd_req_t *req)
+{
+    char buf[64];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+
+    cJSON *idx_item = cJSON_GetObjectItem(root, "index");
+    if (!idx_item || !cJSON_IsNumber(idx_item)) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
+    }
+
+    int result = fox_hunter_registry_remove(idx_item->valueint);
+    cJSON_Delete(root);
+
+    if (result < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
 static esp_err_t post_settings(httpd_req_t *req)
 {
     char buf[128];
@@ -349,7 +432,7 @@ static void ws_push_task(void *arg)
 void web_server_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 16;
     config.stack_size       = 8192;
     config.lru_purge_enable = true;
 
@@ -380,6 +463,15 @@ void web_server_start(void)
 
     httpd_uri_t uri_fox_led = { .uri="/api/fox/ledmode", .method=HTTP_POST, .handler=post_fox_ledmode };
     httpd_register_uri_handler(g_app.http_server, &uri_fox_led);
+
+    httpd_uri_t uri_fox_reg_get = { .uri="/api/fox/registry", .method=HTTP_GET, .handler=get_fox_registry };
+    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_get);
+
+    httpd_uri_t uri_fox_reg_post = { .uri="/api/fox/registry", .method=HTTP_POST, .handler=post_fox_registry };
+    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_post);
+
+    httpd_uri_t uri_fox_reg_del = { .uri="/api/fox/registry", .method=HTTP_DELETE, .handler=delete_fox_registry };
+    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_del);
 
     httpd_uri_t uri_settings = { .uri="/api/settings", .method=HTTP_POST, .handler=post_settings };
     httpd_register_uri_handler(g_app.http_server, &uri_settings);

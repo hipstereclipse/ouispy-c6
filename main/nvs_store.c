@@ -76,6 +76,33 @@ void nvs_store_save_prefs(void)
     }
 }
 
+void nvs_store_save_fox_registry(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "fox_reg_n", (uint8_t)g_app.fox_registry_count);
+        nvs_set_blob(h, "fox_reg", g_app.fox_registry,
+                     g_app.fox_registry_count * sizeof(fox_reg_entry_t));
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+void nvs_store_load_fox_registry(void)
+{
+    nvs_handle_t h;
+    uint8_t count = 0;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, "fox_reg_n", &count) == ESP_OK && count <= FOX_REGISTRY_MAX) {
+            size_t len = count * sizeof(fox_reg_entry_t);
+            if (nvs_get_blob(h, "fox_reg", g_app.fox_registry, &len) == ESP_OK) {
+                g_app.fox_registry_count = count;
+            }
+        }
+        nvs_close(h);
+    }
+}
+
 void nvs_store_load_prefs(void)
 {
     nvs_handle_t h;

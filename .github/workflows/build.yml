@@ -1,0 +1,71 @@
+name: Build & Release Firmware
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.3.2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target esp32c6
+          idf.py build
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release
+          cp build/bootloader/bootloader.bin    release/bootloader.bin
+          cp build/partition_table/partition-table.bin release/partition-table.bin
+          cp build/ouispy-c6.bin                release/ouispy-c6.bin
+          # Create a combined flash command reference
+          echo "esptool.py --chip esp32c6 -b 460800 write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB 0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 ouispy-c6.bin" > release/flash_command.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: release/
+
+      - name: Update latest release
+        uses: andelf/nightly-release@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: latest
+          name: "Latest Firmware Build"
+          prerelease: false
+          body: |
+            Automatically built from the latest commit on `master`.
+
+            **Commit:** ${{ github.sha }}
+            **Date:** ${{ github.event.head_commit.timestamp }}
+
+            ### Flash with the OUI-Spy flasher
+            ```
+            python flash.py
+            ```
+
+            ### Manual flash (esptool)
+            ```
+            esptool.py --chip esp32c6 -b 460800 write_flash \
+              --flash_mode dio --flash_freq 80m --flash_size 4MB \
+              0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 ouispy-c6.bin
+            ```
+          files: |
+            release/bootloader.bin
+            release/partition-table.bin
+            release/ouispy-c6.bin

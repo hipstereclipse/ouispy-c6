@@ -16,6 +16,7 @@ SPDX-License-Identifier: MIT
 """
 
 import glob
+import json
 import os
 import platform
 import re
@@ -25,6 +26,8 @@ import sys
 import time
 from collections import deque
 from datetime import datetime
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 # ── Flash layout (must match partitions.csv) ──
 CHIP = "esp32c6"
@@ -35,6 +38,8 @@ BAUD = 460800
 MONITOR_BAUD = 115200
 IDF_VERSION = "v5.3.2"
 MONITOR_RETRY_SECONDS = 15
+GITHUB_REPO = "hipstereclipse/ouispy-c6"
+GITHUB_RELEASE_TAG = "latest"
 
 CRASH_MARKERS = (
     "guru meditation",
@@ -650,8 +655,53 @@ def _find_idf_and_build():
     return bd
 
 
+def _download_release_binaries():
+    """Download prebuilt firmware from the latest GitHub release. Returns build dir or None."""
+    bd = get_build_dir()
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{GITHUB_RELEASE_TAG}"
+
+    color_print(f"\n  Fetching release info from GitHub...", C.CYAN)
+    try:
+        req = Request(api_url, headers={"Accept": "application/vnd.github+json"})
+        with urlopen(req, timeout=15) as resp:
+            release = json.loads(resp.read())
+    except (URLError, OSError, json.JSONDecodeError) as e:
+        color_print(f"  Could not reach GitHub: {e}", C.RED)
+        return None
+
+    assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
+    needed = {name: url for _, name, _ in FLASH_MAP if (url := assets.get(name))}
+
+    if len(needed) != len(FLASH_MAP):
+        missing = [name for _, name, _ in FLASH_MAP if name not in assets]
+        color_print(f"  Release is missing: {', '.join(missing)}", C.RED)
+        return None
+
+    # Ensure build dir structure exists
+    for _, _, rel in FLASH_MAP:
+        os.makedirs(os.path.join(bd, os.path.dirname(rel)), exist_ok=True)
+
+    for _, name, rel in FLASH_MAP:
+        url = needed[name]
+        dest = os.path.join(bd, rel)
+        color_print(f"  Downloading {name}...", C.YELLOW)
+        try:
+            with urlopen(url, timeout=30) as resp:
+                data = resp.read()
+            with open(dest, "wb") as f:
+                f.write(data)
+            sz = len(data) / 1024
+            color_print(f"    {name:28s}  {sz:>7.1f} kB", C.CYAN)
+        except (URLError, OSError) as e:
+            color_print(f"  Download failed for {name}: {e}", C.RED)
+            return None
+
+    color_print("\n  Downloaded prebuilt firmware from GitHub!", C.GREEN)
+    return bd
+
+
 def ensure_firmware():
-    """Make sure firmware binaries exist — find IDF, install if needed, build. Returns build dir."""
+    """Make sure firmware binaries exist. Returns build dir."""
     bd = get_build_dir()
 
     if firmware_ready():
@@ -664,7 +714,32 @@ def ensure_firmware():
             return _find_idf_and_build()
         return bd
 
-    color_print("  Firmware has not been built yet.", C.YELLOW)
+    color_print("  Firmware has not been built yet.\n", C.YELLOW)
+
+    # CLI flags can skip the interactive prompt
+    if os.environ.get("OUISPY_FORCE_BUILD"):
+        return _find_idf_and_build()
+    if os.environ.get("OUISPY_FORCE_DOWNLOAD"):
+        result = _download_release_binaries()
+        if result and firmware_ready():
+            return result
+        color_print("\n  Download failed — falling back to local build.", C.YELLOW)
+        return _find_idf_and_build()
+
+    color_print("  How would you like to get the firmware?\n", C.BOLD)
+    color_print("    [1] Download latest prebuilt release (fast, no tools needed)", C.CYAN)
+    color_print("    [2] Build from source (requires ESP-IDF, use if you modified code)\n", C.CYAN)
+
+    choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
+    if choice == "2":
+        return _find_idf_and_build()
+
+    # Try download; fall back to build on failure
+    result = _download_release_binaries()
+    if result and firmware_ready():
+        return result
+
+    color_print("\n  Download failed — falling back to local build.", C.YELLOW)
     return _find_idf_and_build()
 
 
@@ -809,10 +884,16 @@ def main():
             erase = True; i += 1; continue
         if args[i] == "--no-monitor":
             monitor = False; i += 1; continue
+        if args[i] == "--build":
+            os.environ["OUISPY_FORCE_BUILD"] = "1"; i += 1; continue
+        if args[i] == "--download":
+            os.environ["OUISPY_FORCE_DOWNLOAD"] = "1"; i += 1; continue
         if args[i] in ("--help", "-h"):
-            print("Usage: python flash.py [--port PORT] [--erase] [--baud RATE] [--monitor-baud RATE] [--no-monitor]")
+            print("Usage: python flash.py [--port PORT] [--erase] [--baud RATE] [--monitor-baud RATE] [--no-monitor] [--download] [--build]")
             print("\n  No arguments needed — the script handles everything automatically.")
-            print("  It will install ESP-IDF, build, flash, and then open a serial monitor by default.\n")
+            print("  --download   Skip menu, download prebuilt firmware from GitHub")
+            print("  --build      Skip menu, build from local source code")
+            print("  It will flash and then open a serial monitor by default.\n")
             sys.exit(0)
         i += 1
 

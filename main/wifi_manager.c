@@ -72,15 +72,6 @@ esp_err_t wifi_manager_init(void)
         return err;
     }
 
-    /* Randomize MAC for privacy */
-    uint8_t mac[6];
-    esp_fill_random(mac, 6);
-    mac[0] = (mac[0] & 0xFC) | 0x02; /* Locally administered, unicast */
-    err = esp_wifi_set_mac(WIFI_IF_AP, mac);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "esp_wifi_set_mac failed: %s", esp_err_to_name(err));
-    }
-
     s_initialized = true;
     ESP_LOGI(TAG, "WiFi subsystem initialized");
     return ESP_OK;
@@ -97,8 +88,9 @@ esp_err_t wifi_manager_start_ap(const char *ssid, const char *password, uint8_t 
         .ap = {
             .channel        = channel,
             .max_connection = 4,
-            .authmode       = WIFI_AUTH_WPA2_PSK,
-            .pmf_cfg        = { .required = true },
+            .authmode       = WIFI_AUTH_WPA_WPA2_PSK,
+            .pmf_cfg        = { .capable = true, .required = false },
+            .pairwise_cipher = WIFI_CIPHER_TYPE_CCMP,
         },
     };
     strncpy((char *)ap_cfg.ap.ssid, ssid, sizeof(ap_cfg.ap.ssid) - 1);

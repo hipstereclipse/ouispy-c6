@@ -70,7 +70,7 @@ void display_init(void)
     /* ── ST7789 Panel ── */
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num   = PIN_LCD_RST,
-        .rgb_ele_order    = LCD_RGB_ELEMENT_ORDER_RGB,
+        .rgb_ele_order    = LCD_RGB_ELEMENT_ORDER_BGR,
         .bits_per_pixel   = 16,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(s_io, &panel_config, &s_panel));
@@ -198,13 +198,11 @@ void display_draw_status(const char *mode_name, uint16_t accent_color)
     display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "192.168.4.1", 0xFFFF, accent_color);
 
     /* Bottom info bar — dark, unobtrusive */
-    uint16_t footer_bg = rgb565(9, 9, 11);
-    uint16_t footer_fg = rgb565(161, 161, 170);
+    uint16_t footer_bg = rgb565(22, 22, 26);
+    uint16_t footer_fg = rgb565(120, 118, 114);
     display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
-    display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, rgb565(63, 63, 70));
-    char info[40];
-    snprintf(info, sizeof(info), "ouispy123  %dCli  %lukB",
-             g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
+    char info[32];
+    snprintf(info, sizeof(info), "Heap:%lukB", (unsigned long)(g_app.free_heap / 1024));
     display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, info, footer_fg, footer_bg);
 }
 

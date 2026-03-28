@@ -289,9 +289,20 @@ static void expire_drones(void)
 static void sky_display_task(void *arg)
 {
     int frame = 0;
+    int last_drone_count = -1;
+    int last_cursor = -1;
+    int last_wifi_clients = -1;
+    bool full_drawn = false;  /* force first full draw */
+
     while (g_app.current_mode == MODE_SKY_SPY) {
         frame++;
         expire_drones();
+
+        /* Dirty check: data sections only redraw when content changed */
+        bool data_dirty = !full_drawn
+                        || (g_app.drone_count != last_drone_count)
+                        || (g_app.ui_cursor != last_cursor)
+                        || (g_app.wifi_clients != last_wifi_clients);
 
         /* Naval CIC palette — near-black with phosphor green */
         uint16_t bg        = rgb565(2, 4, 2);
@@ -309,14 +320,23 @@ static void sky_display_task(void *arg)
         uint16_t border_col= rgb565(0, 48, 0);
         uint16_t footer_bg = rgb565(2, 4, 2);
 
-        /* Status bar — dark navy with green type */
-        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, rgb565(0, 12, 0));
-        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, phos_mid);
-        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", phosphor, rgb565(0, 12, 0));
-        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "skyspy-c6", phos_mid, rgb565(0, 12, 0));
+        /* Static sections: status bar, content bg, footer — only on data change */
+        /* Static header: only redraw on data change */
+        if (data_dirty) {
+            last_drone_count = g_app.drone_count;
+            last_cursor = g_app.ui_cursor;
+            last_wifi_clients = g_app.wifi_clients;
+            full_drawn = true;
 
-        /* Content area */
-        display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - DISPLAY_CONTENT_TOP, bg);
+            /* Status bar — dark navy with green type */
+            display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, rgb565(0, 12, 0));
+            display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, phos_mid);
+            display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", phosphor, rgb565(0, 12, 0));
+            display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "skyspy-c6", phos_mid, rgb565(0, 12, 0));
+        }
+
+        /* Radar area bg — always clear for sweep animation */
+        display_draw_rect(0, DISPLAY_CONTENT_TOP, LCD_H_RES, 196 - DISPLAY_CONTENT_TOP, bg);
 
         char buf[64];
 
@@ -377,109 +397,102 @@ static void sky_display_task(void *arg)
         display_draw_text(cx - 2, cy - r_outer - 10, "N", phos_dim, bg);
         display_draw_text(cx - 2, cy + r_outer + 3,  "S", phos_dim, bg);
 
-        if (g_app.drone_count == 0) {
-            /* No contacts — show scanning status */
-            display_draw_text_centered(196, "NO CONTACTS", text_main, bg);
-
-            const char *scan_anim[] = {"SCANNING .", "SCANNING ..", "SCANNING ...", "SCANNING ...."};
-            display_draw_text_centered(208, scan_anim[frame % 4], text_dim, bg);
-
-            /* Protocol readiness */
-            display_draw_bordered_rect(4, 224, 78, 16, border_col, panel_bg);
-            display_draw_text(8, 228, "WiFi RDY", phos_mid, panel_bg);
-            display_draw_bordered_rect(88, 224, 78, 16, border_col, panel_bg);
-            display_draw_text(92, 228, "BLE  RDY", phos_mid, panel_bg);
-
-            display_draw_text(4, 248, "THREAT LEVEL:", text_dim, bg);
-            display_draw_text(86, 248, "CLEAR", phos_mid, bg);
-        } else {
-            /* ── Contacts detected — plot blips on radar + list below ── */
-
-            /* Draw drone blips on the radar scope as amber squares */
-            for (int i = 0; i < g_app.drone_count; i++) {
-                drone_info_t *d = &g_app.drones[i];
-                /* Place blip based on RSSI as distance from center;
-                   angle from MAC hash to spread them around */
-                uint8_t hash = d->mac[4] ^ d->mac[5] ^ d->mac[3];
-                float blip_angle = (float)hash * 6.2831853f / 256.0f;
-                /* RSSI -30 = close (center), -100 = far (edge) */
-                int dist = r_outer - ((d->rssi + 100) * r_outer / 70);
-                if (dist < 6) dist = 6;
-                if (dist > r_outer) dist = r_outer;
-                int bx = cx + (int)(dist * sinf(blip_angle));
-                int by = cy - (int)(dist * cosf(blip_angle));
-                if (bx >= 2 && bx < LCD_H_RES - 4 && by >= 40 && by < DISPLAY_FOOTER_BAR_Y - 6) {
-                    /* Blinking blip */
-                    uint16_t blip_col = ((frame + i) % 3) ? amber : amber_dim;
-                    display_draw_rect(bx - 2, by - 2, 5, 5, blip_col);
-                    display_draw_rect(bx - 1, by - 1, 3, 3, amber);
-                }
+        /* Drone blips on radar — always drawn (radar area clears each frame) */
+        for (int i = 0; i < g_app.drone_count; i++) {
+            drone_info_t *d = &g_app.drones[i];
+            uint8_t hash = d->mac[4] ^ d->mac[5] ^ d->mac[3];
+            float blip_angle = (float)hash * 6.2831853f / 256.0f;
+            int dist = r_outer - ((d->rssi + 100) * r_outer / 70);
+            if (dist < 6) dist = 6;
+            if (dist > r_outer) dist = r_outer;
+            int bx = cx + (int)(dist * sinf(blip_angle));
+            int by = cy - (int)(dist * cosf(blip_angle));
+            if (bx >= 2 && bx < LCD_H_RES - 4 && by >= 40 && by < 196) {
+                uint16_t blip_col = ((frame + i) % 3) ? amber : amber_dim;
+                display_draw_rect(bx - 2, by - 2, 5, 5, blip_col);
+                display_draw_rect(bx - 1, by - 1, 3, 3, amber);
             }
-
-            /* Contact count */
-            snprintf(buf, sizeof(buf), "CONTACTS: %d", g_app.drone_count);
-            display_draw_text(4, 196, buf, amber, bg);
-
-            display_draw_text(4, 208, "THREAT LEVEL:", text_dim, bg);
-            if (g_app.drone_count >= 3) {
-                display_draw_text(86, 208, "HIGH", red_alert, bg);
-            } else {
-                display_draw_text(86, 208, "ACTIVE", amber, bg);
-            }
-
-            g_app.ui_item_count = g_app.drone_count;
-            if (g_app.ui_cursor >= g_app.drone_count)
-                g_app.ui_cursor = g_app.drone_count > 0 ? g_app.drone_count - 1 : 0;
-
-            /* Compact drone list below radar */
-            int max_show = 3;
-            int start = 0;
-            if (g_app.ui_cursor >= max_show) start = g_app.ui_cursor - max_show + 1;
-
-            for (int idx = start, row = 0; idx < g_app.drone_count && row < max_show; idx++, row++) {
-                drone_info_t *d = &g_app.drones[idx];
-                char mac_str[18];
-                mac_to_str(d->mac, mac_str, sizeof(mac_str));
-
-                int y_base = 222 + row * 22;
-                bool selected = (idx == g_app.ui_cursor);
-
-                const char *proto_label;
-                uint16_t proto_col;
-                if (d->protocol == PROTO_DJI) {
-                    proto_col = amber; proto_label = "DJI";
-                } else if (d->protocol == PROTO_ASTM_BLE) {
-                    proto_col = phos_mid; proto_label = "BLE";
-                } else {
-                    proto_col = phos_dim; proto_label = "WFI";
-                }
-
-                uint16_t row_bg = selected ? rgb565(8, 20, 8) : bg;
-                uint16_t row_border = selected ? phos_mid : border_col;
-                display_draw_rect(4, y_base, LCD_H_RES - 8, 18, row_bg);
-                display_draw_rect(4, y_base, LCD_H_RES - 8, 1, row_border);
-                display_draw_rect(4, y_base, 3, 18, proto_col);
-
-                snprintf(buf, sizeof(buf), "%s %ddB", proto_label, d->rssi);
-                display_draw_text(10, y_base + 2, buf, proto_col, row_bg);
-
-                const char *id_str = d->basic_id[0] ? d->basic_id : mac_str;
-                /* Truncate to fit */
-                char id_short[20];
-                strncpy(id_short, id_str, 16);
-                id_short[16] = '\0';
-                display_draw_text(10, y_base + 10, id_short, selected ? phosphor : text_dim, row_bg);
-            }
-
-            g_app.ui_item_count = g_app.drone_count;
         }
 
-        /* Footer — WiFi info */
-        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
-        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
-        snprintf(buf, sizeof(buf), "skyspy1234  %dCli  %lukB",
-                 g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
-        display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer_bg);
+        /* ── Data sections + footer — only redraw on data change ── */
+        if (data_dirty) {
+            /* Clear data area below radar */
+            display_draw_rect(0, 196, LCD_H_RES, DISPLAY_FOOTER_BAR_Y - 196, bg);
+
+            if (g_app.drone_count == 0) {
+                display_draw_text_centered(196, "NO CONTACTS", text_main, bg);
+                display_draw_text_centered(208, "SCANNING ...", text_dim, bg);
+
+                display_draw_bordered_rect(4, 224, 78, 16, border_col, panel_bg);
+                display_draw_text(8, 228, "WiFi RDY", phos_mid, panel_bg);
+                display_draw_bordered_rect(88, 224, 78, 16, border_col, panel_bg);
+                display_draw_text(92, 228, "BLE  RDY", phos_mid, panel_bg);
+
+                display_draw_text(4, 248, "THREAT LEVEL:", text_dim, bg);
+                display_draw_text(86, 248, "CLEAR", phos_mid, bg);
+            } else {
+                snprintf(buf, sizeof(buf), "CONTACTS: %d", g_app.drone_count);
+                display_draw_text(4, 196, buf, amber, bg);
+
+                display_draw_text(4, 208, "THREAT LEVEL:", text_dim, bg);
+                if (g_app.drone_count >= 3) {
+                    display_draw_text(86, 208, "HIGH", red_alert, bg);
+                } else {
+                    display_draw_text(86, 208, "ACTIVE", amber, bg);
+                }
+
+                g_app.ui_item_count = g_app.drone_count;
+                if (g_app.ui_cursor >= g_app.drone_count)
+                    g_app.ui_cursor = g_app.drone_count > 0 ? g_app.drone_count - 1 : 0;
+
+                int max_show = 3;
+                int start = 0;
+                if (g_app.ui_cursor >= max_show) start = g_app.ui_cursor - max_show + 1;
+
+                for (int idx = start, row = 0; idx < g_app.drone_count && row < max_show; idx++, row++) {
+                    drone_info_t *d = &g_app.drones[idx];
+                    char mac_str[18];
+                    mac_to_str(d->mac, mac_str, sizeof(mac_str));
+
+                    int y_base = 222 + row * 22;
+                    bool selected = (idx == g_app.ui_cursor);
+
+                    const char *proto_label;
+                    uint16_t proto_col;
+                    if (d->protocol == PROTO_DJI) {
+                        proto_col = amber; proto_label = "DJI";
+                    } else if (d->protocol == PROTO_ASTM_BLE) {
+                        proto_col = phos_mid; proto_label = "BLE";
+                    } else {
+                        proto_col = phos_dim; proto_label = "WFI";
+                    }
+
+                    uint16_t row_bg = selected ? rgb565(8, 20, 8) : bg;
+                    uint16_t row_border = selected ? phos_mid : border_col;
+                    display_draw_rect(4, y_base, LCD_H_RES - 8, 18, row_bg);
+                    display_draw_rect(4, y_base, LCD_H_RES - 8, 1, row_border);
+                    display_draw_rect(4, y_base, 3, 18, proto_col);
+
+                    snprintf(buf, sizeof(buf), "%s %ddB", proto_label, d->rssi);
+                    display_draw_text(10, y_base + 2, buf, proto_col, row_bg);
+
+                    const char *id_str = d->basic_id[0] ? d->basic_id : mac_str;
+                    char id_short[20];
+                    strncpy(id_short, id_str, 16);
+                    id_short[16] = '\0';
+                    display_draw_text(10, y_base + 10, id_short, selected ? phosphor : text_dim, row_bg);
+                }
+
+                g_app.ui_item_count = g_app.drone_count;
+            }
+
+            /* Footer — WiFi info */
+            display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer_bg);
+            display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border_col);
+            snprintf(buf, sizeof(buf), "skyspy1234  %dCli  %lukB",
+                     g_app.wifi_clients, (unsigned long)(g_app.free_heap / 1024));
+            display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, buf, text_dim, footer_bg);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(500));
     }

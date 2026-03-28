@@ -118,6 +118,16 @@ typedef struct {
     bool     has_pilot;
 } drone_info_t;
 
+/* ── Fox Hunter Target Registry ───────────────────────────── */
+
+#define FOX_REGISTRY_MAX     8
+#define FOX_REG_LABEL_LEN   16
+
+typedef struct {
+    uint8_t  mac[6];
+    char     label[FOX_REG_LABEL_LEN];
+} fox_reg_entry_t;
+
 /* ── Global Application State ────────────────────────────── */
 
 typedef struct {
@@ -139,6 +149,9 @@ typedef struct {
     bool            fox_target_found;
     uint32_t        fox_last_seen;
     uint8_t         fox_led_mode;      /* 0=Detector, 1=Sting */
+    bool            fox_registry_open;  /* true = showing registry on LCD */
+    fox_reg_entry_t fox_registry[FOX_REGISTRY_MAX];
+    int             fox_registry_count;
 
     /* Sky Spy drone list */
     drone_info_t    drones[MAX_DRONES];
