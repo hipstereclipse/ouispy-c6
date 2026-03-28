@@ -967,7 +967,7 @@ def main():
     color_print("    1. Connect to WiFi shown on device/web:", C.CYAN)
     color_print("       - UniSpy-C6 / ouispy123 (if Single AP Name is ON)", C.CYAN)
     color_print("       - or mode AP (flockyou-c6 / foxhunt-c6 / skyspy-c6)", C.CYAN)
-    color_print("    2. Open in browser:  http://192.168.4.1", C.CYAN)
+    color_print("    2. Open in browser:  https://192.168.4.1  (or http://192.168.4.1)", C.CYAN)
     color_print("    3. If it still crashes, check the latest file in ./logs/", C.CYAN)
     print()
     color_print("  Button controls:", C.BOLD)

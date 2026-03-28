@@ -29,6 +29,7 @@ Locks onto a single BLE MAC address and acts as a Geiger counter for Bluetooth â
 
 - **7-zone RSSI-to-cadence mapping**: from 15ms (machine gun, >-35 dBm) down to 800ms (slow pulse, <-85 dBm)
 - Color-mapped proximity bar and signal strength visualization on LCD
+- Lost-signal screen waits a short grace period (about 9 seconds) after last contact before switching to full "SIGNAL LOST"
 - Targets can be set via the web UI, or imported directly from Flock You detections with a single button hold
 - Target MAC persists across reboots via NVS flash storage
 - Two toggleable LED tracking modes:
@@ -64,7 +65,9 @@ Dual-protocol passive drone detection with a Naval CIC-inspired radar display.
 
 ## Web Interface
 
-A modern single-page dark-themed web UI served directly from the device. Connect to the device's WiFi AP and open **http://192.168.4.1** in any browser.
+A modern single-page dark-themed web UI served directly from the device. Connect to the device's WiFi AP and open **https://192.168.4.1** (preferred) or **http://192.168.4.1** in any browser.
+
+For phone GPS features, use HTTPS. The device uses a local self-signed certificate, so your browser may show a one-time certificate warning before allowing secure-context APIs.
 
 - Real-time state updates via WebSocket (500ms push interval)
 - Mode switching with animated tab navigation

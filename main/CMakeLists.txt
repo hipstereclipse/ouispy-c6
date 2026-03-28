@@ -19,6 +19,7 @@ idf_component_register(
     REQUIRES
         bt
         esp_http_server
+        esp_https_server
         esp_driver_gpio
         esp_driver_ledc
         esp_driver_spi
@@ -28,5 +29,5 @@ idf_component_register(
             fatfs
             sdmmc
             esp_driver_sdspi
-    EMBED_TXTFILES "index.html"
+    EMBED_TXTFILES "index.html" "certs/servercert.pem" "certs/prvtkey.pem"
 )

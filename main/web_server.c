@@ -26,6 +26,7 @@
 #include "display.h"
 #include "wifi_manager.h"
 #include "esp_http_server.h"
+#include "esp_https_server.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
@@ -35,6 +36,10 @@ static const char *TAG = "websrv";
 /* Embedded index.html */
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+extern const uint8_t servercert_pem_start[] asm("_binary_servercert_pem_start");
+extern const uint8_t servercert_pem_end[]   asm("_binary_servercert_pem_end");
+extern const uint8_t prvtkey_pem_start[]    asm("_binary_prvtkey_pem_start");
+extern const uint8_t prvtkey_pem_end[]      asm("_binary_prvtkey_pem_end");
 
 /* ── Serve main page ── */
 static esp_err_t get_index(httpd_req_t *req)
@@ -676,75 +681,94 @@ static esp_err_t get_fox_nearby(httpd_req_t *req)
 }
 
 /* ── Register routes and start server ── */
-void web_server_start(void)
+static void web_register_routes(httpd_handle_t srv)
 {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 20;
-    config.stack_size       = 8192;
-    config.lru_purge_enable = true;
-
-    if (httpd_start(&g_app.http_server, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start HTTP server");
-        return;
-    }
-
     /* Static page */
     httpd_uri_t uri_index = { .uri="/", .method=HTTP_GET, .handler=get_index };
-    httpd_register_uri_handler(g_app.http_server, &uri_index);
+    httpd_register_uri_handler(srv, &uri_index);
 
     /* API endpoints */
     httpd_uri_t uri_state = { .uri="/api/state", .method=HTTP_GET, .handler=get_state };
-    httpd_register_uri_handler(g_app.http_server, &uri_state);
+    httpd_register_uri_handler(srv, &uri_state);
 
     httpd_uri_t uri_devices = { .uri="/api/devices", .method=HTTP_GET, .handler=get_devices };
-    httpd_register_uri_handler(g_app.http_server, &uri_devices);
+    httpd_register_uri_handler(srv, &uri_devices);
 
     httpd_uri_t uri_drones = { .uri="/api/drones", .method=HTTP_GET, .handler=get_drones };
-    httpd_register_uri_handler(g_app.http_server, &uri_drones);
+    httpd_register_uri_handler(srv, &uri_drones);
 
     httpd_uri_t uri_mode = { .uri="/api/mode", .method=HTTP_POST, .handler=post_mode };
-    httpd_register_uri_handler(g_app.http_server, &uri_mode);
+    httpd_register_uri_handler(srv, &uri_mode);
 
     httpd_uri_t uri_fox = { .uri="/api/fox/target", .method=HTTP_POST, .handler=post_fox_target };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox);
+    httpd_register_uri_handler(srv, &uri_fox);
 
     httpd_uri_t uri_fox_led = { .uri="/api/fox/ledmode", .method=HTTP_POST, .handler=post_fox_ledmode };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox_led);
+    httpd_register_uri_handler(srv, &uri_fox_led);
 
     httpd_uri_t uri_fox_reg_get = { .uri="/api/fox/registry", .method=HTTP_GET, .handler=get_fox_registry };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_get);
+    httpd_register_uri_handler(srv, &uri_fox_reg_get);
 
     httpd_uri_t uri_fox_reg_post = { .uri="/api/fox/registry", .method=HTTP_POST, .handler=post_fox_registry };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_post);
+    httpd_register_uri_handler(srv, &uri_fox_reg_post);
 
     httpd_uri_t uri_fox_reg_del = { .uri="/api/fox/registry", .method=HTTP_DELETE, .handler=delete_fox_registry };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_del);
+    httpd_register_uri_handler(srv, &uri_fox_reg_del);
 
     httpd_uri_t uri_fox_reg_update = { .uri="/api/fox/registry/update", .method=HTTP_POST, .handler=post_fox_registry_update };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox_reg_update);
+    httpd_register_uri_handler(srv, &uri_fox_reg_update);
 
     httpd_uri_t uri_settings = { .uri="/api/settings", .method=HTTP_POST, .handler=post_settings };
-    httpd_register_uri_handler(g_app.http_server, &uri_settings);
+    httpd_register_uri_handler(srv, &uri_settings);
 
     httpd_uri_t uri_csv = { .uri="/api/export/csv", .method=HTTP_GET, .handler=get_export_csv };
-    httpd_register_uri_handler(g_app.http_server, &uri_csv);
+    httpd_register_uri_handler(srv, &uri_csv);
 
     httpd_uri_t uri_fox_nearby = { .uri="/api/fox/nearby", .method=HTTP_GET, .handler=get_fox_nearby };
-    httpd_register_uri_handler(g_app.http_server, &uri_fox_nearby);
+    httpd_register_uri_handler(srv, &uri_fox_nearby);
 
     /* WebSocket */
     httpd_uri_t uri_ws = {
         .uri="/ws", .method=HTTP_GET, .handler=ws_handler,
         .is_websocket=true, .handle_ws_control_frames=true,
     };
-    httpd_register_uri_handler(g_app.http_server, &uri_ws);
+    httpd_register_uri_handler(srv, &uri_ws);
+}
+
+void web_server_start(void)
+{
+    httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
+    ssl_config.httpd.max_uri_handlers = 20;
+    ssl_config.httpd.stack_size = 8192;
+    ssl_config.httpd.lru_purge_enable = true;
+    ssl_config.httpd.server_port = 443;
+    ssl_config.httpd.ctrl_port = 32768;
+    ssl_config.servercert = servercert_pem_start;
+    ssl_config.servercert_len = servercert_pem_end - servercert_pem_start;
+    ssl_config.prvtkey_pem = prvtkey_pem_start;
+    ssl_config.prvtkey_len = prvtkey_pem_end - prvtkey_pem_start;
+
+    if (httpd_ssl_start(&g_app.http_server, &ssl_config) == ESP_OK) {
+        web_register_routes(g_app.http_server);
+        ESP_LOGI(TAG, "HTTPS web server started on port %d", ssl_config.httpd.server_port);
+    } else {
+        httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+        config.max_uri_handlers = 20;
+        config.stack_size       = 8192;
+        config.lru_purge_enable = true;
+
+        if (httpd_start(&g_app.http_server, &config) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start HTTP/HTTPS server");
+            return;
+        }
+        web_register_routes(g_app.http_server);
+        ESP_LOGW(TAG, "HTTPS unavailable, HTTP server started on port %d", config.server_port);
+    }
 
     /* Start push task */
     if (xTaskCreate(ws_push_task, "ws_push", TASK_STACK_WS, NULL, 1, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create WebSocket push task");
     }
-
-    ESP_LOGI(TAG, "Web server started on port %d", config.server_port);
 }
 
 void web_server_stop(void)

@@ -31,6 +31,7 @@ static const char *TAG = "fox";
 static TaskHandle_t s_beep_task = NULL;
 
 #define TARGET_LOST_MS  5000
+#define TARGET_LOST_SCREEN_DELAY_MS  9000
 #define FOX_NEARBY_SECTION_MAX     4
 #define FOX_FOLLOWING_SECTION_MAX  4
 #define FOX_DETECTED_SECTION_MAX   6
@@ -507,8 +508,11 @@ static void fox_beep_task(void *arg)
     while (g_app.current_mode == MODE_FOX_HUNTER) {
         frame++;
         uint32_t now = uptime_ms();
-        bool target_visible = g_app.fox_target_found &&
-                              (now - g_app.fox_last_seen < TARGET_LOST_MS);
+        uint32_t time_since_seen_ms = (g_app.fox_last_seen > 0 && now > g_app.fox_last_seen)
+                          ? (now - g_app.fox_last_seen)
+                          : 0;
+        bool target_visible = g_app.fox_target_found && (time_since_seen_ms < TARGET_LOST_MS);
+        bool show_lost_screen = g_app.fox_target_found && (time_since_seen_ms >= TARGET_LOST_SCREEN_DELAY_MS);
         char target_header[DEVICE_NAME_LEN] = {0};
         fox_target_display_name(target_header, sizeof(target_header));
 
@@ -813,6 +817,23 @@ static void fox_beep_task(void *arg)
                     } else {
                         display_draw_text(26, 254, "TRACKING LOCK .", status_text, status_fill);
                     }
+                } else if (!show_lost_screen) {
+                    char buf[36];
+                    uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now > g_app.fox_last_seen)
+                        ? (now - g_app.fox_last_seen) / 1000U
+                        : 0;
+
+                    display_draw_bordered_rect(20, 100, LCD_H_RES - 40, 58, rgb565(120, 82, 0), rgb565(30, 20, 10));
+                    display_draw_text(28, 112, "SIGNAL HOLD", rgb565(251, 191, 36), rgb565(30, 20, 10));
+                    display_draw_text(28, 126, "Waiting for reacquire...", text_dim, rgb565(30, 20, 10));
+                    snprintf(buf, sizeof(buf), "Seen %lus ago", (unsigned long)last_seen_sec);
+                    display_draw_text(28, 140, buf, text_dim, rgb565(30, 20, 10));
+                    snprintf(buf, sizeof(buf), "Lost screen after %lus", (unsigned long)(TARGET_LOST_SCREEN_DELAY_MS / 1000U));
+                    display_draw_text(20, 172, buf, text_dim, bg);
+
+                    int cx = LCD_H_RES / 2, cy = 212;
+                    display_draw_rect(cx - 20, cy, 40, 2, dim_accent);
+                    display_draw_rect(cx, cy - 20, 2, 40, dim_accent);
                 } else {
                     char buf[36];
                     uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now > g_app.fox_last_seen)
