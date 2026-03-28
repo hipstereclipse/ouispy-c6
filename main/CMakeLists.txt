@@ -1,0 +1,28 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "app_common.c"
+        "display.c"
+        "led_ctrl.c"
+        "buzzer.c"
+        "button.c"
+        "nvs_store.c"
+        "wifi_manager.c"
+        "ble_scanner.c"
+        "web_server.c"
+        "sniffer.c"
+        "flock_you.c"
+        "fox_hunter.c"
+        "sky_spy.c"
+    INCLUDE_DIRS "." "${IDF_PATH}/components/bt/host/nimble/esp-hci/include"
+    REQUIRES
+        bt
+        esp_http_server
+        esp_driver_gpio
+        esp_driver_ledc
+        esp_driver_spi
+        esp_lcd
+        nvs_flash
+        json
+    EMBED_TXTFILES "index.html"
+)
