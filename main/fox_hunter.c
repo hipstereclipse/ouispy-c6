@@ -282,7 +282,7 @@ static void fox_beep_task(void *arg)
                     if (have_nearby_lock) xSemaphoreGive(g_app.device_mutex);
                 }
 
-                display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 24, "DblClk=Select Hold=Prev 3xClk=Back", text_dim, bg);
+                display_draw_text_centered(DISPLAY_FOOTER_BAR_Y - 24, "DblClk=Prev Hold=Select 3xClk=Back", text_dim, bg);
             } else {
                 /* ── Normal tracker view ── */
             if (!g_app.fox_target_set) {

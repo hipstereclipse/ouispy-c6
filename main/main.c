@@ -246,8 +246,8 @@ static void render_mode_select_screen(int cursor)
     }
 
     display_draw_hline(14, 252, LCD_H_RES - 28, purple_dim);
-    display_draw_text_centered(262, "Click next   DblClk select", text_dim, bg);
-    display_draw_text_centered(274, "Hold prev   Hold 5s reset", text_dim, bg);
+    display_draw_text_centered(262, "Click next   DblClk prev", text_dim, bg);
+    display_draw_text_centered(274, "Hold select  Hold 5s reset", text_dim, bg);
 }
 
 static void render_settings_screen(int cursor)
@@ -266,7 +266,7 @@ static void render_settings_screen(int cursor)
     display_fill(bg);
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, rgb565(38, 24, 54));
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 8, "SETTINGS", rgb565(235, 220, 255), rgb565(38, 24, 54));
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "Click=next Hold=prev DblClk=change", text_dim, rgb565(38, 24, 54));
+    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "Click=next DblClk=prev Hold=change", text_dim, rgb565(38, 24, 54));
 
     const char *labels[SET_ITEM_COUNT] = {
         "AP Broadcast",
@@ -657,36 +657,18 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_DOUBLE_CLICK:
-        if (g_app.current_mode == MODE_FOX_HUNTER && g_app.fox_registry_open) {
-            if (g_app.ui_item_count > 0 && g_app.ui_cursor < g_app.ui_item_count) {
-                fox_hunter_registry_select_view_index(g_app.ui_cursor);
-                buzzer_tone(1400, 120);
-            } else {
-                buzzer_beep(10);
-            }
-            break;
-        }
-        if (g_app.current_mode == MODE_SELECT) {
-            static const app_mode_t sel_modes[] = {
-                MODE_FLOCK_YOU, MODE_FOX_HUNTER, MODE_SKY_SPY, MODE_SETTINGS
-            };
-            if (g_app.ui_cursor >= 0 && g_app.ui_cursor < 4) {
-                g_app.requested_mode = sel_modes[g_app.ui_cursor];
-                g_app.mode_change_pending = true;
-            }
-            buzzer_tone(1100, 60);
-            break;
-        }
-        if (g_app.current_mode == MODE_SETTINGS) {
-            apply_settings_item_action();
-            break;
-        }
-
         if (g_app.current_mode == MODE_FOX_HUNTER) {
-            g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
-            buzzer_tone(g_app.fox_led_mode ? 1400 : 900, 60);
+            if (!g_app.fox_registry_open) {
+                g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
+                buzzer_tone(g_app.fox_led_mode ? 1400 : 900, 60);
+            } else if (g_app.ui_item_count > 0) {
+                g_app.ui_cursor = (g_app.ui_cursor - 1 + g_app.ui_item_count) % g_app.ui_item_count;
+                buzzer_beep(20);
+            }
+        } else if (g_app.ui_item_count > 0) {
+            g_app.ui_cursor = (g_app.ui_cursor - 1 + g_app.ui_item_count) % g_app.ui_item_count;
+            buzzer_beep(20);
         } else {
-            /* Do not switch operating modes on double-click. */
             buzzer_beep(20);
         }
         break;
@@ -709,19 +691,26 @@ static void on_button_event(button_id_t btn, button_event_t evt)
             } else {
                 buzzer_beep(30);
             }
+        } else if (g_app.current_mode != MODE_SELECT) {
+            g_app.requested_mode = MODE_SELECT;
+            g_app.mode_change_pending = true;
+            buzzer_tone(900, 60);
         }
         break;
 
     case BTN_EVT_HOLD:
         buzzer_tone(900, 60);
         if (g_app.current_mode == MODE_SELECT) {
-            if (g_app.ui_item_count > 0) {
-                g_app.ui_cursor = (g_app.ui_cursor - 1 + g_app.ui_item_count) % g_app.ui_item_count;
+            static const app_mode_t sel_modes[] = {
+                MODE_FLOCK_YOU, MODE_FOX_HUNTER, MODE_SKY_SPY, MODE_SETTINGS
+            };
+            if (g_app.ui_cursor >= 0 && g_app.ui_cursor < 4) {
+                g_app.requested_mode = sel_modes[g_app.ui_cursor];
+                g_app.mode_change_pending = true;
             }
+            buzzer_tone(1100, 60);
         } else if (g_app.current_mode == MODE_SETTINGS) {
-            if (g_app.ui_item_count > 0) {
-                g_app.ui_cursor = (g_app.ui_cursor - 1 + g_app.ui_item_count) % g_app.ui_item_count;
-            }
+            apply_settings_item_action();
         } else if (g_app.current_mode == MODE_FLOCK_YOU) {
             if (g_app.device_count > 0 && g_app.ui_cursor < g_app.device_count) {
                 fox_hunter_set_target_from_flock(g_app.ui_cursor);
@@ -734,8 +723,8 @@ static void on_button_event(button_id_t btn, button_event_t evt)
                 g_app.ui_item_count = fox_hunter_registry_view_count();
                 buzzer_tone(1200, 40);
             } else if (g_app.ui_item_count > 0) {
-                g_app.ui_cursor = (g_app.ui_cursor - 1 + g_app.ui_item_count) % g_app.ui_item_count;
-                buzzer_beep(20);
+                fox_hunter_registry_select_view_index(g_app.ui_cursor);
+                buzzer_tone(1400, 120);
             }
         }
         break;
