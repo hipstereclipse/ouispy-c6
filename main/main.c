@@ -391,15 +391,15 @@ static void render_boot_splash(void)
     display_fill(bg);
 
     /* Framed boot card keeps the logo centered and avoids clipping artifacts. */
-    display_draw_bordered_rect(8, 52, LCD_H_RES - 16, 110, border, panel);
-    display_draw_rect(8, 52, LCD_H_RES - 16, 3, gold);
+    display_draw_bordered_rect(8, 44, LCD_H_RES - 16, 128, border, panel);
+    display_draw_rect(8, 44, LCD_H_RES - 16, 3, gold);
 
-    display_draw_text_scaled_centered(74, "OUI-SPY", gold, panel, 2);
-    display_draw_text_scaled_centered(96, "C6", violet, panel, 2);
-
-    display_draw_hline(20, 128, LCD_H_RES - 40, border);
-    display_draw_text_centered(140, "RF Intelligence Tool", text_dim, panel);
-    display_draw_text_centered(176, "Initializing...", text_faint, bg);
+    display_draw_text_centered(64, "OUI-SPY", gold, panel);
+    display_draw_text_scaled_centered(78, "C6", violet, panel, 2);
+    display_draw_text_centered(102, "RF INTELLIGENCE TOOL", text_dim, panel);
+    display_draw_hline(20, 120, LCD_H_RES - 40, border);
+    display_draw_text_centered(132, "ESP32-C6 EDITION", text_dim, panel);
+    display_draw_text_centered(184, "Initializing...", text_faint, bg);
 }
 
 static void mode_select_task(void *arg)

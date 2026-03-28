@@ -30,8 +30,8 @@
 static const char *TAG = "fox";
 static TaskHandle_t s_beep_task = NULL;
 
-#define TARGET_LOST_MS  5000
-#define TARGET_LOST_SCREEN_DELAY_MS  15000
+#define TARGET_LOST_MS  15000
+#define TARGET_LOST_SCREEN_DELAY_MS  22000
 #define FOX_NEARBY_SECTION_MAX     4
 #define FOX_FOLLOWING_SECTION_MAX  4
 #define FOX_DETECTED_SECTION_MAX   6
