@@ -861,6 +861,8 @@ static void fox_beep_task(void *arg)
                 const char *led_label = g_app.fox_led_mode ? "STING" : "DETECTOR";
                 char mode_label[24];
                 snprintf(mode_label, sizeof(mode_label), "LED: %s", led_label);
+                /* Clear full label lane so shorter text never leaves stale pixels behind. */
+                display_draw_rect(4, DISPLAY_FOOTER_BAR_Y - 12, 96, 10, bg);
                 display_draw_text(4, DISPLAY_FOOTER_BAR_Y - 12, mode_label, mode_col, bg);
             }
 

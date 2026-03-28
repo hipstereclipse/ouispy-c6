@@ -97,6 +97,7 @@ void nvs_store_save_prefs(void)
         nvs_set_u8(h, "sc_act", g_app.shortcut_action_btn);
         nvs_set_u8(h, "sc_back", g_app.shortcut_back_btn);
         nvs_set_u8(h, "sd_logs", g_app.use_microsd_logs ? 1 : 0);
+        nvs_set_u8(h, "gps_tag", g_app.gps_tagging_enabled ? 1 : 0);
         nvs_commit(h);
         nvs_close(h);
     }
@@ -181,6 +182,7 @@ void nvs_store_load_prefs(void)
         if (nvs_get_u8(h, "sc_act", &tmp) == ESP_OK) g_app.shortcut_action_btn = tmp;
         if (nvs_get_u8(h, "sc_back", &tmp) == ESP_OK) g_app.shortcut_back_btn = tmp;
         if (nvs_get_u8(h, "sd_logs", &tmp) == ESP_OK) g_app.use_microsd_logs = (tmp != 0);
+        if (nvs_get_u8(h, "gps_tag", &tmp) == ESP_OK) g_app.gps_tagging_enabled = (tmp != 0);
         nvs_close(h);
     }
 

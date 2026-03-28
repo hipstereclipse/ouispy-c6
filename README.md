@@ -30,6 +30,7 @@ Passively scans for Flock Safety ALPR cameras and ShotSpotter Raven acoustic sen
 
 - **5 detection heuristics**: OUI prefix matching (20 known prefixes), device name pattern matching, Manufacturer Company ID (0x09C8 / XUNTONG), Raven GATT service UUID fingerprinting, and firmware version estimation
 - Real-time scrollable device list on the LCD showing RSSI, hit count, and detection method
+- Flock LCD now shows live `GPS TAG` status (`ON`/`OFF`) so operators can verify geotagging state at a glance
 - New detections trigger an orange LED warning flash, then transition to a breathing red/purple heartbeat whose intensity tracks signal strength
 - Idle sweep alternates a dim amber/purple heartbeat so low activity remains visible
 - Tracks up to 200 unique devices with MAC deduplication
@@ -87,6 +88,7 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - Per-mode device lists, proximity visualization, and drone cards
 - Fox Hunter target selection and LED mode toggle
 - Flock You GPS ON/OFF safety toggle; GPS marking only when enabled and secure (HTTPS)
+- GPS toggle is synchronized to firmware state (`gpsTagging`) so web + device stay in sync
 - Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, and button shortcut mappings
 - CSV data export for Flock You detections
 - Mobile-optimized responsive Tailwind CSS design
@@ -116,7 +118,9 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - **Click**: Navigate to next item
 - **Double-click**: Navigate to previous item
 - **Triple-click**: Back/cancel (Fox main: clears target; Fox registry: exits registry)
-- **Quintuple-click**: In Flock You, lock selected/strongest Flock camera and jump to Fox Hunter
+- **Quintuple-click**:
+  - In Flock You: lock selected/strongest Flock camera and jump to Fox Hunter
+  - In Sky Spy: lock selected/strongest drone and jump to Fox Hunter
 - **Hold 0.5s**: Select / activate current item
 - **Hold 3.5s**: Orange LED warning flash (reset imminent)
 - **Hold 5s**: Return to mode selector
@@ -196,14 +200,14 @@ Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Web UI |
-| GET | `/api/state` | Full JSON state (mode, heap, uptime, settings, fox target) |
+| GET | `/api/state` | Full JSON state (mode, heap, uptime, settings, fox target, gpsTagging) |
 | GET | `/api/devices` | Flock You device list (JSON array) |
 | GET | `/api/drones` | Sky Spy drone list (JSON array) |
 | GET | `/api/export/csv` | Download Flock detections as CSV |
 | POST | `/api/mode` | Change mode: `{"mode": 0-3}` |
 | POST | `/api/fox/target` | Set Fox target: `{"mac":"AA:BB:CC:DD:EE:FF"}` or `{"index":0}` |
-| POST | `/api/fox/ledmode` | Toggle Fox Hunter LED mode (Detector / Sting) |
-| POST | `/api/settings` | Update prefs: `{"brightness":200,"sound":true,"led":true}` |
+| POST | `/api/fox/ledmode` | Set/toggle Fox Hunter LED mode (`{"mode":0|1}` sets explicitly; empty body toggles) |
+| POST | `/api/settings` | Update prefs: `{"brightness":200,"sound":true,"led":true,"gpsTagging":false}` |
 | WS | `/ws` | WebSocket for real-time push updates |
 
 ---

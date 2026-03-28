@@ -228,6 +228,7 @@ typedef struct {
     uint8_t         shortcut_action_btn;
     uint8_t         shortcut_back_btn;
     bool            use_microsd_logs;
+    bool            gps_tagging_enabled;
 
     /* Web server handle */
     httpd_handle_t  http_server;

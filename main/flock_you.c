@@ -353,6 +353,7 @@ static void flock_display_task(void *arg)
     int last_device_count = -1;
     int last_cursor = -1;
     int last_wifi_clients = -1;
+    int last_gps_tagging = -1;
 
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         frame++;
@@ -360,7 +361,8 @@ static void flock_display_task(void *arg)
         /* Check if anything worth redrawing has changed */
         bool dirty = (g_app.device_count != last_device_count)
                    || (g_app.ui_cursor != last_cursor)
-                   || (g_app.wifi_clients != last_wifi_clients);
+                   || (g_app.wifi_clients != last_wifi_clients)
+                   || ((int)g_app.gps_tagging_enabled != last_gps_tagging);
 
         /* Redraw scanning animation every 4 frames even when idle */
         bool anim_tick = (frame % 4 == 0);
@@ -373,6 +375,7 @@ static void flock_display_task(void *arg)
         last_device_count = g_app.device_count;
         last_cursor = g_app.ui_cursor;
         last_wifi_clients = g_app.wifi_clients;
+        last_gps_tagging = (int)g_app.gps_tagging_enabled;
 
         /* Dark zinc base with vivid red accent */
         uint16_t bg = rgb565(9, 9, 11);
@@ -415,6 +418,11 @@ static void flock_display_task(void *arg)
         snprintf(buf, sizeof(buf), "F:%d R:%d", flock_cnt, raven_cnt);
         int x_off = 10 + (g_app.device_count >= 10 ? 30 : 18);
         display_draw_text(x_off, 58, buf, text_soft, panel_bg);
+        display_draw_text(96, 42, "GPS TAG", text_soft, panel_bg);
+        display_draw_text(96, 54,
+                  g_app.gps_tagging_enabled ? "ON" : "OFF",
+                  g_app.gps_tagging_enabled ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                  panel_bg);
 
         /* Accent divider line */
         display_draw_hline(4, 78, LCD_H_RES - 8, accent);

@@ -307,6 +307,7 @@ const $$ = s => document.querySelectorAll(s);
 let ws, state = {}, devices = [], drones = [];
 let wsRetryMs = 1500;
 let currentView = -1; // track which view is shown
+let modeRenderSeq = 0;
 let uiFramePending = false;
 let pageSwitchPending = false;
 let modeSwitchInFlight = false;
@@ -343,6 +344,9 @@ function scheduleUIUpdate(withPageTransition) {
 
 function applyIncomingState(nextState) {
   state = nextState || {};
+  if (typeof state.gpsTagging === 'boolean') {
+    gpsToggleEnabled = !!state.gpsTagging;
+  }
   if (foxLedOptimistic !== null) {
     const serverLed = !!((state.fox || {}).ledMode);
     if (serverLed === !!foxLedOptimistic) {
@@ -408,6 +412,8 @@ function setGpsToggle(enabled) {
   if (enabled && !gpsSecureAvailable(caps)) {
     gpsToggleEnabled = false;
     saveGpsToggleEnabled();
+    state.gpsTagging = false;
+    api('/api/settings', {gpsTagging:false});
     if (!caps.supported) toast('GPS unavailable in this browser');
     else if (caps.iphone && !caps.secure) toast('iPhone GPS requires HTTPS');
     else toast('GPS requires HTTPS');
@@ -418,6 +424,8 @@ function setGpsToggle(enabled) {
   }
   gpsToggleEnabled = !!enabled;
   saveGpsToggleEnabled();
+  state.gpsTagging = gpsToggleEnabled;
+  api('/api/settings', {gpsTagging:gpsToggleEnabled});
   renderGpsStatus();
   renderGpsToggleBlock();
   if (Number(state.mode) === 1) renderDevList();
@@ -721,6 +729,13 @@ function updateTabs() {
   });
 }
 
+function renderModeLoading(mode) {
+  const c = $('#main');
+  if (!c) return;
+  c.dataset.view = String(mode);
+  c.innerHTML = `<div class="card"><h2>Loading</h2><p style="font-size:12px;color:var(--dim)">Switching view...</p></div>`;
+}
+
 // ── Main render loop ──
 function updateUI() {
   $('#heapInfo').textContent = Math.round((state.heap||0)/1024) + 'kB';
@@ -728,13 +743,42 @@ function updateUI() {
   updateTabs();
 
   const m = Number(state.mode);
-  if (m !== currentView) {
+  const main = $('#main');
+  const domView = main ? Number(main.dataset.view || -1) : -1;
+  const forceViewRender = (m !== currentView) || (domView !== m);
+
+  if (forceViewRender) {
+    const seq = ++modeRenderSeq;
     currentView = m;
-    if (m === 1) fetchDevices().then(() => renderFlock());
-    else if (m === 2) renderFox();
-    else if (m === 3) fetchDrones().then(() => renderSky());
-    else if (m === 4) renderSettings();
-    else renderModeSelectInfo();
+    renderModeLoading(m);
+
+    if (m === 1) {
+      fetchDevices().then(() => {
+        if (seq !== modeRenderSeq || Number(state.mode) !== 1) return;
+        renderFlock();
+        const cur = $('#main');
+        if (cur) cur.dataset.view = '1';
+      });
+    } else if (m === 2) {
+      renderFox();
+      const cur = $('#main');
+      if (cur) cur.dataset.view = '2';
+    } else if (m === 3) {
+      fetchDrones().then(() => {
+        if (seq !== modeRenderSeq || Number(state.mode) !== 3) return;
+        renderSky();
+        const cur = $('#main');
+        if (cur) cur.dataset.view = '3';
+      });
+    } else if (m === 4) {
+      renderSettings();
+      const cur = $('#main');
+      if (cur) cur.dataset.view = '4';
+    } else {
+      renderModeSelectInfo();
+      const cur = $('#main');
+      if (cur) cur.dataset.view = '0';
+    }
   } else {
     // Live update within current view
     if (m === 1) updateFlockLive();

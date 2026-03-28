@@ -84,6 +84,7 @@ static char *build_state_json(void)
     cJSON_AddNumberToObject(root, "shortcutActionBtn", g_app.shortcut_action_btn);
     cJSON_AddNumberToObject(root, "shortcutBackBtn", g_app.shortcut_back_btn);
     cJSON_AddBoolToObject(root, "useMicrosdLogs", g_app.use_microsd_logs);
+    cJSON_AddBoolToObject(root, "gpsTagging", g_app.gps_tagging_enabled);
     cJSON_AddBoolToObject(root, "microsdAvailable", storage_ext_is_available());
     cJSON_AddNumberToObject(root, "logCapacityKb", storage_ext_log_capacity_kb());
     cJSON_AddNumberToObject(root, "deviceCount", g_app.device_count);
@@ -572,6 +573,9 @@ static esp_err_t post_settings(httpd_req_t *req)
 
     cJSON *sd_logs = cJSON_GetObjectItem(root, "useMicrosdLogs");
     if (sd_logs) g_app.use_microsd_logs = cJSON_IsTrue(sd_logs);
+
+    cJSON *gps_tagging = cJSON_GetObjectItem(root, "gpsTagging");
+    if (gps_tagging) g_app.gps_tagging_enabled = cJSON_IsTrue(gps_tagging);
 
     if (old_ap_broadcast != g_app.ap_broadcast_enabled ||
         old_single_ap_name != g_app.single_ap_name_enabled) {
