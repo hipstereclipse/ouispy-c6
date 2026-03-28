@@ -28,6 +28,7 @@ static const char *TAG = "main";
 #define LED_PHASE_BLE_INIT      15,  35,  65
 #define LED_PHASE_SNIFFER_INIT  15,  50,  55
 #define LED_PHASE_MODE_START    30,  42,  28
+#define UI_GPS_READY_TIMEOUT_MS 8000
 
 enum {
     SET_ITEM_AP_BROADCAST = 0,
@@ -73,6 +74,15 @@ static void mode_ap_credentials(app_mode_t mode, const char **ssid, const char *
 }
 
 static const uint16_t SLEEP_OPTIONS[] = {0, 15, 30, 60, 120, 300};
+
+static bool ui_gps_tag_active(void)
+{
+    uint32_t now_ms = uptime_ms();
+    bool gps_ready_fresh = g_app.gps_client_ready
+                        && (now_ms > g_app.gps_client_ready_ms)
+                        && ((now_ms - g_app.gps_client_ready_ms) <= UI_GPS_READY_TIMEOUT_MS);
+    return g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+}
 
 static void set_init_phase_led(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -217,6 +227,7 @@ static void render_mode_select_screen(int cursor)
     uint16_t text_dim    = rgb565(161, 161, 170);
     uint16_t selected_bg = rgb565(38, 30, 52);
     uint16_t text_link   = rgb565(196, 168, 255);
+    bool gps_tag_active  = ui_gps_tag_active();
 
     struct {
         const char *label;
@@ -238,6 +249,11 @@ static void render_mode_select_screen(int cursor)
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y + 30, LCD_H_RES, 2, gold);
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 7, "OUI-SPY C6", gold, purple_dim);
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "MAIN MENU", rgb565(216, 180, 254), purple_dim);
+    display_draw_text(120, DISPLAY_STATUS_BAR_Y + 7, "GPS", text_dim, purple_dim);
+    display_draw_text(140, DISPLAY_STATUS_BAR_Y + 7,
+                      gps_tag_active ? "ON" : "OFF",
+                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                      purple_dim);
 
     display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, card_bg);
     display_draw_text(14, 53, "WiFi:", text_dim, card_bg);
@@ -296,6 +312,7 @@ static void render_settings_screen(int cursor)
     uint16_t accent = rgb565(168, 85, 247);
     uint16_t text_main = rgb565(246, 246, 250);
     uint16_t text_dim = rgb565(161, 161, 170);
+    bool gps_tag_active = ui_gps_tag_active();
 
     char val[28];
     if (cursor < 0) cursor = 0;
@@ -305,6 +322,11 @@ static void render_settings_screen(int cursor)
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, rgb565(38, 24, 54));
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 8, "SETTINGS", rgb565(235, 220, 255), rgb565(38, 24, 54));
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "Click=next DblClk=prev Hold=change", text_dim, rgb565(38, 24, 54));
+    display_draw_text(120, DISPLAY_STATUS_BAR_Y + 8, "GPS", text_dim, rgb565(38, 24, 54));
+    display_draw_text(140, DISPLAY_STATUS_BAR_Y + 8,
+                      gps_tag_active ? "ON" : "OFF",
+                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                      rgb565(38, 24, 54));
 
     const char *labels[SET_ITEM_COUNT] = {
         "AP Broadcast",

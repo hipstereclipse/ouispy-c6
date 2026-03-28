@@ -48,7 +48,7 @@ void display_init(void)
     spi_bus_config_t buscfg = {
         .sclk_io_num   = PIN_LCD_SCLK,
         .mosi_io_num   = PIN_LCD_MOSI,
-        .miso_io_num   = -1,
+        .miso_io_num   = PIN_SD_MISO,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = LCD_H_RES * 80 * sizeof(uint16_t),

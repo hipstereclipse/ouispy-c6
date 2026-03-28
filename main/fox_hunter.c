@@ -39,6 +39,7 @@ static TaskHandle_t s_beep_task = NULL;
 #define FOX_FOLLOWING_RECENT_MS    12000
 #define FOX_FOLLOWING_MIN_SEEN_MS  20000
 #define FOX_DETECTED_RECENT_MS     30000
+#define FOX_GPS_READY_TIMEOUT_MS    8000
 
 typedef struct {
     int nearby_count;
@@ -48,6 +49,14 @@ typedef struct {
     ble_device_t following[FOX_FOLLOWING_SECTION_MAX];
     ble_device_t detected[FOX_DETECTED_SECTION_MAX];
 } fox_candidate_snapshot_t;
+
+static inline bool fox_gps_tag_active(uint32_t now_ms)
+{
+    bool gps_ready_fresh = g_app.gps_client_ready
+                        && (now_ms > g_app.gps_client_ready_ms)
+                        && ((now_ms - g_app.gps_client_ready_ms) <= FOX_GPS_READY_TIMEOUT_MS);
+    return g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+}
 
 static void fox_target_display_name(char *out, size_t out_len)
 {
@@ -500,6 +509,7 @@ static void fox_beep_task(void *arg)
     uint8_t last_led_mode = 0xFF;
     int last_wifi_clients = -1;
     bool last_registry_open = false;
+    int last_gps_active = -1;
     char last_target_header[DEVICE_NAME_LEN] = {0};
     int last_reg_cursor = -1;
     int last_reg_count = -1;
@@ -515,6 +525,7 @@ static void fox_beep_task(void *arg)
         bool show_lost_screen = g_app.fox_target_found && (time_since_seen_ms >= TARGET_LOST_SCREEN_DELAY_MS);
         char target_header[DEVICE_NAME_LEN] = {0};
         fox_target_display_name(target_header, sizeof(target_header));
+        bool gps_tag_active = fox_gps_tag_active(now);
 
         int8_t live_rssi = target_visible ? g_app.fox_rssi : -128;
 
@@ -525,6 +536,7 @@ static void fox_beep_task(void *arg)
                    || (g_app.fox_led_mode != last_led_mode)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || (g_app.fox_registry_open != last_registry_open)
+                   || ((int)gps_tag_active != last_gps_active)
                    || (strcmp(target_header, last_target_header) != 0)
                    || (g_app.fox_registry_open && (g_app.ui_cursor != last_reg_cursor
                        || g_app.fox_registry_count != last_reg_count
@@ -538,6 +550,7 @@ static void fox_beep_task(void *arg)
             last_led_mode = g_app.fox_led_mode;
             last_wifi_clients = g_app.wifi_clients;
             last_registry_open = g_app.fox_registry_open;
+            last_gps_active = (int)gps_tag_active;
             snprintf(last_target_header, sizeof(last_target_header), "%s", target_header);
             last_reg_cursor = g_app.ui_cursor;
             last_reg_count = g_app.fox_registry_count;
@@ -563,6 +576,10 @@ static void fox_beep_task(void *arg)
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
             display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
             display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "FOX HUNTER", text_main, dim_accent);
+            display_draw_text(120, DISPLAY_STATUS_TEXT_Y,
+                              gps_tag_active ? "GPS ON" : "GPS OFF",
+                              gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                              dim_accent);
             display_draw_text_centered(DISPLAY_STATUS_SUB_Y,
                                        target_header[0] ? target_header : ap_ssid,
                                        rgb565(228, 228, 231), dim_accent);

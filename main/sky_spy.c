@@ -40,6 +40,15 @@ static const uint8_t PARROT_OUI[][3] = {
 #define BLE_SERVICE_REMOTEID  0xFFFA
 #define DJI_BLE_CID           0x2CA3
 #define DRONE_TIMEOUT_MS      30000
+#define SKY_GPS_READY_TIMEOUT_MS 8000
+
+static inline bool sky_gps_tag_active(uint32_t now_ms)
+{
+    bool gps_ready_fresh = g_app.gps_client_ready
+                        && (now_ms > g_app.gps_client_ready_ms)
+                        && ((now_ms - g_app.gps_client_ready_ms) <= SKY_GPS_READY_TIMEOUT_MS);
+    return g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+}
 
 /* ── OpenDroneID minimal parser ── */
 
@@ -292,17 +301,21 @@ static void sky_display_task(void *arg)
     int last_drone_count = -1;
     int last_cursor = -1;
     int last_wifi_clients = -1;
+    int last_gps_active = -1;
     bool full_drawn = false;  /* force first full draw */
 
     while (g_app.current_mode == MODE_SKY_SPY) {
         frame++;
         expire_drones();
+        uint32_t now_ms = uptime_ms();
+        bool gps_tag_active = sky_gps_tag_active(now_ms);
 
         /* Dirty check: data sections only redraw when content changed */
         bool data_dirty = !full_drawn
                         || (g_app.drone_count != last_drone_count)
                         || (g_app.ui_cursor != last_cursor)
-                        || (g_app.wifi_clients != last_wifi_clients);
+                        || (g_app.wifi_clients != last_wifi_clients)
+                        || ((int)gps_tag_active != last_gps_active);
 
         /* Naval CIC palette — near-black with phosphor green */
         uint16_t bg        = rgb565(2, 4, 2);
@@ -329,12 +342,17 @@ static void sky_display_task(void *arg)
             last_drone_count = g_app.drone_count;
             last_cursor = g_app.ui_cursor;
             last_wifi_clients = g_app.wifi_clients;
+            last_gps_active = (int)gps_tag_active;
             full_drawn = true;
 
             /* Status bar — dark navy with green type */
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, rgb565(0, 12, 0));
             display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, phos_mid);
             display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, "SKY SPY", phosphor, rgb565(0, 12, 0));
+            display_draw_text(118, DISPLAY_STATUS_TEXT_Y,
+                              gps_tag_active ? "GPS ON" : "GPS OFF",
+                              gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
+                              rgb565(0, 12, 0));
             display_draw_text_centered(DISPLAY_STATUS_SUB_Y, ap_ssid, phos_mid, rgb565(0, 12, 0));
         }
 

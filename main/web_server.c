@@ -266,11 +266,21 @@ static esp_err_t post_fox_target(httpd_req_t *req)
     cJSON *root = cJSON_Parse(buf);
     if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
 
+    cJSON *clear_item = cJSON_GetObjectItem(root, "clear");
+    if (clear_item && cJSON_IsTrue(clear_item)) {
+        fox_hunter_clear_target();
+        cJSON_Delete(root);
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+
     cJSON *mac_item = cJSON_GetObjectItem(root, "mac");
     if (mac_item && cJSON_IsString(mac_item)) {
         uint8_t mac[6];
         if (mac_from_str(mac_item->valuestring, mac) == 0) {
             fox_hunter_set_target(mac);
+        } else if (mac_item->valuestring[0] == '\0') {
+            fox_hunter_clear_target();
         }
     }
 

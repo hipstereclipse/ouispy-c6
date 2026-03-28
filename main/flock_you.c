@@ -27,6 +27,14 @@ static const char *TAG = "flock";
 #define FLOCK_LED_STALE_MS          4000
 #define FLOCK_GPS_READY_TIMEOUT_MS  8000
 
+static inline bool flock_gps_tag_active(uint32_t now_ms)
+{
+    bool gps_ready_fresh = g_app.gps_client_ready
+                        && (now_ms > g_app.gps_client_ready_ms)
+                        && ((now_ms - g_app.gps_client_ready_ms) <= FLOCK_GPS_READY_TIMEOUT_MS);
+    return g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+}
+
 static TaskHandle_t s_led_task = NULL;
 static volatile uint32_t s_warning_started_ms = 0;
 
@@ -359,10 +367,7 @@ static void flock_display_task(void *arg)
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         frame++;
         uint32_t now_ms = uptime_ms();
-        bool gps_ready_fresh = g_app.gps_client_ready
-                            && (now_ms > g_app.gps_client_ready_ms)
-                            && ((now_ms - g_app.gps_client_ready_ms) <= FLOCK_GPS_READY_TIMEOUT_MS);
-        bool gps_tag_active = g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
+        bool gps_tag_active = flock_gps_tag_active(now_ms);
 
         /* Check if anything worth redrawing has changed */
         bool dirty = (g_app.device_count != last_device_count)
@@ -387,7 +392,8 @@ static void flock_display_task(void *arg)
         uint16_t bg = rgb565(9, 9, 11);
         uint16_t accent = rgb565(248, 113, 113);
         uint16_t dim_accent = rgb565(153, 27, 27);
-        uint16_t raven_col = rgb565(251, 146, 60);
+        uint16_t raven_col = rgb565(168, 85, 247);
+        uint16_t flock_num_col = rgb565(251, 146, 60);
         uint16_t panel_bg = rgb565(24, 24, 27);
         uint16_t panel_alt = rgb565(20, 20, 22);
         uint16_t text_main = rgb565(250, 250, 250);
@@ -421,11 +427,15 @@ static void flock_display_task(void *arg)
             if (g_app.devices[i].is_flock) flock_cnt++;
             if (g_app.devices[i].is_raven) raven_cnt++;
         }
-        snprintf(buf, sizeof(buf), "F:%d R:%d", flock_cnt, raven_cnt);
-        int x_off = 10 + (g_app.device_count >= 10 ? 30 : 18);
-        display_draw_text(x_off, 58, buf, text_soft, panel_bg);
-        display_draw_text(96, 42, "GPS TAG", text_soft, panel_bg);
-        display_draw_text(96, 54,
+        display_draw_text(56, 58, "F:", text_soft, panel_bg);
+        snprintf(buf, sizeof(buf), "%d", flock_cnt);
+        display_draw_text(68, 58, buf, flock_num_col, panel_bg);
+        display_draw_text(88, 58, "R:", text_soft, panel_bg);
+        snprintf(buf, sizeof(buf), "%d", raven_cnt);
+        display_draw_text(100, 58, buf, raven_col, panel_bg);
+
+        display_draw_text(122, 42, "GPS TAG", text_soft, panel_bg);
+        display_draw_text(132, 54,
                           gps_tag_active ? "ON" : "OFF",
                           gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
                           panel_bg);

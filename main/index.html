@@ -1221,6 +1221,7 @@ function renderFoxInner() {
         <div style="margin-top:10px;font-size:13px;font-weight:700;letter-spacing:1px;color:${f.found?'var(--green)':'var(--rose)'}">${f.found?'&#9679; TRACKING':'&#9675; SIGNAL LOST'}</div>
         <div style="margin-top:10px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
           <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="saveTargetToRegistry()">&#128190; Save to Registry</button>
+          <button class="btn sm" style="border-color:var(--rose);color:var(--rose)" onclick="clearFoxTarget()">&#10005; Clear Target</button>
         </div>
       </div>`;
   } else {
@@ -1400,6 +1401,24 @@ function lockFox(mac) {
   toast('Locked on ' + mac);
 }
 
+async function clearFoxTarget() {
+  const r = await api('/api/fox/target', { clear: true });
+  if (r && r.ok) {
+    state.fox = Object.assign({}, state.fox || {}, {
+      hasTarget: false,
+      target: 'none',
+      found: false,
+      rssi: -100,
+      bestRssi: -100,
+      lastSeenSec: 0
+    });
+    renderFoxInner();
+    toast('Target cleared');
+  } else {
+    toast('Failed to clear target');
+  }
+}
+
 function renderFoxBars(rssi) {
   const el = $('#foxBars'); if(!el) return;
   const pct = rssiPct(rssi);
@@ -1414,6 +1433,16 @@ function renderFoxBars(rssi) {
 
 function updateFoxLive() {
   const f = state.fox || {};
+  const hasTargetDom = !!$('#foxRssi');
+  const hasTargetState = !!f.hasTarget;
+  const domMacEl = $('#foxMac');
+  const domMac = domMacEl ? (domMacEl.textContent || '').trim() : '';
+  const stateMac = (f.target || '').trim();
+  if (hasTargetDom !== hasTargetState || (hasTargetState && stateMac && domMac !== stateMac)) {
+    renderFoxInner();
+    return;
+  }
+
   updateFoxLedButton(!!f.ledMode, foxLedToggleInFlight);
   const el = $('#foxRssi'); if(el) { el.textContent = f.found ? f.rssi : '--'; el.style.color = rssiColor(f.rssi); }
   const best = $('#foxBest'); if(best) best.textContent = 'Best: ' + f.bestRssi + ' dBm';
@@ -1594,7 +1623,11 @@ async function saveTargetToRegistry() {
 
 async function removeFromRegistry(idx) {
   try {
+    const removed = foxRegistry[idx];
     await fetch('/api/fox/registry', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:idx})});
+    if (removed && state.fox && state.fox.hasTarget && removed.mac === state.fox.target) {
+      await clearFoxTarget();
+    }
     toast('Removed'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); });
   } catch(e) { toast('Error removing'); }
 }

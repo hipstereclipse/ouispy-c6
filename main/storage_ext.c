@@ -17,6 +17,11 @@ static bool s_sd_ready = false;
 static storage_status_t s_sd_status = STORAGE_STATUS_NOT_FOUND;
 static sdmmc_card_t *s_card = NULL;
 
+static void refresh_storage_dependent_limits(void)
+{
+    g_app.max_drones_allowed = s_sd_ready ? MAX_DRONES : MAX_DRONES_NO_SD;
+}
+
 static storage_status_t classify_mount_error(esp_err_t err)
 {
     switch (err) {
@@ -44,6 +49,7 @@ void storage_ext_init(void)
     s_sd_ready = false;
     s_sd_status = STORAGE_STATUS_NOT_FOUND;
     s_card = NULL;
+    refresh_storage_dependent_limits();
 
     esp_vfs_fat_mount_config_t mount_cfg = {
         .format_if_mount_failed = false,
@@ -67,6 +73,7 @@ void storage_ext_init(void)
     if (err == ESP_OK) {
         s_sd_ready = true;
         s_sd_status = STORAGE_STATUS_AVAILABLE;
+        refresh_storage_dependent_limits();
         ensure_log_dir();
         ESP_LOGI(TAG, "microSD mounted");
         return;
@@ -75,6 +82,7 @@ void storage_ext_init(void)
     s_sd_ready = false;
     s_card = NULL;
     s_sd_status = classify_mount_error(err);
+    refresh_storage_dependent_limits();
     if (s_sd_status == STORAGE_STATUS_NEEDS_FORMAT) {
         ESP_LOGW(TAG, "microSD card detected but mount failed: %s", esp_err_to_name(err));
     } else {
@@ -146,6 +154,7 @@ esp_err_t storage_ext_format(void)
         esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
         s_sd_ready = false;
         s_card = NULL;
+        refresh_storage_dependent_limits();
     }
 
     ESP_LOGI(TAG, "Starting microSD format...");
@@ -173,6 +182,7 @@ esp_err_t storage_ext_format(void)
     if (err == ESP_OK) {
         s_sd_ready = true;
         s_sd_status = STORAGE_STATUS_AVAILABLE;
+        refresh_storage_dependent_limits();
         ensure_log_dir();
         ESP_LOGI(TAG, "microSD formatted and mounted successfully");
         return ESP_OK;
@@ -181,6 +191,7 @@ esp_err_t storage_ext_format(void)
     s_sd_ready = false;
     s_card = NULL;
     s_sd_status = classify_mount_error(err);
+    refresh_storage_dependent_limits();
     ESP_LOGE(TAG, "microSD format failed: %s", esp_err_to_name(err));
     return err;
 }
