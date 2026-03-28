@@ -277,7 +277,30 @@ static esp_err_t post_fox_target(httpd_req_t *req)
 
 static esp_err_t post_fox_ledmode(httpd_req_t *req)
 {
-    g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
+    bool applied = false;
+    int content_len = req->content_len;
+    if (content_len > 0 && content_len < 64) {
+        char buf[64];
+        int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+        if (len > 0) {
+            buf[len] = '\0';
+            cJSON *root = cJSON_Parse(buf);
+            if (root) {
+                cJSON *mode = cJSON_GetObjectItem(root, "mode");
+                if (mode && cJSON_IsNumber(mode)) {
+                    g_app.fox_led_mode = (mode->valueint != 0) ? 1 : 0;
+                    applied = true;
+                }
+                cJSON_Delete(root);
+            }
+        }
+    }
+
+    if (!applied) {
+        /* Backward compatibility: no body means toggle. */
+        g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
+    }
+
     char resp[32];
     snprintf(resp, sizeof(resp), "{\"ledMode\":%d}", g_app.fox_led_mode);
     httpd_resp_set_type(req, "application/json");

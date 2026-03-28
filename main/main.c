@@ -717,6 +717,48 @@ static void on_button_event(button_id_t btn, button_event_t evt)
             } else {
                 buzzer_tone(520, 90);
             }
+        } else if (g_app.current_mode == MODE_SKY_SPY) {
+            int target_idx = -1;
+            if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                /* Prefer selected drone row, else strongest currently visible drone. */
+                if (g_app.drone_count > 0 && g_app.ui_cursor >= 0 && g_app.ui_cursor < g_app.drone_count) {
+                    target_idx = g_app.ui_cursor;
+                }
+                if (target_idx < 0) {
+                    int best_rssi = -127;
+                    for (int i = 0; i < g_app.drone_count; i++) {
+                        if (g_app.drones[i].rssi >= best_rssi) {
+                            best_rssi = g_app.drones[i].rssi;
+                            target_idx = i;
+                        }
+                    }
+                }
+                xSemaphoreGive(g_app.drone_mutex);
+            }
+
+            if (target_idx >= 0) {
+                uint8_t target_mac[6];
+                bool have_target = false;
+                if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                    if (target_idx < g_app.drone_count) {
+                        memcpy(target_mac, g_app.drones[target_idx].mac, sizeof(target_mac));
+                        have_target = true;
+                    }
+                    xSemaphoreGive(g_app.drone_mutex);
+                }
+
+                if (have_target) {
+                    fox_hunter_set_target(target_mac);
+                    g_app.requested_mode = MODE_FOX_HUNTER;
+                    g_app.mode_change_pending = true;
+                    storage_ext_append_log("sky", "quintuple_click_track_in_fox");
+                    buzzer_tone(1500, 110);
+                } else {
+                    buzzer_tone(520, 90);
+                }
+            } else {
+                buzzer_tone(520, 90);
+            }
         }
         break;
 
