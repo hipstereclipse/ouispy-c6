@@ -1,12 +1,24 @@
 # OUI-Spy C6
 
-**Open-source RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47**
+**Official ESP32-C6 RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47**
+
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![Platform: ESP32-C6](https://img.shields.io/badge/Platform-ESP32--C6-0a7ea4)
+![Framework: ESP-IDF](https://img.shields.io/badge/Framework-ESP--IDF%20v5.3.x-222)
+
+> Production-oriented passive RF situational awareness toolkit for BLE surveillance hardware discovery, proximity tracking, and Remote ID drone detection.
 
 > This project is a from-scratch C rewrite and hardware-specific spinoff of [**OUI-Spy Unified Blue**](https://github.com/colonelpanichacks/oui-spy-unified-blue) by [ColonelPanicHacks](https://github.com/colonelpanichacks). The original project pioneered the concept of passive BLE surveillance hardware detection and drone monitoring on ESP32 — this version ports and extends those ideas natively to the ESP32-C6 platform with a custom display UI, hardware buzzer integration, and a modern web interface.
 
 OUI-Spy C6 consolidates three passive RF intelligence modes into a single flash image running on the Waveshare ESP32-C6-LCD-1.47 dev board. Pure ESP-IDF C, no Arduino — just bare metal and radio waves.
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+## Quick Links
+
+- [Build & Flash](#build--flash)
+- [Web Interface](#web-interface)
+- [API Endpoints](#api-endpoints)
+- [Hardware Wiring Guide](HARDWARE.md)
+- [License](LICENSE)
 
 ---
 
