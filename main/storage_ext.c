@@ -4,6 +4,7 @@
  */
 #include "storage_ext.h"
 #include "app_common.h"
+#include "map_tile.h"
 
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
@@ -25,11 +26,18 @@ static bool s_sd_ready = false;
 static storage_status_t s_sd_status = STORAGE_STATUS_NOT_FOUND;
 static sdmmc_card_t *s_card = NULL;
 static int64_t s_last_probe_us = 0;
+static int64_t s_last_runtime_status_us = 0;
+static int64_t s_last_space_refresh_us = 0;
+static uint32_t s_total_kb_cached = 0;
+static uint32_t s_free_kb_cached = 0;
 static storage_log_entry_t s_log_ring[LOG_RING_SIZE];
 static int s_log_ring_head = 0;
 static int s_log_ring_count = 0;
 
 #define SD_RUNTIME_PROBE_INTERVAL_US (2000000LL)
+#define SD_RETRY_NEEDS_FORMAT_INTERVAL_US (30000000LL)
+#define SD_RUNTIME_STATUS_CHECK_INTERVAL_US (1000000LL)
+#define SD_SPACE_REFRESH_INTERVAL_US (1500000LL)
 #define SD_SPI_MAX_FREQ_KHZ          4000
 #define LOG_MIN_FREE_KB              128U
 #define EVENT_LOG_MAX_BYTES          (512U * 1024U)
@@ -43,6 +51,39 @@ static SemaphoreHandle_t s_storage_lock = NULL;
 static void ensure_log_dir(void);
 static void refresh_card_runtime_status(void);
 static void prune_noncritical_logs_if_needed(void);
+
+static void update_space_cache_locked(void)
+{
+    int64_t now_us = esp_timer_get_time();
+    if (!s_sd_ready) {
+        s_total_kb_cached = 0;
+        s_free_kb_cached = 0;
+        s_last_space_refresh_us = 0;
+        return;
+    }
+
+    if (s_last_space_refresh_us != 0
+        && (now_us - s_last_space_refresh_us) < SD_SPACE_REFRESH_INTERVAL_US) {
+        return;
+    }
+
+    uint64_t total_bytes = 0;
+    uint64_t free_bytes = 0;
+    if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
+        return;
+    }
+
+    s_total_kb_cached = (uint32_t)(total_bytes / 1024ULL);
+    s_free_kb_cached = (uint32_t)(free_bytes / 1024ULL);
+    s_last_space_refresh_us = now_us;
+}
+
+static int64_t storage_probe_interval_us(void)
+{
+    return (s_sd_status == STORAGE_STATUS_NEEDS_FORMAT)
+        ? SD_RETRY_NEEDS_FORMAT_INTERVAL_US
+        : SD_RUNTIME_PROBE_INTERVAL_US;
+}
 
 static bool storage_ext_lock(TickType_t wait_ticks)
 {
@@ -327,10 +368,16 @@ static storage_status_t classify_mount_error(esp_err_t err)
     case ESP_OK:
         return STORAGE_STATUS_AVAILABLE;
     case ESP_ERR_TIMEOUT:
-        /* Only a genuine bus timeout means no card is present */
+    case ESP_ERR_NOT_FOUND:
+    case ESP_ERR_INVALID_RESPONSE:
+    case ESP_ERR_INVALID_CRC:
+    case ESP_FAIL:
+        /* Generic probe/init failures are not reliable evidence of a bad filesystem. */
+        ESP_LOGW(TAG, "mount error treated as NOT_FOUND: %s (0x%x)",
+                 esp_err_to_name(err), (unsigned)err);
         return STORAGE_STATUS_NOT_FOUND;
     default:
-        /* Card responded on SPI but filesystem is unreadable/corrupt */
+        /* Card responded on SPI but filesystem is unreadable, unsupported, or corrupt */
         ESP_LOGW(TAG, "mount error classified as NEEDS_FORMAT: %s (0x%x)",
                  esp_err_to_name(err), (unsigned)err);
         return STORAGE_STATUS_NEEDS_FORMAT;
@@ -355,8 +402,13 @@ static esp_err_t mount_sd_card(bool format_if_mount_failed, bool log_result)
     if (err == ESP_OK) {
         s_sd_ready = true;
         s_sd_status = STORAGE_STATUS_AVAILABLE;
+        s_last_probe_us = esp_timer_get_time();
+        s_last_runtime_status_us = s_last_probe_us;
+        s_last_space_refresh_us = 0;
+        update_space_cache_locked();
         refresh_storage_dependent_limits();
         ensure_log_dir();
+        map_tile_invalidate_cache();
         if (log_result) {
             ESP_LOGI(TAG, "microSD mounted");
         }
@@ -366,12 +418,18 @@ static esp_err_t mount_sd_card(bool format_if_mount_failed, bool log_result)
     s_sd_ready = false;
     s_card = NULL;
     s_sd_status = classify_mount_error(err);
+    s_last_probe_us = esp_timer_get_time();
+    s_last_runtime_status_us = 0;
+    s_last_space_refresh_us = 0;
+    s_total_kb_cached = 0;
+    s_free_kb_cached = 0;
     refresh_storage_dependent_limits();
     if (log_result) {
         if (s_sd_status == STORAGE_STATUS_NEEDS_FORMAT) {
             ESP_LOGW(TAG, "microSD card detected but mount failed: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "Likely cause: filesystem is damaged, uses an unsupported format, or the card needs in-device formatting");
         } else {
-            ESP_LOGW(TAG, "microSD card not found");
+            ESP_LOGW(TAG, "microSD card not ready: %s", esp_err_to_name(err));
         }
     }
     return err;
@@ -385,15 +443,21 @@ static void mark_card_missing(void)
     s_sd_ready = false;
     s_card = NULL;
     s_sd_status = STORAGE_STATUS_NOT_FOUND;
+    s_total_kb_cached = 0;
+    s_free_kb_cached = 0;
+    s_last_runtime_status_us = 0;
+    s_last_space_refresh_us = 0;
     refresh_storage_dependent_limits();
+    map_tile_invalidate_cache();
 }
 
 static void refresh_card_runtime_status(void)
 {
     int64_t now_us = esp_timer_get_time();
+    int64_t probe_interval_us = storage_probe_interval_us();
 
     if (!s_sd_ready || !s_card) {
-        if ((now_us - s_last_probe_us) >= SD_RUNTIME_PROBE_INTERVAL_US) {
+        if ((now_us - s_last_probe_us) >= probe_interval_us) {
             s_last_probe_us = now_us;
             mount_sd_card(false, false);
         }
@@ -401,6 +465,11 @@ static void refresh_card_runtime_status(void)
     }
 
     /* CMD13 card-status check; if this fails the card was removed or bus is gone. */
+    if ((now_us - s_last_runtime_status_us) < SD_RUNTIME_STATUS_CHECK_INTERVAL_US) {
+        return;
+    }
+
+    s_last_runtime_status_us = now_us;
     esp_err_t err = sdmmc_get_status(s_card);
     if (err == ESP_OK) {
         s_sd_status = STORAGE_STATUS_AVAILABLE;
@@ -429,6 +498,10 @@ void storage_ext_init(void)
     s_sd_status = STORAGE_STATUS_NOT_FOUND;
     s_card = NULL;
     s_last_probe_us = 0;
+    s_last_runtime_status_us = 0;
+    s_last_space_refresh_us = 0;
+    s_total_kb_cached = 0;
+    s_free_kb_cached = 0;
     memset(s_log_ring, 0, sizeof(s_log_ring));
     s_log_ring_head = 0;
     s_log_ring_count = 0;
@@ -455,6 +528,16 @@ storage_status_t storage_ext_get_status(void)
         return STORAGE_STATUS_NOT_FOUND;
     }
     refresh_card_runtime_status();
+    storage_status_t status = s_sd_status;
+    storage_ext_unlock();
+    return status;
+}
+
+storage_status_t storage_ext_get_status_cached(void)
+{
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return STORAGE_STATUS_NOT_FOUND;
+    }
     storage_status_t status = s_sd_status;
     storage_ext_unlock();
     return status;
@@ -503,14 +586,8 @@ uint32_t storage_ext_total_kb(void)
         return 0;
     }
 
-    uint64_t total_bytes = 0;
-    uint64_t free_bytes = 0;
-    if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
-        storage_ext_unlock();
-        return 0;
-    }
-
-    uint32_t total_kb = (uint32_t)(total_bytes / 1024ULL);
+    update_space_cache_locked();
+    uint32_t total_kb = s_total_kb_cached;
     storage_ext_unlock();
     return total_kb;
 }
@@ -536,26 +613,50 @@ uint32_t storage_ext_free_kb(void)
         return 0;
     }
 
-    uint64_t total_bytes = 0;
-    uint64_t free_bytes = 0;
-    if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
-        storage_ext_unlock();
+    update_space_cache_locked();
+    uint32_t free_kb = s_free_kb_cached;
+    storage_ext_unlock();
+    return free_kb;
+}
+
+uint32_t storage_ext_total_kb_cached(void)
+{
+    if (!storage_ext_lock(portMAX_DELAY)) {
         return 0;
     }
+    uint32_t total_kb = s_total_kb_cached;
+    storage_ext_unlock();
+    return total_kb;
+}
 
-    uint32_t free_kb = (uint32_t)((uint64_t)free_bytes / 1024ULL);
+uint32_t storage_ext_used_kb_cached(void)
+{
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return 0;
+    }
+    uint32_t used_kb = (s_total_kb_cached > s_free_kb_cached) ? (s_total_kb_cached - s_free_kb_cached) : 0;
+    storage_ext_unlock();
+    return used_kb;
+}
+
+uint32_t storage_ext_free_kb_cached(void)
+{
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return 0;
+    }
+    uint32_t free_kb = s_free_kb_cached;
     storage_ext_unlock();
     return free_kb;
 }
 
 bool storage_ext_logging_active(void)
 {
-    return g_app.use_microsd_logs && (storage_ext_get_status() == STORAGE_STATUS_AVAILABLE);
+    return g_app.use_microsd_logs && (storage_ext_get_status_cached() == STORAGE_STATUS_AVAILABLE);
 }
 
 bool storage_ext_logging_blocked(void)
 {
-    return g_app.use_microsd_logs && (storage_ext_get_status() != STORAGE_STATUS_AVAILABLE);
+    return g_app.use_microsd_logs && (storage_ext_get_status_cached() != STORAGE_STATUS_AVAILABLE);
 }
 
 static esp_err_t storage_ext_append_bucketed(storage_log_bucket_t bucket, const char *kind, const char *message)

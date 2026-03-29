@@ -40,6 +40,7 @@ IDF_VERSION = "v5.3.2"
 MONITOR_RETRY_SECONDS = 15
 GITHUB_REPO = "hipstereclipse/ouispy-c6"
 GITHUB_RELEASE_TAG = "latest"
+FIRMWARE_INFO_FILE = ".ouispy-firmware.json"
 
 CRASH_MARKERS = (
     "guru meditation",
@@ -123,12 +124,106 @@ def get_project_dir():
 def get_build_dir():
     return os.path.join(get_project_dir(), "build")
 
+def get_firmware_info_path(build_dir=None):
+    return os.path.join(build_dir or get_build_dir(), FIRMWARE_INFO_FILE)
+
 def get_monitor_log_dir():
     return os.path.join(get_project_dir(), "logs")
 
 def firmware_ready():
     bd = get_build_dir()
     return all(os.path.isfile(os.path.join(bd, rel)) for _, _, rel in FLASH_MAP)
+
+def _read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+def _write_json_file(path, payload):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.write("\n")
+        return True
+    except OSError:
+        return False
+
+def _get_local_git_description():
+    if not shutil.which("git"):
+        return None
+    try:
+        r = subprocess.run(
+            ["git", "-C", get_project_dir(), "describe", "--tags", "--always", "--dirty"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+        text = (r.stdout or "").strip()
+        return text or None
+    except OSError:
+        return None
+
+def _get_build_project_description(build_dir):
+    return _read_json_file(os.path.join(build_dir, "project_description.json")) or {}
+
+def _load_firmware_info(build_dir):
+    info = _read_json_file(get_firmware_info_path(build_dir)) or {}
+    project = _get_build_project_description(build_dir)
+
+    if project.get("project_version") and not info.get("version"):
+        info["version"] = str(project["project_version"])
+    if project.get("project_name") and not info.get("project_name"):
+        info["project_name"] = str(project["project_name"])
+    if project.get("target") and not info.get("target"):
+        info["target"] = str(project["target"])
+
+    if not info.get("git"):
+        git_desc = _get_local_git_description()
+        if git_desc:
+            info["git"] = git_desc
+
+    if not info.get("source"):
+        info["source"] = "local files"
+
+    return info
+
+def _save_firmware_info(build_dir, info):
+    payload = dict(info or {})
+    payload.setdefault("saved_at", datetime.now().isoformat(timespec="seconds"))
+    _write_json_file(get_firmware_info_path(build_dir), payload)
+
+def _firmware_option_suffix(info):
+    version = (info or {}).get("version")
+    release_tag = (info or {}).get("release_tag")
+    source = (info or {}).get("source")
+    bits = []
+    if version:
+        bits.append(f"v{version}")
+    elif release_tag:
+        bits.append(str(release_tag))
+    if source and source != "local files":
+        bits.append(str(source))
+    return f" ({', '.join(bits)})" if bits else ""
+
+def print_firmware_info(info, heading="Firmware selected"):
+    info = info or {}
+    section(heading)
+    version = info.get("version") or "unknown"
+    color_print(f"  Version: {version}", C.CYAN)
+    if info.get("source"):
+        color_print(f"  Source:  {info['source']}", C.CYAN)
+    if info.get("release_tag"):
+        color_print(f"  Release: {info['release_tag']}", C.CYAN)
+    if info.get("git"):
+        color_print(f"  Git:     {info['git']}", C.CYAN)
+    if info.get("target"):
+        color_print(f"  Target:  {info['target']}", C.CYAN)
+    if info.get("published_at"):
+        color_print(f"  Published: {info['published_at']}", C.CYAN)
+    print()
 
 def run_shell(cmd, cwd=None, env=None):
     """Run a command through the platform shell. Returns (success, output)."""
@@ -603,6 +698,13 @@ def ensure_idf_tools_installed(idf_path):
 def build_with_idf(idf_path):
     """Activate ESP-IDF environment and build the project. Returns True on success."""
     project = get_project_dir()
+    build_dir = get_build_dir()
+
+    # idf.py set-target triggers fullclean first. If a stale non-CMake build
+    # directory exists, fullclean refuses to proceed and the build aborts.
+    if os.path.isdir(build_dir) and not os.path.isfile(os.path.join(build_dir, "CMakeCache.txt")):
+        color_print(f"  Removing stale build directory: {build_dir}", C.DIM)
+        shutil.rmtree(build_dir, ignore_errors=True)
 
     color_print(f"\n  ESP-IDF path: {idf_path}", C.DIM)
     color_print(f"  Project:      {project}", C.DIM)
@@ -669,6 +771,14 @@ def _find_idf_and_build():
     for _, name, rel in FLASH_MAP:
         sz = os.path.getsize(os.path.join(bd, rel)) / 1024
         color_print(f"    {name:28s}  {sz:>7.1f} kB", C.CYAN)
+
+    info = _load_firmware_info(bd)
+    info.update({
+        "source": "local source build",
+        "git": _get_local_git_description() or info.get("git"),
+        "built_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    _save_firmware_info(bd, info)
     return bd
 
 
@@ -714,6 +824,15 @@ def _download_release_binaries():
             return None
 
     color_print("\n  Downloaded prebuilt firmware from GitHub!", C.GREEN)
+
+    info = {
+        "source": "GitHub release",
+        "release_tag": release.get("tag_name") or GITHUB_RELEASE_TAG,
+        "release_name": release.get("name") or "",
+        "version": str(release.get("tag_name") or "").lstrip("vV") or None,
+        "published_at": release.get("published_at") or "",
+    }
+    _save_firmware_info(bd, info)
     return bd
 
 
@@ -722,12 +841,15 @@ def ensure_firmware():
     bd = get_build_dir()
 
     local_ready = firmware_ready()
+    local_info = _load_firmware_info(bd) if local_ready else {}
 
     if local_ready:
         color_print("  Firmware is already available locally.", C.GREEN)
         for _, name, rel in FLASH_MAP:
             sz = os.path.getsize(os.path.join(bd, rel)) / 1024
             color_print(f"    {name:28s}  {sz:>7.1f} kB", C.CYAN)
+        if local_info.get("version") or local_info.get("release_tag"):
+            color_print(f"  Detected firmware{_firmware_option_suffix(local_info)}", C.GREEN)
         print()
     else:
         color_print("  Firmware has not been built yet.\n", C.YELLOW)
@@ -744,7 +866,7 @@ def ensure_firmware():
 
     color_print("  Firmware source options:\n", C.BOLD)
     if local_ready:
-        color_print("    [1] Use local firmware already in ./build", C.CYAN)
+        color_print(f"    [1] Use local firmware already in ./build{_firmware_option_suffix(local_info)}", C.CYAN)
         color_print("    [2] Download latest prebuilt release from GitHub", C.CYAN)
         color_print("    [3] Build from local source code (ESP-IDF)\n", C.CYAN)
         choice = input(f"  {C.BOLD}Select [1/2/3] (default: 2): {C.RESET}").strip()
@@ -1377,7 +1499,7 @@ def _format_sd_card(drive_path):
         color_print(f"\n  Formatting {drive_letter}: as FAT32...", C.YELLOW)
         color_print("  (This will erase ALL data on the card!)\n", C.RED)
 
-        sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+        sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),"System32")
         format_exe = os.path.join(sys32, "format.com")
         diskpart_exe = os.path.join(sys32, "diskpart.exe")
 
@@ -1945,12 +2067,14 @@ def main():
     # ── 2. Firmware (find IDF / install IDF / build — all automatic) ──
     section("Checking firmware")
     build_dir = ensure_firmware()
+    firmware_info = _load_firmware_info(build_dir)
 
     # ── 3. Serial port ──
     section("Detecting board")
     port = select_port(specified_port)
 
     # ── 4. Flash ──
+    print_firmware_info(firmware_info, "Firmware to flash")
     section("Flashing firmware")
     color_print(f"  Chip:  {CHIP}", C.CYAN)
     color_print(f"  Port:  {port}", C.CYAN)

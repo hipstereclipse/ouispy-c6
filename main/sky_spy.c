@@ -18,6 +18,7 @@
 #include "display.h"
 #include "map_tile.h"
 #include "storage_ext.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <math.h>
 
@@ -315,9 +316,13 @@ static void sky_display_task(void *arg)
     int last_logging_active = -1;
     int last_logging_blocked = -1;
     int last_map_open = -1;
+    int last_map_zoom_idx = -1;
     bool was_map_open = false;
     bool full_drawn = false;  /* force first full draw */
     uint32_t last_refresh_token = 0;
+    uint32_t last_map_refresh_token = 0;
+    uint32_t last_map_draw_ms = 0;
+    const uint32_t map_refresh_period_ms = 1500;
 
     while (g_app.current_mode == MODE_SKY_SPY) {
         frame++;
@@ -363,18 +368,25 @@ static void sky_display_task(void *arg)
 
         /* When local map is open, render the shared map view instead */
         if (g_app.local_map_open) {
-            if (data_dirty) {
-                last_drone_count = g_app.drone_count;
-                last_cursor = g_app.ui_cursor;
-                last_wifi_clients = g_app.wifi_clients;
-                last_gps_active = (int)gps_tag_active;
-                last_logging_active = (int)logging_active;
-                last_logging_blocked = (int)logging_blocked;
+            if (!was_map_open && g_app.advanced_serial_logging_enabled) {
+                ESP_LOGI(TAG, "map_open triggered heap=%lu stack=%u",
+                         (unsigned long)esp_get_free_heap_size(),
+                         (unsigned)uxTaskGetStackHighWaterMark(NULL));
             }
+            bool map_dirty = !was_map_open
+                          || (g_app.local_map_zoom_idx != last_map_zoom_idx)
+                          || (g_app.ui_refresh_token != last_map_refresh_token);
+            if (!map_dirty && (now_ms - last_map_draw_ms) < map_refresh_period_ms) {
+                vTaskDelay(pdMS_TO_TICKS(120));
+                continue;
+            }
+            last_map_zoom_idx = g_app.local_map_zoom_idx;
+            last_map_refresh_token = g_app.ui_refresh_token;
             display_draw_shared_map_view(MODE_SKY_SPY);
+            last_map_draw_ms = now_ms;
             was_map_open = true;
             full_drawn = false;
-            vTaskDelay(pdMS_TO_TICKS(250));
+            vTaskDelay(pdMS_TO_TICKS(map_dirty ? 250 : 120));
             continue;
         }
 
@@ -589,9 +601,15 @@ void sky_spy_start(void)
     /* Start BLE scan with 50% duty for wifi coexistence */
     ble_scanner_start(sky_ble_cb, 100, 50, true);
 
+    /* LCD task — create before warming the tile cache so the UI renders
+     * immediately even if the SD-card directory scan is slow. */
     if (xTaskCreate(sky_display_task, "sky_lcd", TASK_STACK_UI, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Sky Spy display task");
     }
+
+    /* Warm the tile-zoom cache asynchronously so the main task (and the
+     * button-event loop) are never blocked by slow SD-card I/O. */
+    map_tile_warm_cache_async();
 }
 
 void sky_spy_stop(void)

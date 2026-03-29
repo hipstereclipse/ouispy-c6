@@ -8,6 +8,7 @@
 
 static const char *TAG = "nvs_store";
 #define NVS_NAMESPACE "ouispy"
+#define NVS_FW_VERSION_KEY "fw_ver"
 
 typedef struct {
     uint8_t  mac[6];
@@ -33,6 +34,30 @@ void nvs_store_init(void)
     }
     ESP_ERROR_CHECK(err);
     ESP_LOGI(TAG, "NVS initialized");
+}
+
+bool nvs_store_mark_firmware_seen(const char *version)
+{
+    if (!version || !version[0]) {
+        return true;
+    }
+
+    bool already_seen = false;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        char stored[32] = {0};
+        size_t len = sizeof(stored);
+        esp_err_t err = nvs_get_str(h, NVS_FW_VERSION_KEY, stored, &len);
+        already_seen = (err == ESP_OK) && (strcmp(stored, version) == 0);
+
+        if (!already_seen) {
+            nvs_set_str(h, NVS_FW_VERSION_KEY, version);
+            nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+
+    return already_seen;
 }
 
 void nvs_store_save_mode(app_mode_t mode)
@@ -115,6 +140,7 @@ void nvs_store_save_prefs(void)
         nvs_set_u8(h, "log_fox_id", g_app.log_saved_fox_enabled ? 1 : 0);
         nvs_set_u8(h, "gps_diag", g_app.gps_diagnostics_enabled ? 1 : 0);
         nvs_set_u8(h, "web_diag", g_app.web_diagnostics_enabled ? 1 : 0);
+        nvs_set_u8(h, "adv_ser", g_app.advanced_serial_logging_enabled ? 1 : 0);
         nvs_set_u8(h, "ser_log", g_app.serial_log_verbosity);
         nvs_set_u8(h, "gps_tag", g_app.gps_tagging_enabled ? 1 : 0);
         nvs_commit(h);
@@ -231,6 +257,7 @@ void nvs_store_load_prefs(void)
         if (nvs_get_u8(h, "log_fox_id", &tmp) == ESP_OK) g_app.log_saved_fox_enabled = (tmp != 0);
         if (nvs_get_u8(h, "gps_diag", &tmp) == ESP_OK) g_app.gps_diagnostics_enabled = (tmp != 0);
         if (nvs_get_u8(h, "web_diag", &tmp) == ESP_OK) g_app.web_diagnostics_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "adv_ser", &tmp) == ESP_OK) g_app.advanced_serial_logging_enabled = (tmp != 0);
         if (nvs_get_u8(h, "ser_log", &tmp) == ESP_OK) g_app.serial_log_verbosity = tmp;
         if (nvs_get_u8(h, "gps_tag", &tmp) == ESP_OK) g_app.gps_tagging_enabled = (tmp != 0);
         nvs_close(h);

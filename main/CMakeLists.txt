@@ -19,6 +19,7 @@ idf_component_register(
     INCLUDE_DIRS "." "${IDF_PATH}/components/bt/host/nimble/esp-hci/include"
     REQUIRES
         bt
+        esp_app_format
         esp_http_server
         esp_https_server
         esp_driver_gpio

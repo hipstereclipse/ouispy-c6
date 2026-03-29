@@ -325,6 +325,11 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 .log-kind{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;color:var(--text)}
 .log-time{font-size:11px;color:var(--dim)}
 .log-msg{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;line-height:1.5;color:var(--dim);white-space:pre-wrap;word-break:break-word}
+.map-debug-panel{margin-top:10px;padding:10px 12px;border:1px solid rgba(56,189,248,.28);background:rgba(8,18,28,.72);border-radius:10px}
+.map-debug-grid{display:grid;gap:6px}
+.map-debug-line{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;line-height:1.45;color:#cbd5e1;white-space:pre-wrap;word-break:break-word}
+.map-debug-line strong{color:#f8fafc;font-weight:700}
+.map-debug-list{display:grid;gap:4px;margin-top:6px}
 
 /* Animations */
 @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -417,9 +422,19 @@ let flockMapTapCount = 0;
 let flockMapLastTapMs = 0;
 let flockMapTileDir = null;
 let flockMapDeviceTilesAvailable = null;
-let flockMapZoomIdx = 1;
+let flockMapDeviceMaxZoom = null;
+let flockMapDeviceAvailableZooms = null;
+let flockMapDeviceLcdTilesAvailable = null;
+let flockMapDeviceLcdMaxZoom = null;
+let flockMapDeviceLcdAvailableZooms = null;
+let flockMapDeviceFallbackCenter = null;
+let flockMapLocalAvailableZooms = null;
+let flockMapZoomLevel = 14;
 let flockMapDrawToken = 0;
 let flockMapAlertDismissed = false;
+let flockMapDeviceDebug = null;
+let flockMapRenderDebug = null;
+let flockMapTileAttempts = [];
 let sharedMapPushTimer = null;
 let sharedMapPushInFlight = false;
 let sharedMapPushPending = false;
@@ -435,7 +450,6 @@ let foxSearchQuery = '';
 let foxSelectedMac = '';
 let skyRadarAnimId = 0;
 let skyRadarAngle = 0;
-const FLOCK_MAP_ZOOMS = [12, 14, 16];
 const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
 const GPS_TOGGLE_STORE_KEY = 'ouispy_gps_toggle_v1';
 let settingsSection = 'preferences';
@@ -1309,7 +1323,11 @@ function requestClearCameraLocation(mac, afterDelete) {
 }
 
 function gpsMapEligible() {
-  return Object.keys(cameraLocations || {}).length > 0 || !!lastBrowserPosition || !!flockMapTileDir || gpsEffectiveEnabled();
+  return Object.keys(cameraLocations || {}).length > 0
+    || !!lastBrowserPosition
+    || !!flockMapTileDir
+    || flockMapDeviceTilesAvailable === true
+    || gpsEffectiveEnabled();
 }
 
 function handleFlockMapTap() {
@@ -1372,18 +1390,164 @@ function flockMapPins() {
   }).filter(pin => pin && Number.isFinite(pin.lat) && Number.isFinite(pin.lon));
 }
 
-function flockMapZoom() {
-  return FLOCK_MAP_ZOOMS[flockMapZoomIdx] || 14;
+function mapZoomList(values) {
+  return Array.from(new Set((values || [])
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value >= 0 && value <= 22)))
+    .sort((a, b) => a - b);
+}
+
+function nearestMapZoom(zooms, target) {
+  if (!zooms.length) return 14;
+  return zooms.reduce((best, zoom) => {
+    if (!Number.isFinite(best)) return zoom;
+    return Math.abs(zoom - target) < Math.abs(best - target) ? zoom : best;
+  }, Number.NaN);
+}
+
+function flockMapSupportedZooms() {
+  const localZooms = mapZoomList(flockMapLocalAvailableZooms);
+  if (localZooms.length) return localZooms;
+
+  const deviceZooms = mapZoomList(flockMapDeviceAvailableZooms);
+  if (deviceZooms.length) return deviceZooms;
+
+  const fallbackZooms = [];
+  if (flockMapDeviceFallbackCenter && Number.isFinite(flockMapDeviceFallbackCenter.zoom)) {
+    fallbackZooms.push(Math.round(flockMapDeviceFallbackCenter.zoom));
+  }
+  if (typeof flockMapDeviceMaxZoom === 'number' && flockMapDeviceMaxZoom >= 0) fallbackZooms.push(flockMapDeviceMaxZoom);
+  return mapZoomList(fallbackZooms);
+}
+
+function flockMapRequestedZoom() {
+  const zooms = flockMapSupportedZooms();
+  if (!zooms.length) return 14;
+  if (!zooms.includes(flockMapZoomLevel)) {
+    flockMapZoomLevel = nearestMapZoom(zooms, flockMapZoomLevel);
+  }
+  return flockMapZoomLevel;
+}
+
+function flockMapResolvedZoom() {
+  const requestedZoom = flockMapRequestedZoom();
+  if (mapZoomList(flockMapLocalAvailableZooms).length) return requestedZoom;
+  if (flockMapTileDir) return requestedZoom;
+  if (typeof flockMapDeviceMaxZoom === 'number' && flockMapDeviceMaxZoom >= 0 && requestedZoom > flockMapDeviceMaxZoom) {
+    return flockMapDeviceMaxZoom;
+  }
+  return requestedZoom;
+}
+
+function flockMapDebugEnabled() {
+  return !!(state.advancedLoggingEnabled || state.webDiagnosticsEnabled || state.advancedSerialLoggingEnabled);
+}
+
+function flockMapPushTileAttempt(entry) {
+  flockMapTileAttempts.unshift(Object.assign({ ts: Date.now() }, entry || {}));
+  if (flockMapTileAttempts.length > 18) flockMapTileAttempts.length = 18;
+}
+
+function flockMapDescribeTileSource(source) {
+  if (source === 'local-map-subdir') return 'browser folder /map';
+  if (source === 'local-folder') return 'browser folder';
+  if (source === 'device') return 'device';
+  return source || 'unknown';
+}
+
+function flockMapAttemptAgeLabel(tsMs) {
+  const ageSec = Math.max(0, Math.floor((Date.now() - Number(tsMs || 0)) / 1000));
+  if (ageSec < 2) return 'just now';
+  if (ageSec < 60) return `${ageSec}s ago`;
+  const minutes = Math.floor(ageSec / 60);
+  if (minutes < 60) return `${minutes}m ${ageSec % 60}s ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m ago`;
+}
+
+function flockMapDebugLine(label, value) {
+  return `<div class="map-debug-line"><strong>${htmlEsc(label)}:</strong> ${htmlEsc(value)}</div>`;
+}
+
+function renderFlockMapDebugPanel() {
+  const el = $('#flockMapDebugPanel');
+  if (!el) return;
+
+  const lines = [];
+  if (flockMapRenderDebug) {
+    const render = flockMapRenderDebug;
+    lines.push(flockMapDebugLine('Center', `${Number(render.center.lat || 0).toFixed(6)}, ${Number(render.center.lon || 0).toFixed(6)}`));
+    lines.push(flockMapDebugLine('Zoom', `${render.resolvedZoom}${render.resolvedZoom !== render.requestedZoom ? ` (requested ${render.requestedZoom})` : ''}`));
+    lines.push(flockMapDebugLine('Pins', `${render.pinStats.visible}/${render.pinStats.total} visible, ${render.pinStats.clipped} clipped, ${render.pinStats.invalid} invalid`));
+    lines.push(flockMapDebugLine('Tiles', `${render.tileStats.loaded}/${render.tileStats.attempted} loaded, ${render.tileStats.misses} misses, local ${render.tileStats.localHits}, device ${render.tileStats.deviceHits}`));
+    lines.push(flockMapDebugLine('Viewport', `x ${render.tileStats.startTileX}..${render.tileStats.endTileX}, y ${render.tileStats.startTileY}..${render.tileStats.endTileY}, ${render.tileStats.skippedY} y-skipped`));
+    lines.push(flockMapDebugLine('Sources', `browser zooms [${(render.localZooms || []).join(', ') || 'none'}], device zooms [${(render.deviceZooms || []).join(', ') || 'none'}]`));
+    lines.push(flockMapDebugLine('Fallback', render.fallback || 'none'));
+  }
+
+  if (flockMapDeviceDebug) {
+    const all = flockMapDeviceDebug.all || {};
+    const lcd = flockMapDeviceDebug.lcd || {};
+    lines.push(flockMapDebugLine('Device cache', `${flockMapDeviceDebug.rootAvailable ? (flockMapDeviceDebug.mapRoot || '/sdcard/map') : 'root missing'}, age ${Number(flockMapDeviceDebug.cacheAgeMs || 0)} ms`));
+    lines.push(flockMapDebugLine('Device all', `${all.available ? `z${all.highestZoom} [${((all.zooms || []).join(', ')) || 'none'}], tile ${((all.representativeTile || {}).x ?? 0)}/${((all.representativeTile || {}).y ?? 0)}` : 'unavailable'}`));
+    lines.push(flockMapDebugLine('Device LCD', `${lcd.available ? `z${lcd.highestZoom} [${((lcd.zooms || []).join(', ')) || 'none'}], tile ${((lcd.representativeTile || {}).x ?? 0)}/${((lcd.representativeTile || {}).y ?? 0)}` : 'unavailable'}`));
+  }
+
+  const attempts = flockMapTileAttempts.length
+    ? flockMapTileAttempts.map(entry => `<div class="map-debug-line">${htmlEsc(flockMapAttemptAgeLabel(entry.ts))} · ${htmlEsc(flockMapDescribeTileSource(entry.source))} · z${htmlEsc(String(entry.z))}/${htmlEsc(String(entry.x))}/${htmlEsc(String(entry.y))} · ${htmlEsc(entry.result || 'unknown')}${entry.detail ? ` · ${htmlEsc(entry.detail)}` : ''}</div>`).join('')
+    : '<div class="map-debug-line">No tile fetches recorded yet.</div>';
+
+  el.innerHTML = `
+    <div class="map-debug-grid">
+      ${lines.length ? lines.join('') : '<div class="map-debug-line">Waiting for map diagnostics.</div>'}
+    </div>
+    <div class="map-debug-list">${attempts}</div>`;
+}
+
+async function scanTileZoomLevels(rootHandle) {
+  if (!rootHandle || typeof rootHandle.values !== 'function') return [];
+  const zooms = [];
+  try {
+    for await (const entry of rootHandle.values()) {
+      if (!entry || entry.kind !== 'directory') continue;
+      if (!/^\d+$/.test(entry.name || '')) continue;
+      zooms.push(Number(entry.name));
+    }
+  } catch (e) {}
+  return mapZoomList(zooms);
+}
+
+async function refreshLocalMapTileStatus() {
+  if (!flockMapTileDir) {
+    flockMapLocalAvailableZooms = null;
+    return [];
+  }
+
+  let zooms = await scanTileZoomLevels(flockMapTileDir);
+  if (!zooms.length) {
+    try {
+      const nestedMapDir = await flockMapTileDir.getDirectoryHandle('map');
+      zooms = await scanTileZoomLevels(nestedMapDir);
+    } catch (e) {}
+  }
+
+  flockMapLocalAvailableZooms = zooms;
+  return zooms;
 }
 
 function flockMapCenter(pins) {
-  if (lastBrowserPosition && Number.isFinite(lastBrowserPosition.lat) && Number.isFinite(lastBrowserPosition.lon)) {
-    return { lat: lastBrowserPosition.lat, lon: lastBrowserPosition.lon };
-  }
   if (pins.length) {
     const lat = pins.reduce((sum, pin) => sum + pin.lat, 0) / pins.length;
     const lon = pins.reduce((sum, pin) => sum + pin.lon, 0) / pins.length;
     return { lat, lon };
+  }
+  if (flockMapDeviceFallbackCenter
+      && Number.isFinite(flockMapDeviceFallbackCenter.lat)
+      && Number.isFinite(flockMapDeviceFallbackCenter.lon)) {
+    return { lat: flockMapDeviceFallbackCenter.lat, lon: flockMapDeviceFallbackCenter.lon };
+  }
+  if (lastBrowserPosition && Number.isFinite(lastBrowserPosition.lat) && Number.isFinite(lastBrowserPosition.lon)) {
+    return { lat: lastBrowserPosition.lat, lon: lastBrowserPosition.lon };
   }
   return { lat: 0, lon: 0 };
 }
@@ -1404,34 +1568,76 @@ function wrapTileX(x, zoom) {
 
 async function loadLocalTileBitmap(z, x, y) {
   if (!flockMapTileDir || !window.showDirectoryPicker) return null;
+
+  const tryLoadFromRoot = async (rootHandle) => {
+    if (!rootHandle) return null;
+    try {
+      const zDir = await rootHandle.getDirectoryHandle(String(z));
+      const xDir = await zDir.getDirectoryHandle(String(x));
+      for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
+        try {
+          const fileHandle = await xDir.getFileHandle(`${y}.${ext}`);
+          const file = await fileHandle.getFile();
+          return { bitmap: await createImageBitmap(file), ext };
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  let bitmap = await tryLoadFromRoot(flockMapTileDir);
+  if (bitmap) {
+    flockMapPushTileAttempt({ source: 'local-folder', z, x, y, result: 'hit', detail: bitmap.ext });
+    return bitmap;
+  }
+
   try {
-    const zDir = await flockMapTileDir.getDirectoryHandle(String(z));
-    const xDir = await zDir.getDirectoryHandle(String(x));
-    for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
-      try {
-        const fileHandle = await xDir.getFileHandle(`${y}.${ext}`);
-        const file = await fileHandle.getFile();
-        return await createImageBitmap(file);
-      } catch (e) {}
+    const nestedMapDir = await flockMapTileDir.getDirectoryHandle('map');
+    bitmap = await tryLoadFromRoot(nestedMapDir);
+    if (bitmap) {
+      flockMapPushTileAttempt({ source: 'local-map-subdir', z, x, y, result: 'hit', detail: bitmap.ext });
+      return bitmap;
     }
   } catch (e) {}
+  flockMapPushTileAttempt({ source: 'local-folder', z, x, y, result: 'miss' });
   return null;
 }
 
 async function loadDeviceTileBitmap(z, x, y) {
+  if (!Number.isFinite(z) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (z < 0 || x < 0 || y < 0) return null;
   try {
     const resp = await fetch(`/api/map/tile?z=${encodeURIComponent(z)}&x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, { cache: 'force-cache' });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      flockMapPushTileAttempt({ source: 'device', z, x, y, result: 'miss', detail: `HTTP ${resp.status}` });
+      return null;
+    }
     const blob = await resp.blob();
-    return await createImageBitmap(blob);
-  } catch (e) {}
+    const contentType = blob.type || resp.headers.get('content-type') || 'tile';
+    flockMapPushTileAttempt({ source: 'device', z, x, y, result: 'hit', detail: contentType });
+    return { bitmap: await createImageBitmap(blob), ext: contentType };
+  } catch (e) {
+    flockMapPushTileAttempt({ source: 'device', z, x, y, result: 'error', detail: e && e.message ? e.message : 'fetch failed' });
+  }
   return null;
 }
 
 async function refreshDeviceMapTileStatus() {
   const status = await api('/api/map/status');
   flockMapDeviceTilesAvailable = !!(status && status.available);
-  if (gpsMapEligible()) renderFlockMapPanel();
+  flockMapDeviceMaxZoom = (status && Number.isFinite(status.maxZoom)) ? status.maxZoom : null;
+  flockMapDeviceAvailableZooms = mapZoomList(status && Array.isArray(status.availableZooms) ? status.availableZooms : []);
+  flockMapDeviceLcdTilesAvailable = !!(status && status.lcdAvailable);
+  flockMapDeviceLcdMaxZoom = (status && Number.isFinite(status.lcdMaxZoom)) ? status.lcdMaxZoom : null;
+  flockMapDeviceLcdAvailableZooms = mapZoomList(status && Array.isArray(status.lcdAvailableZooms) ? status.lcdAvailableZooms : []);
+  flockMapDeviceDebug = status && status.debug ? status.debug : null;
+  flockMapDeviceFallbackCenter = (status && status.fallbackAvailable && Number.isFinite(status.fallbackLat) && Number.isFinite(status.fallbackLon))
+    ? { lat: Number(status.fallbackLat), lon: Number(status.fallbackLon), zoom: Number(status.fallbackZoom) }
+    : null;
+  if (gpsMapEligible()) {
+    renderFlockMapPanel();
+    if (flockMapVisible) void drawFlockMap();
+  }
   return flockMapDeviceTilesAvailable;
 }
 
@@ -1457,7 +1663,21 @@ function drawFlockMapGrid(ctx, width, height) {
 }
 
 async function drawFlockMapTiles(ctx, canvas, center, zoom, token) {
-  if (!flockMapTileDir && flockMapDeviceTilesAvailable === false) return false;
+  const stats = {
+    drewAny: false,
+    attempted: 0,
+    loaded: 0,
+    localHits: 0,
+    deviceHits: 0,
+    misses: 0,
+    skippedY: 0,
+    startTileX: 0,
+    endTileX: 0,
+    startTileY: 0,
+    endTileY: 0
+  };
+  if (!Number.isFinite(zoom) || zoom < 0 || zoom > 22) return stats;
+  if (!flockMapTileDir && flockMapDeviceTilesAvailable !== true) return stats;
   const centerWorld = latLonToWorld(center.lat, center.lon, zoom);
   const startX = centerWorld.x - canvas.width / 2;
   const startY = centerWorld.y - canvas.height / 2;
@@ -1465,27 +1685,42 @@ async function drawFlockMapTiles(ctx, canvas, center, zoom, token) {
   const endTileX = Math.floor((centerWorld.x + canvas.width / 2) / 256);
   const startTileY = Math.floor(startY / 256);
   const endTileY = Math.floor((centerWorld.y + canvas.height / 2) / 256);
-  let drewAny = false;
+  stats.startTileX = startTileX;
+  stats.endTileX = endTileX;
+  stats.startTileY = startTileY;
+  stats.endTileY = endTileY;
 
   for (let tileY = startTileY; tileY <= endTileY; tileY++) {
-    if (tileY < 0 || tileY >= Math.pow(2, zoom)) continue;
+    if (tileY < 0 || tileY >= Math.pow(2, zoom)) {
+      stats.skippedY += 1;
+      continue;
+    }
     for (let tileX = startTileX; tileX <= endTileX; tileX++) {
-      if (token !== flockMapDrawToken) return drewAny;
+      if (token !== flockMapDrawToken) return stats;
+      stats.attempted += 1;
       const wrappedX = wrapTileX(tileX, zoom);
-      let bitmap = await loadLocalTileBitmap(zoom, wrappedX, tileY);
-      if (!bitmap) {
-        bitmap = await loadDeviceTileBitmap(zoom, wrappedX, tileY);
+      let tile = await loadLocalTileBitmap(zoom, wrappedX, tileY);
+      if (tile) {
+        stats.localHits += 1;
       }
-      if (!bitmap) continue;
+      if (!tile) {
+        tile = await loadDeviceTileBitmap(zoom, wrappedX, tileY);
+        if (tile) stats.deviceHits += 1;
+      }
+      if (!tile) {
+        stats.misses += 1;
+        continue;
+      }
       const dx = Math.round((tileX * 256) - startX);
       const dy = Math.round((tileY * 256) - startY);
-      ctx.drawImage(bitmap, dx, dy, 256, 256);
-      bitmap.close();
-      drewAny = true;
+      ctx.drawImage(tile.bitmap, dx, dy, 256, 256);
+      tile.bitmap.close();
+      stats.loaded += 1;
+      stats.drewAny = true;
     }
   }
 
-  return drewAny;
+  return stats;
 }
 
 function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
@@ -1494,12 +1729,27 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
   ctx.textBaseline = 'top';
 
   const metersPerPixel = (40075016.686 * Math.cos(center.lat * Math.PI / 180)) / (256 * Math.pow(2, zoom));
+  const stats = {
+    total: pins.length,
+    visible: 0,
+    clipped: 0,
+    invalid: 0,
+    metersPerPixel
+  };
 
   pins.forEach(pin => {
     const point = latLonToWorld(pin.lat, pin.lon, zoom);
     const px = Math.round((point.x - centerWorld.x) + canvas.width / 2);
     const py = Math.round((point.y - centerWorld.y) + canvas.height / 2);
-    if (px < -24 || px > canvas.width + 24 || py < -24 || py > canvas.height + 24) return;
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      stats.invalid += 1;
+      return;
+    }
+    if (px < -24 || px > canvas.width + 24 || py < -24 || py > canvas.height + 24) {
+      stats.clipped += 1;
+      return;
+    }
+    stats.visible += 1;
 
     const radiusPx = Math.max(3, Math.min(48, Number(pin.radiusM || 0) / Math.max(0.01, metersPerPixel)));
     const fillColor = pin.kind === 'self'
@@ -1535,6 +1785,8 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(label, px + 13, py - 8);
   });
+
+  return stats;
 }
 
 async function drawFlockMap() {
@@ -1544,38 +1796,65 @@ async function drawFlockMap() {
   const ctx = canvas.getContext('2d');
   const pins = flockMapRenderablePins();
   const center = flockMapCenter(pins);
-  const zoom = flockMapZoom();
+  const requestedZoom = flockMapRequestedZoom();
+  const zoom = flockMapResolvedZoom();
   const token = ++flockMapDrawToken;
 
   drawFlockMapGrid(ctx, canvas.width, canvas.height);
-  const drewTiles = await drawFlockMapTiles(ctx, canvas, center, zoom, token);
+  const tileStats = await drawFlockMapTiles(ctx, canvas, center, zoom, token);
   if (token !== flockMapDrawToken) return;
 
-  if (!drewTiles) {
+  if (!tileStats.drewAny) {
     drawFlockMapGrid(ctx, canvas.width, canvas.height);
   }
-  drawFlockMapPins(ctx, canvas, center, zoom, pins);
+  const pinStats = drawFlockMapPins(ctx, canvas, center, zoom, pins);
+  flockMapRenderDebug = {
+    center,
+    requestedZoom,
+    resolvedZoom: zoom,
+    localZooms: mapZoomList(flockMapLocalAvailableZooms),
+    deviceZooms: mapZoomList(flockMapDeviceAvailableZooms),
+    pinStats,
+    tileStats,
+    fallback: pins.length
+      ? 'pin-centroid'
+      : (flockMapDeviceFallbackCenter
+          ? `device fallback z${Number(flockMapDeviceFallbackCenter.zoom || zoom)}`
+          : (lastBrowserPosition ? 'browser GPS' : 'origin'))
+  };
 
   ctx.fillStyle = 'rgba(9,9,11,0.78)';
   ctx.fillRect(8, canvas.height - 24, canvas.width - 16, 16);
   ctx.fillStyle = '#d4d4d8';
   ctx.font = '11px Segoe UI, Aptos, sans-serif';
-  ctx.fillText(`Zoom ${zoom} · ${pins.length} map points${drewTiles ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
+  const zoomLabel = zoom === requestedZoom ? `Zoom ${zoom}` : `Zoom ${zoom} (requested ${requestedZoom})`;
+  ctx.fillText(`${zoomLabel} · ${pins.length} map points${tileStats.drewAny ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
 
   if (!pins.length) {
     ctx.fillStyle = 'rgba(9,9,11,0.68)';
     ctx.fillRect(40, 46, canvas.width - 80, 42);
     ctx.fillStyle = '#e4e4e7';
-    ctx.fillText('No pinned devices yet.', 54, 58);
+    ctx.fillText(tileStats.drewAny ? 'No pinned devices yet. Showing tile fallback.' : 'No pinned devices yet.', 54, 58);
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Save GPS or manual pins across the applets to populate the map.', 54, 72);
+    ctx.fillText(tileStats.drewAny ? 'Last browser GPS or a device tile area is being used as the center.' : 'Save GPS or manual pins across the applets to populate the map.', 54, 72);
   }
+
+  renderFlockMapDebugPanel();
 }
 
 function cycleFlockMapZoom() {
-  flockMapZoomIdx = (flockMapZoomIdx + 1) % FLOCK_MAP_ZOOMS.length;
-  drawFlockMap();
-  toast(`Map zoom ${flockMapZoom()}`);
+  const zooms = flockMapSupportedZooms();
+  if (!zooms.length) {
+    flockMapZoomLevel = 14;
+    renderFlockMapPanel();
+    toast('Map zoom 14');
+    return;
+  }
+  const currentZoom = flockMapRequestedZoom();
+  const currentIdx = Math.max(0, zooms.indexOf(currentZoom));
+  flockMapZoomLevel = zooms[(currentIdx + 1) % zooms.length] || currentZoom;
+  renderFlockMapPanel();
+  toast(`Map zoom ${flockMapRequestedZoom()}`);
 }
 
 function dismissFlockMapAlert() {
@@ -1586,6 +1865,8 @@ function dismissFlockMapAlert() {
 async function loadFlockMapTiles() {
   const deviceHasTiles = await refreshDeviceMapTileStatus();
   if (deviceHasTiles) {
+    flockMapTileDir = null;
+    flockMapLocalAvailableZooms = null;
     flockMapAlertDismissed = false;
     renderFlockMapPanel();
     await drawFlockMap();
@@ -1598,6 +1879,7 @@ async function loadFlockMapTiles() {
   }
   try {
     flockMapTileDir = await window.showDirectoryPicker();
+    await refreshLocalMapTileStatus();
     flockMapAlertDismissed = false;
     renderFlockMapPanel();
     await drawFlockMap();
@@ -1636,24 +1918,41 @@ function renderFlockMapPanel() {
   }
 
   const showAlert = !flockMapTileDir && flockMapDeviceTilesAvailable === false && !flockMapAlertDismissed;
+  const showDebug = flockMapDebugEnabled();
+  const zoomBtn = $('#flockMapZoomBtn');
+  if (zoomBtn) zoomBtn.textContent = `Zoom ${flockMapRequestedZoom()}`;
+
+  const existingCanvas = $('#flockMapCanvas');
+  const existingAlert = $('#flockMapAlert');
+  const existingDebug = $('#flockMapDebugPanel');
+  if (existingCanvas && (!!existingAlert === showAlert) && (!!existingDebug === showDebug)) {
+    renderFlockMapDebugPanel();
+    return;
+  }
+
   el.innerHTML = `
-    ${showAlert ? `<div style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(248,113,113,.45);background:rgba(127,29,29,.18);border-radius:10px;color:#fecaca;font-size:12px">
+    ${showAlert ? `<div id="flockMapAlert" style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(248,113,113,.45);background:rgba(127,29,29,.18);border-radius:10px;color:#fecaca;font-size:12px">
       No map tiles are currently loading from a browser folder or /sdcard/map. The map is using a gray grid fallback. <a href="https://github.com/colonelpanichacks/ouispy-c6#offline-flock-map-addon" target="_blank">README instructions</a>
       <button class="btn sm" style="margin-left:8px;border-color:var(--rose);color:var(--rose)" onclick="dismissFlockMapAlert()">Clear</button>
     </div>` : ''}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       <button class="btn sm" onclick="loadFlockMapTiles()">${flockMapTileDir ? 'Reload Tiles' : 'Load Device/Folder Tiles'}</button>
-      <button class="btn sm" onclick="cycleFlockMapZoom()">Zoom ${flockMapZoom()}</button>
+      <button class="btn sm" id="flockMapZoomBtn" onclick="cycleFlockMapZoom()">Zoom ${flockMapRequestedZoom()}</button>
     </div>
-    <canvas id="flockMapCanvas" width="320" height="220" ondblclick="cycleFlockMapZoom()" style="width:100%;max-width:100%;border-radius:12px;border:1px solid var(--border);background:#15181c"></canvas>`;
+    <canvas id="flockMapCanvas" width="320" height="220" ondblclick="cycleFlockMapZoom()" style="width:100%;max-width:100%;border-radius:12px;border:1px solid var(--border);background:#15181c"></canvas>
+    ${showDebug ? '<div id="flockMapDebugPanel" class="map-debug-panel"></div>' : ''}`;
 
+  renderFlockMapDebugPanel();
   setTimeout(() => { drawFlockMap(); }, 0);
 }
 
-function toggleFlockMap(forceOpen) {
+async function toggleFlockMap(forceOpen) {
   if (!gpsMapEligible()) {
-    toast('No pinned devices available yet');
-    return;
+    const deviceHasTiles = await refreshDeviceMapTileStatus();
+    if (!deviceHasTiles && !gpsMapEligible()) {
+      toast('No pinned devices or device tiles available yet');
+      return;
+    }
   }
   flockMapVisible = typeof forceOpen === 'boolean' ? forceOpen : !flockMapVisible;
   if (flockMapVisible) {
@@ -1815,8 +2114,9 @@ function formatStorageUsageCompact(usedKb, totalKb) {
 function loggingSummaryText() {
   const mode = state.loggingStatus || 'RAM only';
   const diag = state.advancedLoggingEnabled ? 'Advanced diagnostics on.' : 'Advanced diagnostics off.';
+  const serial = state.advancedSerialLoggingEnabled ? 'Map serial trace on.' : 'Map serial trace off.';
   const storage = state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) + '.' : '';
-  return mode + '. ' + storage + ' ' + diag;
+  return mode + '. ' + storage + ' ' + diag + ' ' + serial;
 }
 
 function updateHeaderLoggingStatus() {
@@ -3366,6 +3666,7 @@ function updateSkyLive() {
   const el = $('#sDroneCount'); if(el) el.textContent = state.droneCount || 0;
   renderSkyGpsWidgets();
   renderFlockMapPanel();
+  if (flockMapVisible) drawFlockMap();
   if ((state.droneCount || 0) > 0) stopSkyRadarAnimation();
   else startSkyRadarAnimation();
   if(state.droneCount > 0 && !drones.length) fetchDrones().then(() => renderDroneCards());
@@ -3497,13 +3798,17 @@ function renderSettingsSectionContent() {
               <label class="toggle"><input type="checkbox" ${state.webDiagnosticsEnabled?'checked':''} onchange="updateSetting('webDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
             </div>
             <div class="setting-row">
+              <label>Advanced serial map trace</label>
+              <label class="toggle"><input type="checkbox" ${state.advancedSerialLoggingEnabled?'checked':''} onchange="updateSetting('advancedSerialLoggingEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
               <label>Serial log verbosity</label>
               <select class="sel-sm" style="width:140px" onchange="updateSetting('serialLogVerbosity',parseInt(this.value))">
                 ${['Error','Warn','Info','Debug','Verbose'].map((n,i) => `<option value="${i}" ${Number(state.serialLogVerbosity||2)===i?'selected':''}>${n}</option>`).join('')}
               </select>
             </div>
           </div>
-          <div class="settings-note" style="margin-top:10px">Current storage: ${state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'No mounted microSD card'}.</div>
+          <div class="settings-note" style="margin-top:10px">Current storage: ${state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'No mounted microSD card'}. Advanced serial map trace mirrors map diagnostics to the terminal without requiring web diagnostics.</div>
         </div>
         <div class="card">
           <h2>Log Destruction</h2>
@@ -3564,6 +3869,7 @@ function renderSettingsSectionContent() {
         <div class="card">
           <h2>System Info</h2>
           <div style="font-size:12px;line-height:1.8" id="settingsSystemInfo">
+            <div>Firmware Version: <strong id="settingsFirmwareVersion">${state.firmwareVersion || 'unknown'}</strong></div>
             <div>Free Heap: <strong id="settingsHeap">${Math.round((state.heap||0)/1024)} kB</strong></div>
             <div>Uptime: <strong id="settingsUptime">${fmtTime(state.uptime||0)}</strong></div>
             <div>WiFi Clients: <strong id="settingsClients">${state.clients||0}</strong></div>
@@ -3573,6 +3879,7 @@ function renderSettingsSectionContent() {
             <div>Log Capacity: <strong id="settingsLogCapacity">${state.logCapacityKb||768} kB</strong></div>
             <div>Logging Status: <strong id="settingsLoggingStatus">${loggingStatusText()}</strong></div>
             <div>Advanced Logging: <strong id="settingsAdvLogging">${state.advancedLoggingEnabled ? 'Enabled' : 'Disabled'}</strong></div>
+            <div>Advanced Serial Map Trace: <strong id="settingsAdvSerialLogging">${state.advancedSerialLoggingEnabled ? 'Enabled' : 'Disabled'}</strong></div>
             <div>Serial Verbosity: <strong id="settingsSerialLogging">${['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)]}</strong></div>
             <div>microSD Status: <strong id="settingsMicrosd">${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
             <div>microSD Usage: <strong id="settingsMicrosdUsage">${state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'Unavailable'}</strong></div>
@@ -3592,7 +3899,8 @@ function renderSettingsSectionContent() {
           <p style="font-size:12px;color:var(--dim);line-height:1.6">
             OUI-Spy C6 is open-source RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47.
             It detects Flock Safety ALPR cameras, ShotSpotter Raven sensors, and drones broadcasting
-            ASTM F3411 Remote ID or DJI DroneID. Built with ESP-IDF in pure C.<br><br>
+            ASTM F3411 Remote ID or DJI DroneID. Built with ESP-IDF in pure C.<br>
+            Firmware version: <strong>${htmlEsc(state.firmwareVersion || 'unknown')}</strong><br><br>
             Connect external push buttons and a piezo speaker for standalone operation without a phone.
             See the HARDWARE.md file for wiring instructions.
           </p>
@@ -3726,6 +4034,7 @@ function updateSetting(key, val) {
   else if(key==='logSavedFoxEnabled') body.logSavedFoxEnabled = !!val;
   else if(key==='gpsDiagnosticsEnabled') body.gpsDiagnosticsEnabled = !!val;
   else if(key==='webDiagnosticsEnabled') body.webDiagnosticsEnabled = !!val;
+  else if(key==='advancedSerialLoggingEnabled') body.advancedSerialLoggingEnabled = !!val;
   else if(key==='serialLogVerbosity') body.serialLogVerbosity = parseInt(val);
   if (key === 'gpsTagging') {
     gpsToggleEnabled = !!val;
@@ -3783,6 +4092,7 @@ function renderSettingsLogs() {
 
 function updateSettingsLive() {
   const modeNames = ['Select','Flock You','Fox Hunter','Sky Spy','Settings'];
+  const fw = $('#settingsFirmwareVersion'); if (fw) fw.textContent = state.firmwareVersion || 'unknown';
   const heap = $('#settingsHeap'); if (heap) heap.textContent = Math.round((state.heap||0)/1024) + ' kB';
   const uptime = $('#settingsUptime'); if (uptime) uptime.textContent = fmtTime(state.uptime||0);
   const clients = $('#settingsClients'); if (clients) clients.textContent = state.clients||0;
@@ -3792,6 +4102,7 @@ function updateSettingsLive() {
   const cap = $('#settingsLogCapacity'); if (cap) cap.textContent = (state.logCapacityKb||768) + ' kB';
   const logStatus = $('#settingsLoggingStatus'); if (logStatus) logStatus.textContent = loggingStatusText();
   const advLog = $('#settingsAdvLogging'); if (advLog) advLog.textContent = state.advancedLoggingEnabled ? 'Enabled' : 'Disabled';
+  const advSerialLog = $('#settingsAdvSerialLogging'); if (advSerialLog) advSerialLog.textContent = state.advancedSerialLoggingEnabled ? 'Enabled' : 'Disabled';
   const serialLog = $('#settingsSerialLogging'); if (serialLog) serialLog.textContent = ['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)] || 'Info';
   const sd = $('#settingsMicrosd'); if (sd) sd.textContent = state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found');
   const sdUsage = $('#settingsMicrosdUsage'); if (sdUsage) sdUsage.textContent = state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'Unavailable';

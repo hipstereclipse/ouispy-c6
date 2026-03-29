@@ -13,11 +13,13 @@
 #include "wifi_manager.h"
 #include "ble_scanner.h"
 #include "sniffer.h"
+#include "map_tile.h"
 #include "web_server.h"
 #include "flock_you.h"
 #include "fox_hunter.h"
 #include "sky_spy.h"
 #include "esp_heap_caps.h"
+#include "esp_app_desc.h"
 #include "esp_timer.h"
 
 static const char *TAG = "main";
@@ -46,6 +48,7 @@ enum {
     SET_ITEM_ADV_LOGS,
     SET_ITEM_GPS_DIAG,
     SET_ITEM_WEB_DIAG,
+    SET_ITEM_ADV_SERIAL_LOG,
     SET_ITEM_SERIAL_LOG,
     SET_ITEM_SD_FORMAT,
     SET_ITEM_BACK,
@@ -123,6 +126,7 @@ static const int SETTINGS_CAT_LOGGING_ITEMS[] = {
     SET_ITEM_ADV_LOGS,
     SET_ITEM_GPS_DIAG,
     SET_ITEM_WEB_DIAG,
+    SET_ITEM_ADV_SERIAL_LOG,
     SET_ITEM_SERIAL_LOG,
 };
 
@@ -140,7 +144,7 @@ static const struct {
     [SETTINGS_CAT_DISPLAY] = {"Display", "Sleep timeout and menu LED", SETTINGS_CAT_DISPLAY_ITEMS, 2},
     [SETTINGS_CAT_SOUND] = {"Sound Profiles", "Per-applet audio behavior", SETTINGS_CAT_SOUND_ITEMS, 3},
     [SETTINGS_CAT_CONTROLS] = {"Button Shortcuts", "Quick actions per button", SETTINGS_CAT_CONTROLS_ITEMS, 3},
-    [SETTINGS_CAT_LOGGING] = {"Logging", "Storage, diagnostics, serial", SETTINGS_CAT_LOGGING_ITEMS, 5},
+    [SETTINGS_CAT_LOGGING] = {"Logging", "Storage, diagnostics, serial", SETTINGS_CAT_LOGGING_ITEMS, 6},
     [SETTINGS_CAT_MAINTENANCE] = {"Maintenance", "microSD tools and service", SETTINGS_CAT_MAINTENANCE_ITEMS, 1},
 };
 
@@ -286,6 +290,7 @@ static const char *settings_item_label(int item)
     case SET_ITEM_ADV_LOGS: return "Advanced Logs";
     case SET_ITEM_GPS_DIAG: return "GPS Diagnostics";
     case SET_ITEM_WEB_DIAG: return "Web Diagnostics";
+    case SET_ITEM_ADV_SERIAL_LOG: return "Advanced Serial";
     case SET_ITEM_SERIAL_LOG: return "Serial Logging";
     case SET_ITEM_SD_FORMAT: return "Format microSD";
     case SET_ITEM_BACK: return "Back to Menu";
@@ -340,6 +345,9 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         break;
     case SET_ITEM_WEB_DIAG:
         snprintf(val, val_sz, "%s", g_app.web_diagnostics_enabled ? "ON" : "OFF");
+        break;
+    case SET_ITEM_ADV_SERIAL_LOG:
+        snprintf(val, val_sz, "%s", g_app.advanced_serial_logging_enabled ? "ON" : "OFF");
         break;
     case SET_ITEM_SERIAL_LOG:
         snprintf(val, val_sz, "%s", serial_log_name(g_app.serial_log_verbosity));
@@ -1050,6 +1058,12 @@ static void apply_settings_leaf_action(int item)
         log_msg = g_app.web_diagnostics_enabled ? "web_diagnostics_enabled" : "web_diagnostics_disabled";
         break;
 
+    case SET_ITEM_ADV_SERIAL_LOG:
+        g_app.advanced_serial_logging_enabled = !g_app.advanced_serial_logging_enabled;
+        buzzer_beep(40);
+        log_msg = g_app.advanced_serial_logging_enabled ? "advanced_serial_logging_enabled" : "advanced_serial_logging_disabled";
+        break;
+
     case SET_ITEM_SERIAL_LOG:
         g_app.serial_log_verbosity = (g_app.serial_log_verbosity + 1) % SERIAL_LOG_COUNT;
         app_apply_runtime_logging_prefs();
@@ -1209,7 +1223,10 @@ static void on_button_event(button_id_t btn, button_event_t evt)
     case BTN_EVT_DOUBLE_CLICK:
         if ((g_app.current_mode == MODE_FLOCK_YOU || g_app.current_mode == MODE_SKY_SPY)
             && g_app.local_map_open) {
-            g_app.local_map_zoom_idx = (g_app.local_map_zoom_idx + 1) % 5;
+            int zooms[20];
+            size_t zoom_count = map_tile_available_zooms(zooms, sizeof(zooms) / sizeof(zooms[0]), false);
+            size_t zoom_options = (zoom_count > 0) ? zoom_count : 5;
+            g_app.local_map_zoom_idx = (g_app.local_map_zoom_idx + 1) % zoom_options;
             g_app.ui_refresh_token++;
             buzzer_tone(1000, 40);
         } else if (g_app.current_mode == MODE_FOX_HUNTER) {
@@ -1356,8 +1373,14 @@ void app_main(void)
     set_init_phase_led(LED_PHASE_SNIFFER_INIT);
     sniffer_init();
 
-    app_mode_t saved_mode = nvs_store_load_mode();
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    const char *fw_version = (app_desc && app_desc->version[0]) ? app_desc->version : "unknown";
+    bool resume_saved_mode = nvs_store_mark_firmware_seen(fw_version);
+    app_mode_t saved_mode = resume_saved_mode ? nvs_store_load_mode() : MODE_SELECT;
     if (saved_mode >= MODE_COUNT) saved_mode = MODE_SELECT;
+    if (!resume_saved_mode) {
+        ESP_LOGI(TAG, "New firmware version detected (%s); starting in mode selector", fw_version);
+    }
     ESP_LOGI(TAG, "Phase 4: starting saved mode %d", saved_mode);
     set_init_phase_led(LED_PHASE_MODE_START);
     vTaskDelay(pdMS_TO_TICKS(100));

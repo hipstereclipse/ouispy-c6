@@ -16,7 +16,9 @@
 #include "buzzer.h"
 #include "led_ctrl.h"
 #include "display.h"
+#include "map_tile.h"
 #include "storage_ext.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
@@ -46,6 +48,16 @@ static void flock_draw_logging_badge(uint16_t bg)
 
 static TaskHandle_t s_led_task = NULL;
 static volatile uint32_t s_warning_started_ms = 0;
+
+typedef struct {
+    int device_count;
+    int flock_count;
+    int raven_count;
+    int cursor;
+    int row_start;
+    int row_count;
+    ble_device_t rows[5];
+} flock_ui_snapshot_t;
 
 /* ── Flock Safety OUI Prefixes ── */
 static const uint8_t FLOCK_OUI[][3] = {
@@ -364,6 +376,48 @@ static void flock_scan_cb(const uint8_t *addr, int8_t rssi,
     xSemaphoreGive(g_app.device_mutex);
 }
 
+static void flock_capture_ui_snapshot(flock_ui_snapshot_t *snap)
+{
+    if (!snap) return;
+
+    memset(snap, 0, sizeof(*snap));
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(30)) != pdTRUE) {
+        snap->cursor = 0;
+        return;
+    }
+
+    snap->device_count = g_app.device_count;
+    for (int i = 0; i < g_app.device_count; i++) {
+        if (g_app.devices[i].is_flock) snap->flock_count++;
+        if (g_app.devices[i].is_raven) snap->raven_count++;
+    }
+
+    int cursor = g_app.ui_cursor;
+    if (cursor >= g_app.device_count) {
+        cursor = g_app.device_count > 0 ? g_app.device_count - 1 : 0;
+        g_app.ui_cursor = cursor;
+    }
+    if (cursor < 0) {
+        cursor = 0;
+        g_app.ui_cursor = 0;
+    }
+    g_app.ui_item_count = g_app.device_count;
+    snap->cursor = cursor;
+
+    int start = (g_app.device_count > 5) ? g_app.device_count - 5 : 0;
+    if (cursor < start) start = cursor;
+    if (cursor >= start + 5) start = cursor - 4;
+    if (start < 0) start = 0;
+
+    snap->row_start = start;
+    for (int i = start; i < g_app.device_count && snap->row_count < 5; i++) {
+        snap->rows[snap->row_count++] = g_app.devices[i];
+    }
+
+    xSemaphoreGive(g_app.device_mutex);
+}
+
 /* LCD status update task — Terracotta surveillance aesthetic */
 static void flock_display_task(void *arg)
 {
@@ -382,10 +436,12 @@ static void flock_display_task(void *arg)
         bool gps_tag_active = flock_gps_tag_active(now_ms);
         bool logging_active = storage_ext_logging_active();
         bool logging_blocked = storage_ext_logging_blocked();
+        flock_ui_snapshot_t snap;
+        flock_capture_ui_snapshot(&snap);
 
         /* Check if anything worth redrawing has changed */
-        bool dirty = (g_app.device_count != last_device_count)
-                   || (g_app.ui_cursor != last_cursor)
+        bool dirty = (snap.device_count != last_device_count)
+                   || (snap.cursor != last_cursor)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || ((int)gps_tag_active != last_gps_active)
                    || ((int)logging_active != last_logging_active)
@@ -398,8 +454,8 @@ static void flock_display_task(void *arg)
             continue;
         }
 
-        last_device_count = g_app.device_count;
-        last_cursor = g_app.ui_cursor;
+        last_device_count = snap.device_count;
+        last_cursor = snap.cursor;
         last_wifi_clients = g_app.wifi_clients;
         last_gps_active = (int)gps_tag_active;
         last_logging_active = (int)logging_active;
@@ -409,6 +465,11 @@ static void flock_display_task(void *arg)
 
         /* When local map is open, render the shared map view instead */
         if (g_app.local_map_open) {
+            if (!was_map_open && g_app.advanced_serial_logging_enabled) {
+                ESP_LOGI(TAG, "map_open triggered heap=%lu stack=%u",
+                         (unsigned long)esp_get_free_heap_size(),
+                         (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            }
             display_draw_shared_map_view(MODE_FLOCK_YOU);
             was_map_open = true;
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -452,20 +513,15 @@ static void flock_display_task(void *arg)
         char buf[64];
         display_draw_bordered_rect(4, 38, LCD_H_RES - 8, 36, border_col, panel_bg);
         display_draw_text(10, 42, "DETECTED TARGETS", text_main, panel_bg);
-        snprintf(buf, sizeof(buf), "%d", g_app.device_count);
+        snprintf(buf, sizeof(buf), "%d", snap.device_count);
         display_draw_text_scaled(10, 54, buf, accent, panel_bg, 2);
 
         /* Count breakdown */
-        int flock_cnt = 0, raven_cnt = 0;
-        for (int i = 0; i < g_app.device_count; i++) {
-            if (g_app.devices[i].is_flock) flock_cnt++;
-            if (g_app.devices[i].is_raven) raven_cnt++;
-        }
         display_draw_text(56, 58, "F:", text_soft, panel_bg);
-        snprintf(buf, sizeof(buf), "%d", flock_cnt);
+        snprintf(buf, sizeof(buf), "%d", snap.flock_count);
         display_draw_text(68, 58, buf, flock_num_col, panel_bg);
         display_draw_text(88, 58, "R:", text_soft, panel_bg);
-        snprintf(buf, sizeof(buf), "%d", raven_cnt);
+        snprintf(buf, sizeof(buf), "%d", snap.raven_count);
         display_draw_text(100, 58, buf, raven_col, panel_bg);
 
         display_draw_text(122, 42, "GPS TAG", text_soft, panel_bg);
@@ -479,21 +535,14 @@ static void flock_display_task(void *arg)
         /* Scanning indicator intentionally omitted to avoid periodic UI flicker.
          * Scan activity is conveyed by LED behavior and web interface updates. */
 
-        /* Keep UI cursor in range for device list */
-        g_app.ui_item_count = g_app.device_count;
-        if (g_app.ui_cursor >= g_app.device_count)
-            g_app.ui_cursor = g_app.device_count > 0 ? g_app.device_count - 1 : 0;
-
         /* Device list — last 5 with left accent bar + cursor highlight */
-        int start = (g_app.device_count > 5) ? g_app.device_count - 5 : 0;
-        if (g_app.ui_cursor < start) start = g_app.ui_cursor;
-        if (g_app.ui_cursor >= start + 5) start = g_app.ui_cursor - 4;
-
-        for (int i = start, row = 0; i < g_app.device_count && row < 5; i++, row++) {
+        for (int row = 0; row < snap.row_count; row++) {
+            int i = snap.row_start + row;
             int y_pos = 98 + row * 30;
-            bool selected = (i == g_app.ui_cursor && g_app.device_count > 0);
+            ble_device_t *device = &snap.rows[row];
+            bool selected = (i == snap.cursor && snap.device_count > 0);
 
-            uint16_t indicator = g_app.devices[i].is_raven ? raven_col : accent;
+            uint16_t indicator = device->is_raven ? raven_col : accent;
 
             if (selected) {
                 uint16_t sel_bg = rgb565(39, 39, 42);
@@ -501,24 +550,24 @@ static void flock_display_task(void *arg)
                 display_draw_rect(10, y_pos, LCD_H_RES - 16, 24, sel_bg);
 
                 char mac_str[18];
-                mac_to_str(g_app.devices[i].mac, mac_str, sizeof(mac_str));
+                mac_to_str(device->mac, mac_str, sizeof(mac_str));
                 display_draw_text(14, y_pos + 2, mac_str, text_main, sel_bg);
 
                 snprintf(buf, sizeof(buf), "%ddBm x%d",
-                         g_app.devices[i].rssi, g_app.devices[i].hit_count);
+                         device->rssi, device->hit_count);
                 display_draw_text(14, y_pos + 12, buf, accent, sel_bg);
             } else {
                 display_draw_rect(4, y_pos, 3, 24, indicator);
                 display_draw_rect(10, y_pos, LCD_H_RES - 16, 24, panel_alt);
 
                 char mac_str[18];
-                mac_to_str(g_app.devices[i].mac, mac_str, sizeof(mac_str));
+                mac_to_str(device->mac, mac_str, sizeof(mac_str));
                 display_draw_text(14, y_pos + 2, mac_str,
-                                  g_app.devices[i].is_raven ? raven_col : text_main,
+                                  device->is_raven ? raven_col : text_main,
                                   panel_alt);
 
                 snprintf(buf, sizeof(buf), "%ddBm x%d",
-                         g_app.devices[i].rssi, g_app.devices[i].hit_count);
+                         device->rssi, device->hit_count);
                 display_draw_text(14, y_pos + 12, buf, text_dim, panel_alt);
             }
         }
@@ -550,10 +599,15 @@ void flock_you_start(void)
         s_led_task = NULL;
     }
 
-    /* LCD status task */
+    /* LCD status task — create before warming the tile cache so the UI
+     * renders immediately even if the SD-card directory scan is slow. */
     if (xTaskCreate(flock_display_task, "flock_lcd", TASK_STACK_UI, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Flock You display task");
     }
+
+    /* Warm the tile-zoom cache asynchronously so the main task (and the
+     * button-event loop) are never blocked by slow SD-card I/O. */
+    map_tile_warm_cache_async();
 }
 
 void flock_you_stop(void)

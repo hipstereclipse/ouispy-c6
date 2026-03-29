@@ -24,10 +24,14 @@
 #include "nvs_store.h"
 #include "storage_ext.h"
 #include "display.h"
+#include "map_tile.h"
 #include "wifi_manager.h"
+#include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_https_server.h"
 #include "cJSON.h"
+#include <limits.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,7 +44,11 @@ static httpd_handle_t s_https_server = NULL;
 #define GPS_READY_TIMEOUT_MS 20000
 #define LOG_RECENT_LIMIT 32
 #define WEB_MAX_URI_HANDLERS 32
-static const char *MAP_ROOT_PATH = "/sdcard/map";
+
+typedef struct {
+    int device_count;
+    int drone_count;
+} web_counts_snapshot_t;
 
 /* Embedded index.html */
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -55,6 +63,84 @@ static const char *logging_status_label(void)
     if (storage_ext_logging_active()) return "SD + RAM";
     if (storage_ext_logging_blocked()) return "RAM only (SD waiting)";
     return "RAM only";
+}
+
+static void append_map_diagnostic(const char *fmt, ...)
+{
+    if ((!g_app.web_diagnostics_enabled && !g_app.advanced_serial_logging_enabled) || !fmt) return;
+
+    char log_msg[160];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(log_msg, sizeof(log_msg), fmt, args);
+    va_end(args);
+    ESP_LOGI(TAG, "map %s", log_msg);
+    if (g_app.web_diagnostics_enabled) {
+        storage_ext_append_diagnostic("map", log_msg);
+    }
+}
+
+static void add_int_array_json(cJSON *parent, const char *name, const int *values, size_t count)
+{
+    if (!parent || !name) return;
+
+    cJSON *arr = cJSON_AddArrayToObject(parent, name);
+    if (!arr) return;
+
+    for (size_t i = 0; i < count; i++) {
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(values[i]));
+    }
+}
+
+static void add_map_tile_family_debug_json(cJSON *parent, const char *name, const map_tile_debug_family_t *family)
+{
+    if (!parent || !name || !family) return;
+
+    cJSON *obj = cJSON_AddObjectToObject(parent, name);
+    if (!obj) return;
+
+    cJSON_AddBoolToObject(obj, "available", family->available);
+    cJSON_AddNumberToObject(obj, "highestZoom", family->highest_zoom);
+    cJSON_AddNumberToObject(obj, "zoomCount", family->zoom_count);
+    add_int_array_json(obj, "zooms", family->zooms, family->zoom_count);
+
+    cJSON *repr = cJSON_AddObjectToObject(obj, "representativeTile");
+    if (repr) {
+        cJSON_AddNumberToObject(repr, "x", family->representative_tile_x);
+        cJSON_AddNumberToObject(repr, "y", family->representative_tile_y);
+    }
+
+    cJSON *bounds = cJSON_AddObjectToObject(obj, "bounds");
+    if (bounds) {
+        cJSON_AddNumberToObject(bounds, "minX", family->min_tile_x);
+        cJSON_AddNumberToObject(bounds, "maxX", family->max_tile_x);
+        cJSON_AddNumberToObject(bounds, "minY", family->min_tile_y);
+        cJSON_AddNumberToObject(bounds, "maxY", family->max_tile_y);
+    }
+}
+
+static void snapshot_web_counts(web_counts_snapshot_t *snap)
+{
+    if (!snap) return;
+
+    snap->device_count = g_app.device_count;
+    snap->drone_count = g_app.drone_count;
+
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        snap->device_count = g_app.device_count;
+        xSemaphoreGive(g_app.device_mutex);
+    }
+
+    if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        snap->drone_count = g_app.drone_count;
+        xSemaphoreGive(g_app.drone_mutex);
+    }
+}
+
+static const char *firmware_version(void)
+{
+    const esp_app_desc_t *desc = esp_app_get_description();
+    return (desc && desc->version[0]) ? desc->version : "unknown";
 }
 
 static const char *log_bucket_name(storage_log_bucket_t bucket)
@@ -176,12 +262,13 @@ static char *build_logs_json(void)
     cJSON_AddBoolToObject(root, "logSavedFoxEnabled", g_app.log_saved_fox_enabled);
     cJSON_AddBoolToObject(root, "gpsDiagnosticsEnabled", g_app.gps_diagnostics_enabled);
     cJSON_AddBoolToObject(root, "webDiagnosticsEnabled", g_app.web_diagnostics_enabled);
+    cJSON_AddBoolToObject(root, "advancedSerialLoggingEnabled", g_app.advanced_serial_logging_enabled);
     cJSON_AddNumberToObject(root, "serialLogVerbosity", g_app.serial_log_verbosity);
     cJSON_AddStringToObject(root, "status", logging_status_label());
-    cJSON_AddStringToObject(root, "microsdStatus", storage_ext_status_str(storage_ext_get_status()));
-    cJSON_AddNumberToObject(root, "microsdTotalKb", storage_ext_total_kb());
-    cJSON_AddNumberToObject(root, "microsdUsedKb", storage_ext_used_kb());
-    cJSON_AddNumberToObject(root, "microsdFreeKb", storage_ext_free_kb());
+    cJSON_AddStringToObject(root, "microsdStatus", storage_ext_status_str(storage_ext_get_status_cached()));
+    cJSON_AddNumberToObject(root, "microsdTotalKb", storage_ext_total_kb_cached());
+    cJSON_AddNumberToObject(root, "microsdUsedKb", storage_ext_used_kb_cached());
+    cJSON_AddNumberToObject(root, "microsdFreeKb", storage_ext_free_kb_cached());
 
     cJSON *all_arr = cJSON_AddArrayToObject(root, "all");
     cJSON *events_arr = cJSON_AddArrayToObject(root, "events");
@@ -233,7 +320,9 @@ static esp_err_t get_index(httpd_req_t *req)
     return httpd_resp_send(req, (const char *)index_html_start, len);
 }
 
-static bool parse_nonnegative_query_int(const char *query, const char *key, int *out_value)
+static bool parse_nonnegative_query_int_range(const char *query, const char *key,
+                                              int min_value, int max_value,
+                                              int *out_value)
 {
     if (!query || !key || !out_value) return false;
 
@@ -244,7 +333,7 @@ static bool parse_nonnegative_query_int(const char *query, const char *key, int 
 
     char *end = NULL;
     long parsed = strtol(value, &end, 10);
-    if (!end || *end != '\0' || parsed < 0 || parsed > 30) {
+    if (!end || *end != '\0' || parsed < min_value || parsed > max_value) {
         return false;
     }
 
@@ -252,11 +341,18 @@ static bool parse_nonnegative_query_int(const char *query, const char *key, int 
     return true;
 }
 
-static bool map_root_available(void)
+static const char *resolve_map_root_path(void)
 {
     struct stat st = {0};
-    if (storage_ext_get_status() != STORAGE_STATUS_AVAILABLE) return false;
-    return stat(MAP_ROOT_PATH, &st) == 0 && S_ISDIR(st.st_mode);
+
+    static const char *roots[] = {
+        "/sdcard/map",
+        "/sdcard/sdcard/map",
+    };
+    for (size_t i = 0; i < (sizeof(roots) / sizeof(roots[0])); i++) {
+        if (stat(roots[i], &st) == 0 && S_ISDIR(st.st_mode)) return roots[i];
+    }
+    return NULL;
 }
 
 static const char *map_tile_content_type(const char *ext)
@@ -270,27 +366,83 @@ static const char *map_tile_content_type(const char *ext)
 
 static esp_err_t get_map_status(httpd_req_t *req)
 {
+    map_tile_debug_info_t debug_info;
+    int max_zoom = map_tile_max_zoom();
+    int lcd_max_zoom = map_tile_max_png_zoom();
+    int fallback_zoom = -1;
+    double fallback_lat = 0.0;
+    double fallback_lon = 0.0;
+    int available_zooms[MAP_TILE_DEBUG_MAX_ZOOMS] = {0};
+    int lcd_available_zooms[MAP_TILE_DEBUG_MAX_ZOOMS] = {0};
+    size_t available_zoom_count = 0;
+    size_t lcd_available_zoom_count = 0;
+    bool has_fallback = map_tile_get_fallback_center(false, &fallback_zoom, &fallback_lat, &fallback_lon);
+
+    available_zoom_count = map_tile_available_zooms(available_zooms,
+                                                    sizeof(available_zooms) / sizeof(available_zooms[0]),
+                                                    false);
+    lcd_available_zoom_count = map_tile_available_zooms(lcd_available_zooms,
+                                                        sizeof(lcd_available_zooms) / sizeof(lcd_available_zooms[0]),
+                                                        true);
+    map_tile_get_debug_info(&debug_info);
+
     httpd_resp_set_type(req, "application/json");
     set_security_headers(req);
-    char resp[96];
-    snprintf(resp, sizeof(resp), "{\"available\":%s}", map_root_available() ? "true" : "false");
-    return httpd_resp_sendstr(req, resp);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OOM");
+    }
+
+    cJSON_AddBoolToObject(root, "available", max_zoom >= 0);
+    cJSON_AddNumberToObject(root, "maxZoom", max_zoom);
+    add_int_array_json(root, "availableZooms", available_zooms, available_zoom_count);
+    cJSON_AddBoolToObject(root, "lcdAvailable", lcd_max_zoom >= 0);
+    cJSON_AddNumberToObject(root, "lcdMaxZoom", lcd_max_zoom);
+    add_int_array_json(root, "lcdAvailableZooms", lcd_available_zooms, lcd_available_zoom_count);
+    cJSON_AddBoolToObject(root, "fallbackAvailable", has_fallback);
+    cJSON_AddNumberToObject(root, "fallbackZoom", fallback_zoom);
+    cJSON_AddNumberToObject(root, "fallbackLat", fallback_lat);
+    cJSON_AddNumberToObject(root, "fallbackLon", fallback_lon);
+
+    cJSON *debug = cJSON_AddObjectToObject(root, "debug");
+    if (debug) {
+        cJSON_AddBoolToObject(debug, "rootAvailable", debug_info.root_available);
+        cJSON_AddStringToObject(debug, "mapRoot", debug_info.root_available ? debug_info.root : "");
+        cJSON_AddNumberToObject(debug, "cacheAgeMs", debug_info.cache_age_ms);
+        add_map_tile_family_debug_json(debug, "all", &debug_info.any);
+        add_map_tile_family_debug_json(debug, "lcd", &debug_info.png);
+    }
+
+    char *resp = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!resp) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OOM");
+    }
+
+    esp_err_t result = httpd_resp_sendstr(req, resp);
+    free(resp);
+    return result;
 }
 
 static esp_err_t get_map_tile(httpd_req_t *req)
 {
     char query[96] = {0};
     int z = 0, x = 0, y = 0;
+    const char *map_root = NULL;
 
     if (httpd_req_get_url_query_len(req) <= 0
             || httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK
-            || !parse_nonnegative_query_int(query, "z", &z)
-            || !parse_nonnegative_query_int(query, "x", &x)
-            || !parse_nonnegative_query_int(query, "y", &y)) {
+            || !parse_nonnegative_query_int_range(query, "z", 0, 30, &z)
+            || !parse_nonnegative_query_int_range(query, "x", 0, INT_MAX, &x)
+            || !parse_nonnegative_query_int_range(query, "y", 0, INT_MAX, &y)) {
+        append_map_diagnostic("tile bad_query query=%s", query[0] ? query : "<empty>");
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad tile query");
     }
 
-    if (!map_root_available()) {
+    map_root = resolve_map_root_path();
+    if (!map_root) {
+        append_map_diagnostic("tile root_missing z=%d x=%d y=%d", z, x, y);
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Map folder not available");
     }
 
@@ -299,7 +451,7 @@ static esp_err_t get_map_tile(httpd_req_t *req)
     const char *matched_ext = NULL;
     struct stat st = {0};
     for (size_t i = 0; i < (sizeof(exts) / sizeof(exts[0])); i++) {
-        snprintf(path, sizeof(path), "%s/%d/%d/%d.%s", MAP_ROOT_PATH, z, x, y, exts[i]);
+        snprintf(path, sizeof(path), "%s/%d/%d/%d.%s", map_root, z, x, y, exts[i]);
         if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
             matched_ext = exts[i];
             break;
@@ -307,12 +459,18 @@ static esp_err_t get_map_tile(httpd_req_t *req)
     }
 
     if (!matched_ext) {
+        append_map_diagnostic("tile miss z=%d x=%d y=%d root=%s", z, x, y, map_root);
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Tile not found");
     }
 
     FILE *f = fopen(path, "rb");
     if (!f) {
+        append_map_diagnostic("tile open_failed z=%d x=%d y=%d path=%s", z, x, y, path);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to open tile");
+    }
+
+    if (g_app.web_diagnostics_enabled && g_app.advanced_logging_enabled) {
+        append_map_diagnostic("tile hit z=%d x=%d y=%d ext=%s bytes=%ld", z, x, y, matched_ext, (long)st.st_size);
     }
 
     set_security_headers(req);
@@ -331,6 +489,7 @@ static esp_err_t get_map_tile(httpd_req_t *req)
     if (result == ESP_OK) {
         return httpd_resp_send_chunk(req, NULL, 0);
     }
+    append_map_diagnostic("tile send_failed z=%d x=%d y=%d path=%s", z, x, y, path);
     return ESP_FAIL;
 }
 
@@ -429,12 +588,34 @@ static esp_err_t post_map_pins(httpd_req_t *req)
         }
     }
 
-    memset(g_app.shared_map_pins, 0, sizeof(g_app.shared_map_pins));
-    if (next_count > 0) {
-        memcpy(g_app.shared_map_pins, next_pins, (size_t)next_count * sizeof(next_pins[0]));
+    if (g_app.map_mutex && xSemaphoreTake(g_app.map_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        memset(g_app.shared_map_pins, 0, sizeof(g_app.shared_map_pins));
+        if (next_count > 0) {
+            memcpy(g_app.shared_map_pins, next_pins, (size_t)next_count * sizeof(next_pins[0]));
+        }
+        g_app.shared_map_pin_count = (uint8_t)next_count;
+        xSemaphoreGive(g_app.map_mutex);
+    } else {
+        memset(g_app.shared_map_pins, 0, sizeof(g_app.shared_map_pins));
+        if (next_count > 0) {
+            memcpy(g_app.shared_map_pins, next_pins, (size_t)next_count * sizeof(next_pins[0]));
+        }
+        g_app.shared_map_pin_count = (uint8_t)next_count;
     }
-    g_app.shared_map_pin_count = (uint8_t)next_count;
     g_app.ui_refresh_token++;
+
+    if (next_count > 0) {
+        const map_pin_t *first_pin = &next_pins[0];
+        append_map_diagnostic("pins update count=%d first=%s kind=%d lat=%.5f lon=%.5f rssi=%d",
+                              next_count,
+                              first_pin->label[0] ? first_pin->label : "<unnamed>",
+                              (int)first_pin->kind,
+                              first_pin->lat,
+                              first_pin->lon,
+                              (int)first_pin->rssi);
+    } else {
+        append_map_diagnostic("pins update count=0");
+    }
 
     cJSON_Delete(root);
 
@@ -469,21 +650,23 @@ static void json_escape_str(const char *src, char *dst, size_t dstsz)
  * Replaces the previous cJSON implementation which performed ~60 small
  * allocations per call, fragmenting the heap every 500 ms.
  */
-#define STATE_JSON_BUF 2496
+#define STATE_JSON_BUF 4608
 static char *build_state_json(void)
 {
+    web_counts_snapshot_t counts;
     uint32_t now_ms = uptime_ms();
     bool gps_ready_fresh = g_app.gps_client_ready &&
                            (now_ms > g_app.gps_client_ready_ms) &&
                            ((now_ms - g_app.gps_client_ready_ms) <= GPS_READY_TIMEOUT_MS);
     bool gps_active = g_app.gps_tagging_enabled && gps_ready_fresh && (g_app.wifi_clients > 0);
-    storage_status_t microsd_status = storage_ext_get_status();
-    uint32_t microsd_total_kb = storage_ext_total_kb();
-    uint32_t microsd_used_kb = storage_ext_used_kb();
-    uint32_t microsd_free_kb = storage_ext_free_kb();
+    storage_status_t microsd_status = storage_ext_get_status_cached();
+    uint32_t microsd_total_kb = storage_ext_total_kb_cached();
+    uint32_t microsd_used_kb = storage_ext_used_kb_cached();
+    uint32_t microsd_free_kb = storage_ext_free_kb_cached();
 
     char fox_mac[18] = "none";
     if (g_app.fox_target_set) mac_to_str(g_app.fox_target_mac, fox_mac, sizeof(fox_mac));
+    snapshot_web_counts(&counts);
 
     uint32_t last_seen_sec = (g_app.fox_last_seen > 0 && now_ms > g_app.fox_last_seen)
                              ? (now_ms - g_app.fox_last_seen) / 1000U : 0;
@@ -498,12 +681,13 @@ static char *build_state_json(void)
 
     int n = snprintf(buf, STATE_JSON_BUF,
         "{\"mode\":%d,\"uptime\":%lu,\"heap\":%lu,\"clients\":%u,"
+        "\"firmwareVersion\":\"%s\","
         "\"brightness\":%u,\"sound\":%s,\"led\":%s,"
         "\"apBroadcast\":%s,\"singleApName\":%s,"
         "\"displaySleepSec\":%u,\"menuLedColor\":%u,"
         "\"soundProfileFlock\":%u,\"soundProfileFox\":%u,\"soundProfileSky\":%u,"
         "\"shortcutModeBtn\":%u,\"shortcutActionBtn\":%u,\"shortcutBackBtn\":%u,"
-        "\"useMicrosdLogs\":%s,\"advancedLoggingEnabled\":%s,\"gpsDiagnosticsEnabled\":%s,\"webDiagnosticsEnabled\":%s,\"serialLogVerbosity\":%u,\"loggingActive\":%s,\"loggingBlocked\":%s,"
+        "\"useMicrosdLogs\":%s,\"advancedLoggingEnabled\":%s,\"gpsDiagnosticsEnabled\":%s,\"webDiagnosticsEnabled\":%s,\"advancedSerialLoggingEnabled\":%s,\"serialLogVerbosity\":%u,\"loggingActive\":%s,\"loggingBlocked\":%s,"
         "\"logGeneralEnabled\":%s,\"logFlockEnabled\":%s,\"logFoxEnabled\":%s,\"logSkyEnabled\":%s,\"logGpsEnabled\":%s,\"logSavedFoxEnabled\":%s,"
         "\"loggingStatus\":\"%s\",\"gpsTagging\":%s,"
         "\"gpsClientReady\":%s,\"gpsTagActive\":%s,"
@@ -523,6 +707,7 @@ static char *build_state_json(void)
         (unsigned long)g_app.uptime_sec,
         (unsigned long)esp_get_free_heap_size(),
         (unsigned)g_app.wifi_clients,
+        firmware_version(),
         (unsigned)g_app.lcd_brightness,
         g_app.sound_enabled ? "true" : "false",
         g_app.led_enabled ? "true" : "false",
@@ -540,6 +725,7 @@ static char *build_state_json(void)
         g_app.advanced_logging_enabled ? "true" : "false",
         g_app.gps_diagnostics_enabled ? "true" : "false",
         g_app.web_diagnostics_enabled ? "true" : "false",
+        g_app.advanced_serial_logging_enabled ? "true" : "false",
         (unsigned)g_app.serial_log_verbosity,
         storage_ext_logging_active() ? "true" : "false",
         storage_ext_logging_blocked() ? "true" : "false",
@@ -559,8 +745,8 @@ static char *build_state_json(void)
         (unsigned long)microsd_used_kb,
         (unsigned long)microsd_free_kb,
         (unsigned long)storage_ext_log_capacity_kb(),
-        g_app.device_count,
-        g_app.drone_count,
+        counts.device_count,
+        counts.drone_count,
         fox_hunter_registry_capacity(),
         fox_mac,
         g_app.fox_target_set ? "true" : "false",
@@ -579,18 +765,33 @@ static char *build_state_json(void)
         (double)g_app.sky_tracked_radius_m,
         (unsigned)g_app.sky_tracked_gps_samples
     );
+    if (n < 0 || n >= STATE_JSON_BUF) {
+        free(buf);
+        return NULL;
+    }
 
     /* Append wifi client MACs */
     uint8_t tracked = (g_app.wifi_clients < WIFI_MAX_AP_CLIENTS)
                       ? g_app.wifi_clients : WIFI_MAX_AP_CLIENTS;
     for (uint8_t i = 0; i < tracked && n < STATE_JSON_BUF - 24; i++) {
         char mc[18];
+        int written;
         mac_to_str(g_app.wifi_client_macs[i], mc, sizeof(mc));
-        n += snprintf(buf + n, STATE_JSON_BUF - n, "%s\"%s\"", (i > 0) ? "," : "", mc);
+        written = snprintf(buf + n, STATE_JSON_BUF - n, "%s\"%s\"", (i > 0) ? "," : "", mc);
+        if (written < 0 || written >= STATE_JSON_BUF - n) {
+            free(buf);
+            return NULL;
+        }
+        n += written;
     }
-    if (n < STATE_JSON_BUF - 3) {
-        buf[n++] = ']'; buf[n++] = '}'; buf[n] = '\0';
+    if (n >= STATE_JSON_BUF - 3) {
+        free(buf);
+        return NULL;
     }
+
+    buf[n++] = ']';
+    buf[n++] = '}';
+    buf[n] = '\0';
     return buf;
 }
 
@@ -1275,6 +1476,9 @@ static esp_err_t post_settings(httpd_req_t *req)
     cJSON *web_diag = cJSON_GetObjectItem(root, "webDiagnosticsEnabled");
     if (web_diag) g_app.web_diagnostics_enabled = cJSON_IsTrue(web_diag);
 
+    cJSON *adv_serial = cJSON_GetObjectItem(root, "advancedSerialLoggingEnabled");
+    if (adv_serial) g_app.advanced_serial_logging_enabled = cJSON_IsTrue(adv_serial);
+
     cJSON *serial_log = cJSON_GetObjectItem(root, "serialLogVerbosity");
     if (serial_log && cJSON_IsNumber(serial_log)) {
         int val = serial_log->valueint;
@@ -1309,7 +1513,7 @@ static esp_err_t post_settings(httpd_req_t *req)
     if (g_app.advanced_logging_enabled) {
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg),
-                 "settings_updated sd=%s adv=%s src(gen=%s flock=%s fox=%s sky=%s gps=%s foxid=%s) gpsdiag=%s webdiag=%s serial=%u gps=%s",
+                 "settings_updated sd=%s adv=%s src(gen=%s flock=%s fox=%s sky=%s gps=%s foxid=%s) gpsdiag=%s webdiag=%s advserial=%s serial=%u gps=%s",
                  g_app.use_microsd_logs ? "on" : "off",
                  g_app.advanced_logging_enabled ? "on" : "off",
                  g_app.log_general_enabled ? "on" : "off",
@@ -1320,6 +1524,7 @@ static esp_err_t post_settings(httpd_req_t *req)
                  g_app.log_saved_fox_enabled ? "on" : "off",
                  g_app.gps_diagnostics_enabled ? "on" : "off",
                  g_app.web_diagnostics_enabled ? "on" : "off",
+                 g_app.advanced_serial_logging_enabled ? "on" : "off",
                  (unsigned)g_app.serial_log_verbosity,
                  g_app.gps_tagging_enabled ? "on" : "off");
         storage_ext_append_diagnostic("system", log_msg);
@@ -1430,6 +1635,7 @@ static void broadcast_on_server(httpd_handle_t server, const char *json)
                 };
                 esp_err_t send_err = httpd_ws_send_data(server, fds[i], &pkt);
                 if (send_err != ESP_OK) {
+                    httpd_sess_trigger_close(server, fds[i]);
                     ESP_LOGW(TAG, "WS send failed fd=%d err=%s", fds[i], esp_err_to_name(send_err));
                     if (g_app.web_diagnostics_enabled) {
                         char log_msg[96];
@@ -1683,7 +1889,7 @@ void web_server_start(void)
     httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
     ssl_config.httpd.max_uri_handlers = WEB_MAX_URI_HANDLERS;
     ssl_config.httpd.stack_size = 6144;
-    ssl_config.httpd.max_open_sockets = 2;
+    ssl_config.httpd.max_open_sockets = 4;
     ssl_config.httpd.lru_purge_enable = true;
     ssl_config.httpd.server_port = 443;
     ssl_config.httpd.ctrl_port = 32769;

@@ -6,6 +6,7 @@
 #include "app_common.h"
 
 void nvs_store_init(void);
+bool nvs_store_mark_firmware_seen(const char *version);
 void nvs_store_save_mode(app_mode_t mode);
 app_mode_t nvs_store_load_mode(void);
 void nvs_store_save_fox_target(const uint8_t mac[6]);

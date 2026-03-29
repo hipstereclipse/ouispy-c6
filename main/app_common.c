@@ -86,6 +86,7 @@ void app_state_init(void)
     g_app.log_saved_fox_enabled = true;
     g_app.gps_diagnostics_enabled = false;
     g_app.web_diagnostics_enabled = false;
+    g_app.advanced_serial_logging_enabled = false;
     g_app.serial_log_verbosity = SERIAL_LOG_INFO;
     g_app.gps_tagging_enabled = false;
     g_app.gps_client_ready = false;
@@ -103,6 +104,7 @@ void app_state_init(void)
     g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();
     g_app.drone_mutex     = xSemaphoreCreateMutex();
+    g_app.map_mutex       = xSemaphoreCreateMutex();
     
     /* Set drone capacity based on microSD availability */
     g_app.max_drones_allowed = storage_ext_is_available() ? MAX_DRONES : MAX_DRONES_NO_SD;

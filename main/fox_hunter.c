@@ -1082,8 +1082,18 @@ void fox_hunter_set_target(const uint8_t mac[6])
 
 void fox_hunter_set_target_from_flock(int device_index)
 {
-    if (device_index < 0 || device_index >= g_app.device_count) return;
-    fox_hunter_set_target(g_app.devices[device_index].mac);
+    uint8_t mac[6];
+
+    if (device_index < 0) return;
+    if (xSemaphoreTake(g_app.device_mutex, pdMS_TO_TICKS(30)) != pdTRUE) return;
+    if (device_index >= g_app.device_count) {
+        xSemaphoreGive(g_app.device_mutex);
+        return;
+    }
+
+    memcpy(mac, g_app.devices[device_index].mac, sizeof(mac));
+    xSemaphoreGive(g_app.device_mutex);
+    fox_hunter_set_target(mac);
 }
 
 void fox_hunter_clear_target(void)

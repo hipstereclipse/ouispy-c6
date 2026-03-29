@@ -12,6 +12,8 @@
 
 OUI-Spy C6 consolidates three passive RF intelligence modes into a single flash image running on the Waveshare ESP32-C6-LCD-1.47 dev board. Pure ESP-IDF C, no Arduino — just bare metal and radio waves.
 
+Current firmware version: 0.41.00
+
 ## Quick Links
 
 - [Build & Flash](#build--flash)
@@ -96,6 +98,7 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls with per-source filters
 - The on-device Settings screen now uses grouped submenus for Connectivity, Display, Sound Profiles, Button Shortcuts, Logging, and Maintenance so you can reach related options without scrolling one flat list
 - microSD status is surfaced as `Available`, `Needs Format`, or `Not Found` in both the LCD UI and web UI
+- This project vendors the ESP-IDF `fatfs` component locally with `FF_FS_EXFAT` enabled, so compatible microSD cards formatted as exFAT can mount without reflashing a custom IDF toolchain
 - microSD usage now updates live as logs accumulate, including used/total card capacity in both the LCD and web UI
 - Unformatted but detected cards can be formatted directly from the on-device Settings menu
 - When microSD logging is enabled, identity-bearing log records (entries containing device MAC/unique IDs) are written to a protected log file and are not auto-pruned; if storage gets tight, the oldest non-critical event records are trimmed first
@@ -121,12 +124,14 @@ The shared pinned-device map can render offline slippy-map tiles for saved Flock
 - Tiles:
   - Preferred device-backed path: copy a `map` folder onto the microSD card at `/sdcard/map` using standard slippy-map layout: `z/x/y.png`, `jpg`, `jpeg`, or `webp`
   - In the web UI, `Load Device/Folder Tiles` first checks `/sdcard/map` served by the device itself, even on browsers that also support local folder selection
-  - Browsers that support directory selection can still load a local folder manually using the same `z/x/y.ext` layout
+  - Browsers that support directory selection can load either the `map` folder itself or a parent folder that contains `map`, using the same `z/x/y.ext` layout
   - If no offline tiles are loaded, the map still shows a gray grid with relative pinned devices
 - Notes:
   - Browser directory selection is no longer required when `/sdcard/map` is present on the device
   - The firmware now serves tiles directly through `/api/map/tile`, so the embedded map remains usable even in browsers that cannot open local folders
-  - The browser map can render `png`, `jpg`, `jpeg`, or `webp` tiles, but the on-device LCD renderer currently expects PNG tiles under `/sdcard/map`
+  - The firmware also tolerates a nested `/sdcard/sdcard/map` layout so flasher-exported folders copied one level too deep still work
+  - The browser map can render `png`, `jpg`, `jpeg`, or `webp` tiles
+  - The on-device LCD renderer can center and browse any indexed tile cache, but image tile drawing on the LCD still requires PNG tiles under `/sdcard/map`; `jpg`/`jpeg`/`webp` tile sets fall back to the grid view instead of blocking the map entirely
   - Pins come from locations you saved in the web UI, so populate those first for a meaningful map
 
 ### Fox Hunter Web Console
@@ -207,6 +212,12 @@ All modes use channel 6 for optimal alignment with Remote ID NAN detection.
 
 - [ESP-IDF v5.3.2](https://docs.espressif.com/projects/esp-idf/en/v5.3.2/esp32c6/get-started/) on Windows
 - Python 3.11 for the ESP-IDF build environment
+
+### microSD Filesystem Note
+
+- This firmware mounts FAT12/16/32 and exFAT volumes through a vendored copy of ESP-IDF's `fatfs` component
+- The local override enables `FF_FS_EXFAT` so exFAT-formatted microSD cards can mount on ESP-IDF 5.3.x without modifying the global IDF installation
+- If the card still reports `Needs Format`, the filesystem is likely damaged or uses a format other than FAT/exFAT
 
 ### Build
 

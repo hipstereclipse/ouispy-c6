@@ -44,8 +44,8 @@ extern "C" {
 #define LCD_COL_OFFSET  34
 #define LCD_ROW_OFFSET  0
 
-#define TASK_STACK_BUTTON   3072
-#define TASK_STACK_UI       6144
+#define TASK_STACK_BUTTON   4096
+#define TASK_STACK_UI       8192
 #define TASK_STACK_WS       6144
 #define TASK_STACK_SNIFFER  4096
 
@@ -270,6 +270,7 @@ typedef struct {
     /* Shared map pins mirrored from the web UI for local LCD rendering */
     map_pin_t       shared_map_pins[MAX_SHARED_MAP_PINS];
     uint8_t         shared_map_pin_count;
+    SemaphoreHandle_t map_mutex;
     bool            local_map_open;
     uint8_t         local_map_zoom_idx;
 
@@ -297,6 +298,7 @@ typedef struct {
     bool            log_saved_fox_enabled;
     bool            gps_diagnostics_enabled;
     bool            web_diagnostics_enabled;
+    bool            advanced_serial_logging_enabled;
     uint8_t         serial_log_verbosity;
     bool            gps_tagging_enabled;
     bool            gps_client_ready;      /* phone/browser currently able to send GPS */
