@@ -10,6 +10,8 @@
 #include "sdmmc_cmd.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -28,6 +30,7 @@ static int s_log_ring_head = 0;
 static int s_log_ring_count = 0;
 
 #define SD_RUNTIME_PROBE_INTERVAL_US (2000000LL)
+#define SD_SPI_MAX_FREQ_KHZ          4000
 #define LOG_MIN_FREE_KB              128U
 #define EVENT_LOG_MAX_BYTES          (512U * 1024U)
 #define EVENT_LOG_KEEP_BYTES         (256U * 1024U)
@@ -35,10 +38,44 @@ static int s_log_ring_count = 0;
 static const char *EVENT_LOG_PATH = "/sdcard/ouispy_logs/events.log";
 static const char *IDENTITY_LOG_PATH = "/sdcard/ouispy_logs/identity.log";
 static const char *DIAGNOSTIC_LOG_PATH = "/sdcard/ouispy_logs/diagnostics.log";
+static SemaphoreHandle_t s_storage_lock = NULL;
 
 static void ensure_log_dir(void);
 static void refresh_card_runtime_status(void);
 static void prune_noncritical_logs_if_needed(void);
+
+static bool storage_ext_lock(TickType_t wait_ticks)
+{
+    if (!s_storage_lock) {
+        s_storage_lock = xSemaphoreCreateRecursiveMutex();
+        if (!s_storage_lock) {
+            ESP_LOGE(TAG, "Failed to create storage lock");
+            return false;
+        }
+    }
+
+    return xSemaphoreTakeRecursive(s_storage_lock, wait_ticks) == pdTRUE;
+}
+
+static void storage_ext_unlock(void)
+{
+    if (s_storage_lock) {
+        xSemaphoreGiveRecursive(s_storage_lock);
+    }
+}
+
+static esp_vfs_fat_mount_config_t storage_mount_cfg(bool format_if_mount_failed)
+{
+    esp_vfs_fat_mount_config_t mount_cfg = {
+        .format_if_mount_failed = format_if_mount_failed,
+        .max_files = 4,
+        .allocation_unit_size = 16 * 1024,
+        .disk_status_check_enable = true,
+        .use_one_fat = false,
+    };
+
+    return mount_cfg;
+}
 
 static void clear_log_ring(void)
 {
@@ -290,27 +327,23 @@ static storage_status_t classify_mount_error(esp_err_t err)
     case ESP_OK:
         return STORAGE_STATUS_AVAILABLE;
     case ESP_ERR_TIMEOUT:
-    case ESP_ERR_NOT_FOUND:
-    case ESP_ERR_INVALID_RESPONSE:
+        /* Only a genuine bus timeout means no card is present */
         return STORAGE_STATUS_NOT_FOUND;
     default:
+        /* Card responded on SPI but filesystem is unreadable/corrupt */
+        ESP_LOGW(TAG, "mount error classified as NEEDS_FORMAT: %s (0x%x)",
+                 esp_err_to_name(err), (unsigned)err);
         return STORAGE_STATUS_NEEDS_FORMAT;
     }
 }
 
 static esp_err_t mount_sd_card(bool format_if_mount_failed, bool log_result)
 {
-    esp_vfs_fat_mount_config_t mount_cfg = {
-        .format_if_mount_failed = format_if_mount_failed,
-        .max_files = 4,
-        .allocation_unit_size = 16 * 1024,
-        .disk_status_check_enable = true,
-        .use_one_fat = false,
-    };
+    esp_vfs_fat_mount_config_t mount_cfg = storage_mount_cfg(format_if_mount_failed);
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SPI2_HOST;
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    host.max_freq_khz = SD_SPI_MAX_FREQ_KHZ;
 
     sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_cfg.host_id = SPI2_HOST;
@@ -388,6 +421,10 @@ static void ensure_log_dir(void)
 
 void storage_ext_init(void)
 {
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return;
+    }
+
     s_sd_ready = false;
     s_sd_status = STORAGE_STATUS_NOT_FOUND;
     s_card = NULL;
@@ -398,18 +435,29 @@ void storage_ext_init(void)
     refresh_storage_dependent_limits();
 
     mount_sd_card(false, true);
+    storage_ext_unlock();
 }
 
 bool storage_ext_is_available(void)
 {
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return false;
+    }
     refresh_card_runtime_status();
-    return s_sd_ready;
+    bool available = s_sd_ready;
+    storage_ext_unlock();
+    return available;
 }
 
 storage_status_t storage_ext_get_status(void)
 {
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return STORAGE_STATUS_NOT_FOUND;
+    }
     refresh_card_runtime_status();
-    return s_sd_status;
+    storage_status_t status = s_sd_status;
+    storage_ext_unlock();
+    return status;
 }
 
 const char *storage_ext_status_str(storage_status_t status)
@@ -433,26 +481,38 @@ bool storage_ext_status_is_present(storage_status_t status)
 
 uint32_t storage_ext_log_capacity_kb(void)
 {
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return 768;
+    }
     if (s_sd_ready) {
+        storage_ext_unlock();
         return 8192;
     }
+    storage_ext_unlock();
     return 768;
 }
 
 uint32_t storage_ext_total_kb(void)
 {
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return 0;
+    }
     refresh_card_runtime_status();
     if (!s_sd_ready) {
+        storage_ext_unlock();
         return 0;
     }
 
     uint64_t total_bytes = 0;
     uint64_t free_bytes = 0;
     if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
+        storage_ext_unlock();
         return 0;
     }
 
-    return (uint32_t)(total_bytes / 1024ULL);
+    uint32_t total_kb = (uint32_t)(total_bytes / 1024ULL);
+    storage_ext_unlock();
+    return total_kb;
 }
 
 uint32_t storage_ext_used_kb(void)
@@ -467,18 +527,25 @@ uint32_t storage_ext_used_kb(void)
 
 uint32_t storage_ext_free_kb(void)
 {
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return 0;
+    }
     refresh_card_runtime_status();
     if (!s_sd_ready) {
+        storage_ext_unlock();
         return 0;
     }
 
     uint64_t total_bytes = 0;
     uint64_t free_bytes = 0;
     if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
+        storage_ext_unlock();
         return 0;
     }
 
-    return (uint32_t)((uint64_t)free_bytes / 1024ULL);
+    uint32_t free_kb = (uint32_t)((uint64_t)free_bytes / 1024ULL);
+    storage_ext_unlock();
+    return free_kb;
 }
 
 bool storage_ext_logging_active(void)
@@ -498,8 +565,15 @@ static esp_err_t storage_ext_append_bucketed(storage_log_bucket_t bucket, const 
     uint32_t now_sec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     log_ring_append(bucket, now_sec, kind, message);
 
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     refresh_card_runtime_status();
-    if (!g_app.use_microsd_logs || !s_sd_ready) return ESP_OK;
+    if (!g_app.use_microsd_logs || !s_sd_ready) {
+        storage_ext_unlock();
+        return ESP_OK;
+    }
 
     ensure_log_dir();
     prune_noncritical_logs_if_needed();
@@ -511,10 +585,14 @@ static esp_err_t storage_ext_append_bucketed(storage_log_bucket_t bucket, const 
         path = DIAGNOSTIC_LOG_PATH;
     }
     FILE *f = fopen(path, "a");
-    if (!f) return ESP_FAIL;
+    if (!f) {
+        storage_ext_unlock();
+        return ESP_FAIL;
+    }
 
     fprintf(f, "%lu,%s,%s\n", (unsigned long)now_sec, kind, message);
     fclose(f);
+    storage_ext_unlock();
     return ESP_OK;
 }
 
@@ -551,8 +629,14 @@ int storage_ext_get_recent_entries(storage_log_entry_t *entries, int max_entries
 int storage_ext_read_recent_lines(char lines[][64], int max_lines)
 {
     if (!lines || max_lines <= 0) return 0;
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return 0;
+    }
     refresh_card_runtime_status();
-    if (!s_sd_ready) return 0;
+    if (!s_sd_ready) {
+        storage_ext_unlock();
+        return 0;
+    }
 
     /* Try event log first, then identity log */
     const char *paths[] = {EVENT_LOG_PATH, IDENTITY_LOG_PATH};
@@ -606,14 +690,39 @@ int storage_ext_read_recent_lines(char lines[][64], int max_lines)
         total += ring_count;
     }
 
+    storage_ext_unlock();
     return total;
 }
 
 esp_err_t storage_ext_format(void)
 {
-    if (!storage_ext_status_is_present(s_sd_status)) {
-        ESP_LOGE(TAG, "No card detected to format");
-        return ESP_ERR_INVALID_STATE;
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    ESP_LOGI(TAG, "Starting microSD format (status=%d)...", (int)s_sd_status);
+
+    refresh_card_runtime_status();
+
+    /* If already mounted, format in-place then remount */
+    if (s_sd_ready && s_card) {
+        esp_vfs_fat_mount_config_t format_cfg = storage_mount_cfg(false);
+        esp_err_t err = esp_vfs_fat_sdcard_format_cfg("/sdcard", s_card, &format_cfg);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "microSD formatted in-place successfully");
+            ensure_log_dir();
+            clear_log_ring();
+            storage_ext_unlock();
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "In-place format failed (%s), trying unmount+remount", esp_err_to_name(err));
+        /* Fall through to unmount-and-reformat path */
+    }
+
+    if (s_sd_status == STORAGE_STATUS_NOT_FOUND) {
+        ESP_LOGW(TAG, "microSD format aborted: card not detected");
+        storage_ext_unlock();
+        return ESP_ERR_NOT_FOUND;
     }
 
     /* Unmount if currently mounted */
@@ -624,31 +733,47 @@ esp_err_t storage_ext_format(void)
         refresh_storage_dependent_limits();
     }
 
-    ESP_LOGI(TAG, "Starting microSD format...");
-
-    /* Format with automatic mount on success */
+    /* Only an explicit format request on a detected-but-unreadable card may auto-format on mount. */
     esp_err_t err = mount_sd_card(true, false);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "microSD formatted and mounted successfully");
+        clear_log_ring();
+        storage_ext_unlock();
         return ESP_OK;
     }
 
     ESP_LOGE(TAG, "microSD format failed: %s", esp_err_to_name(err));
+    storage_ext_unlock();
     return err;
 }
 
 esp_err_t storage_ext_clear_logs(void)
 {
-    return apply_to_log_files(truncate_log_file);
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = apply_to_log_files(truncate_log_file);
+    storage_ext_unlock();
+    return err;
 }
 
 esp_err_t storage_ext_delete_logs(void)
 {
-    return apply_to_log_files(delete_log_file);
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = apply_to_log_files(delete_log_file);
+    storage_ext_unlock();
+    return err;
 }
 
 esp_err_t storage_ext_scramble_logs(void)
 {
-    return apply_to_log_files(scramble_log_file);
+    if (!storage_ext_lock(portMAX_DELAY)) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = apply_to_log_files(scramble_log_file);
+    storage_ext_unlock();
+    return err;
 }
 

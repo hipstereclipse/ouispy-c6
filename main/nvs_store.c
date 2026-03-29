@@ -14,6 +14,15 @@ typedef struct {
     char     label[FOX_REG_LABEL_LEN];
 } fox_reg_entry_v1_t;
 
+typedef struct {
+    uint8_t  mac[6];
+    char     label[FOX_REG_LABEL_LEN];
+    char     original_name[DEVICE_NAME_LEN];
+    char     nickname[FOX_REG_NICK_LEN];
+    char     notes[FOX_REG_NOTES_LEN];
+    char     section[FOX_REG_SECTION_LEN];
+} fox_reg_entry_v2_t;
+
 void nvs_store_init(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -137,6 +146,27 @@ void nvs_store_load_fox_registry(void)
                     size_t out_len = len;
                     if (nvs_get_blob(h, "fox_reg", g_app.fox_registry, &out_len) == ESP_OK) {
                         g_app.fox_registry_count = count;
+                    }
+                } else if (len == count * sizeof(fox_reg_entry_v2_t)) {
+                    fox_reg_entry_v2_t v2[FOX_REGISTRY_MAX] = {0};
+                    size_t out_len = len;
+                    if (nvs_get_blob(h, "fox_reg", v2, &out_len) == ESP_OK) {
+                        memset(g_app.fox_registry, 0, sizeof(g_app.fox_registry));
+                        for (int i = 0; i < count; i++) {
+                            memcpy(g_app.fox_registry[i].mac, v2[i].mac, 6);
+                            strncpy(g_app.fox_registry[i].label, v2[i].label,
+                                    sizeof(g_app.fox_registry[i].label) - 1);
+                            strncpy(g_app.fox_registry[i].original_name, v2[i].original_name,
+                                    sizeof(g_app.fox_registry[i].original_name) - 1);
+                            strncpy(g_app.fox_registry[i].nickname, v2[i].nickname,
+                                    sizeof(g_app.fox_registry[i].nickname) - 1);
+                            strncpy(g_app.fox_registry[i].notes, v2[i].notes,
+                                    sizeof(g_app.fox_registry[i].notes) - 1);
+                            strncpy(g_app.fox_registry[i].section, v2[i].section,
+                                    sizeof(g_app.fox_registry[i].section) - 1);
+                        }
+                        g_app.fox_registry_count = count;
+                        nvs_store_save_fox_registry();
                     }
                 } else if (len == count * sizeof(fox_reg_entry_v1_t)) {
                     fox_reg_entry_v1_t legacy[FOX_REGISTRY_MAX] = {0};

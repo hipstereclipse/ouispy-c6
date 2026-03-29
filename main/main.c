@@ -70,6 +70,7 @@ static TaskHandle_t s_select_task = NULL;
 static TaskHandle_t s_settings_task = NULL;
 static TaskHandle_t s_reset_warn_task = NULL;
 static int s_settings_category = -1;
+static int s_settings_root_cursor = 0;   /* preserved root-menu cursor */
 
 /* ── AP configuration per mode ── */
 typedef struct {
@@ -377,6 +378,7 @@ static int settings_current_leaf_item(void)
 static void settings_open_category(int category)
 {
     if (category < 0 || category >= SETTINGS_CAT_COUNT) return;
+    s_settings_root_cursor = g_app.ui_cursor;  /* remember root position */
     s_settings_category = category;
     g_app.ui_cursor = 0;
     settings_sync_item_count();
@@ -385,8 +387,10 @@ static void settings_open_category(int category)
 static void settings_close_category(void)
 {
     s_settings_category = -1;
-    g_app.ui_cursor = 0;
+    g_app.ui_cursor = s_settings_root_cursor;  /* restore root position */
     settings_sync_item_count();
+    if (g_app.ui_cursor >= g_app.ui_item_count)
+        g_app.ui_cursor = g_app.ui_item_count - 1;
 }
 
 static uint8_t mode_sound_profile(app_mode_t mode)
@@ -445,9 +449,9 @@ static void stop_current_mode(void)
 {
     led_ctrl_breathe_stop();
     switch (g_app.current_mode) {
-    case MODE_FLOCK_YOU:  flock_you_stop(); break;
+    case MODE_FLOCK_YOU:  g_app.local_map_open = false; flock_you_stop(); break;
     case MODE_FOX_HUNTER: fox_hunter_stop(); break;
-    case MODE_SKY_SPY:    sky_spy_stop(); break;
+    case MODE_SKY_SPY:    g_app.local_map_open = false; sky_spy_stop(); break;
     case MODE_SELECT:
     case MODE_SETTINGS:
     default:
@@ -724,12 +728,14 @@ static void mode_select_task(void *arg)
 static void settings_task(void *arg)
 {
     int last_cursor = -1;
+    int last_category = -2;  /* track category changes for reliable re-render */
     int last_gps_active = -1;
     int last_gps_enabled = -1;
     int last_sd_status = -1;
     int last_sd_logs = -1;
     int last_logging_active = -1;
     int last_logging_blocked = -1;
+    uint32_t last_refresh_token = 0;
     bool led_preview_active = false;
     uint8_t led_preview_color = 0xFF;
     while (g_app.current_mode == MODE_SETTINGS) {
@@ -758,14 +764,18 @@ static void settings_task(void *arg)
         }
 
         if (g_app.ui_cursor != last_cursor
+                || s_settings_category != last_category
                 || last_gps_active != (int)gps_tag_active
                 || last_gps_enabled != (int)g_app.gps_tagging_enabled
                 || last_sd_status != (int)sd_status
                 || last_sd_logs != (int)g_app.use_microsd_logs
                 || last_logging_active != (int)logging_active
-                || last_logging_blocked != (int)logging_blocked) {
+                || last_logging_blocked != (int)logging_blocked
+                || last_refresh_token != g_app.ui_refresh_token) {
             render_settings_screen(g_app.ui_cursor);
             last_cursor = g_app.ui_cursor;
+            last_category = s_settings_category;
+            last_refresh_token = g_app.ui_refresh_token;
             last_gps_active = (int)gps_tag_active;
             last_gps_enabled = (int)g_app.gps_tagging_enabled;
             last_sd_status = (int)sd_status;
@@ -812,7 +822,7 @@ static void start_mode(app_mode_t mode)
         web_server_start();
     }
 
-    nvs_store_save_mode(mode);
+    nvs_store_save_mode(mode == MODE_SETTINGS ? MODE_SELECT : mode);
     storage_ext_append_log("mode", names[mode]);
     display_fill(0x0000);
     display_draw_status(names[mode], MODE_CFG[mode].accent);
@@ -841,6 +851,7 @@ static void start_mode(app_mode_t mode)
 
     case MODE_SETTINGS:
         s_settings_category = -1;
+        s_settings_root_cursor = 0;
         g_app.ui_cursor = 0;
         settings_sync_item_count();
         if (xTaskCreate(settings_task, "settings_ui", TASK_STACK_UI, NULL, 3, &s_settings_task) != pdPASS) {
@@ -1047,23 +1058,15 @@ static void apply_settings_leaf_action(int item)
         break;
 
     case SET_ITEM_SD_FORMAT: {
-        storage_status_t status = storage_ext_get_status();
-        if (status == STORAGE_STATUS_NOT_FOUND) {
-            buzzer_tone(400, 100);  /* Error tone */
-            log_msg = "sd_format_failed_no_card";
-        } else if (status == STORAGE_STATUS_AVAILABLE) {
-            buzzer_tone(400, 100);  /* Error tone */
-            log_msg = "sd_already_formatted";
+        /* Only format a detected card. The storage layer will still handle
+         * unreadable filesystems, but won't treat "not found" as wipeable. */
+        esp_err_t err = storage_ext_format();
+        if (err == ESP_OK) {
+            buzzer_play_profile(SOUND_PROFILE_SONAR);
+            log_msg = "sd_format_success";
         } else {
-            /* Format the card */
-            esp_err_t err = storage_ext_format();
-            if (err == ESP_OK) {
-                buzzer_play_profile(SOUND_PROFILE_SONAR);
-                log_msg = "sd_format_success";
-            } else {
-                buzzer_tone(300, 150);  /* Error tone */
-                log_msg = "sd_format_failed";
-            }
+            buzzer_tone(300, 150);  /* Error tone */
+            log_msg = "sd_format_failed";
         }
         break;
     }
@@ -1077,7 +1080,6 @@ static void apply_settings_leaf_action(int item)
     if (log_msg) {
         storage_ext_append_log("settings", log_msg);
     }
-    render_settings_screen(g_app.ui_cursor);
 }
 
 static void apply_settings_item_action(void)
@@ -1093,18 +1095,19 @@ static void apply_settings_item_action(void)
         }
         settings_open_category(entry);
         buzzer_tone(1050, 40);
-        render_settings_screen(g_app.ui_cursor);
+        g_app.ui_refresh_token++;
         return;
     }
 
     if (entry == SETTINGS_SUBMENU_BACK_ENTRY) {
         settings_close_category();
         buzzer_tone(820, 40);
-        render_settings_screen(g_app.ui_cursor);
+        g_app.ui_refresh_token++;
         return;
     }
 
     apply_settings_leaf_action(entry);
+    g_app.ui_refresh_token++;
 }
 
 static void on_button_event(button_id_t btn, button_event_t evt)
@@ -1197,12 +1200,6 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_CLICK:
-        if (g_app.current_mode == MODE_SETTINGS
-                && (settings_visible_entry_at(g_app.ui_cursor) == SETTINGS_ROOT_EXIT_ENTRY
-                    || settings_visible_entry_at(g_app.ui_cursor) == SETTINGS_SUBMENU_BACK_ENTRY)) {
-            apply_settings_item_action();
-            return;
-        }
         if (g_app.ui_item_count > 0) {
             g_app.ui_cursor = (g_app.ui_cursor + 1) % g_app.ui_item_count;
         }
@@ -1210,7 +1207,12 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_DOUBLE_CLICK:
-        if (g_app.current_mode == MODE_FOX_HUNTER) {
+        if ((g_app.current_mode == MODE_FLOCK_YOU || g_app.current_mode == MODE_SKY_SPY)
+            && g_app.local_map_open) {
+            g_app.local_map_zoom_idx = (g_app.local_map_zoom_idx + 1) % 5;
+            g_app.ui_refresh_token++;
+            buzzer_tone(1000, 40);
+        } else if (g_app.current_mode == MODE_FOX_HUNTER) {
             if (!g_app.fox_registry_open) {
                 g_app.fox_led_mode = (g_app.fox_led_mode + 1) % 2;
                 buzzer_tone(g_app.fox_led_mode ? 1400 : 900, 60);
@@ -1234,7 +1236,7 @@ static void on_button_event(button_id_t btn, button_event_t evt)
                 buzzer_tone(900, 60);
             } else {
                 settings_close_category();
-                render_settings_screen(g_app.ui_cursor);
+                g_app.ui_refresh_token++;
                 buzzer_tone(820, 40);
             }
         } else if (g_app.current_mode == MODE_FOX_HUNTER && g_app.fox_registry_open) {
@@ -1251,6 +1253,11 @@ static void on_button_event(button_id_t btn, button_event_t evt)
             } else {
                 buzzer_beep(30);
             }
+        } else if (g_app.current_mode == MODE_FLOCK_YOU
+                   || g_app.current_mode == MODE_SKY_SPY) {
+            g_app.local_map_open = !g_app.local_map_open;
+            g_app.ui_refresh_token++;
+            buzzer_tone(g_app.local_map_open ? 1000 : 800, 60);
         } else if (g_app.current_mode != MODE_SELECT) {
             g_app.requested_mode = MODE_SELECT;
             g_app.mode_change_pending = true;
@@ -1259,7 +1266,8 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_HOLD:
-        buzzer_tone(900, 60);
+        if (g_app.current_mode != MODE_SETTINGS)
+            buzzer_tone(900, 60);
         if (g_app.current_mode == MODE_SELECT) {
             static const app_mode_t sel_modes[] = {
                 MODE_FLOCK_YOU, MODE_FOX_HUNTER, MODE_SKY_SPY, MODE_SETTINGS

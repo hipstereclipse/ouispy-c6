@@ -16,6 +16,7 @@
 #include "buzzer.h"
 #include "led_ctrl.h"
 #include "display.h"
+#include "map_tile.h"
 #include "storage_ext.h"
 #include <string.h>
 #include <math.h>
@@ -313,7 +314,10 @@ static void sky_display_task(void *arg)
     int last_gps_active = -1;
     int last_logging_active = -1;
     int last_logging_blocked = -1;
+    int last_map_open = -1;
+    bool was_map_open = false;
     bool full_drawn = false;  /* force first full draw */
+    uint32_t last_refresh_token = 0;
 
     while (g_app.current_mode == MODE_SKY_SPY) {
         frame++;
@@ -330,7 +334,9 @@ static void sky_display_task(void *arg)
                         || (g_app.wifi_clients != last_wifi_clients)
                         || ((int)gps_tag_active != last_gps_active)
                         || ((int)logging_active != last_logging_active)
-                        || ((int)logging_blocked != last_logging_blocked);
+                        || ((int)logging_blocked != last_logging_blocked)
+                        || ((int)g_app.local_map_open != last_map_open)
+                        || (g_app.ui_refresh_token != last_refresh_token);
 
         /* Naval CIC palette — near-black with phosphor green */
         uint16_t bg        = rgb565(2, 4, 2);
@@ -352,6 +358,32 @@ static void sky_display_task(void *arg)
         app_mode_ap_credentials(MODE_SKY_SPY, &ap_ssid, &ap_pass, NULL);
 
         /* Static sections: status bar, content bg, footer — only on data change */
+        last_map_open = (int)g_app.local_map_open;
+        last_refresh_token = g_app.ui_refresh_token;
+
+        /* When local map is open, render the shared map view instead */
+        if (g_app.local_map_open) {
+            if (data_dirty) {
+                last_drone_count = g_app.drone_count;
+                last_cursor = g_app.ui_cursor;
+                last_wifi_clients = g_app.wifi_clients;
+                last_gps_active = (int)gps_tag_active;
+                last_logging_active = (int)logging_active;
+                last_logging_blocked = (int)logging_blocked;
+            }
+            display_draw_shared_map_view(MODE_SKY_SPY);
+            was_map_open = true;
+            full_drawn = false;
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+        /* Full clear when returning from map view to flush leftover tile pixels */
+        if (was_map_open) {
+            display_fill(rgb565(2, 4, 2));
+            was_map_open = false;
+        }
+
         /* Static header: only redraw on data change */
         if (data_dirty) {
             last_drone_count = g_app.drone_count;

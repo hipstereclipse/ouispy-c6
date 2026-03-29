@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "app_common.c"
         "display.c"
+        "map_tile.c"
         "led_ctrl.c"
         "buzzer.c"
         "button.c"

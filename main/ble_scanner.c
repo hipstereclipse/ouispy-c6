@@ -18,6 +18,7 @@ static bool s_running = false;
 static bool s_initialized = false;
 static SemaphoreHandle_t s_sync_sem = NULL;
 static uint8_t s_own_addr_type = BLE_OWN_ADDR_PUBLIC;
+static struct ble_gap_disc_params s_last_params = {0};
 
 /* ── Gap event callback ── */
 static int gap_event(struct ble_gap_event *event, void *arg)
@@ -45,7 +46,12 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         /* Restart scan automatically if still wanted */
         if (s_running) {
-            ESP_LOGD(TAG, "Scan completed, restarting");
+            ESP_LOGW(TAG, "Scan completed, restarting");
+            int rc = ble_gap_disc(s_own_addr_type, BLE_HS_FOREVER,
+                                  &s_last_params, gap_event, NULL);
+            if (rc != 0) {
+                ESP_LOGE(TAG, "Scan restart failed: %d", rc);
+            }
         }
     }
     return 0;
@@ -125,6 +131,7 @@ void ble_scanner_start(ble_scan_cb_t cb, uint16_t interval_ms,
         .filter_duplicates = 0,
         .limited           = 0,
     };
+    s_last_params = params;
 
     int rc = ble_gap_disc(s_own_addr_type, BLE_HS_FOREVER,
                           &params, gap_event, NULL);

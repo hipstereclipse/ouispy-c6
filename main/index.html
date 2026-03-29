@@ -416,9 +416,15 @@ let flockMapVisible = false;
 let flockMapTapCount = 0;
 let flockMapLastTapMs = 0;
 let flockMapTileDir = null;
+let flockMapDeviceTilesAvailable = null;
 let flockMapZoomIdx = 1;
 let flockMapDrawToken = 0;
 let flockMapAlertDismissed = false;
+let sharedMapPushTimer = null;
+let sharedMapPushInFlight = false;
+let sharedMapPushPending = false;
+let sharedMapLastPayload = '';
+let flockAutoMarkInFlight = false;
 let foxRegistrySortMode = 'recent';
 let logsData = null;
 let logsRefreshCounter = 0;
@@ -439,6 +445,10 @@ let confirmHoldInterval = null;
 let confirmAction = null;
 let cameraLocations = loadCameraLocations();
 let gpsToggleEnabled = loadGpsToggleEnabled();
+const SHARED_MAP_SYNC_DELAY_MS = 250;
+const FLOCK_AUTO_MARK_STALE_SEC = 15;
+const FLOCK_AUTO_MARK_REFRESH_MS = 60000;
+const FLOCK_AUTO_MARK_MOVE_M = 20;
 
 function setMainSwitching(active) {
   const main = $('#main');
@@ -495,6 +505,7 @@ function loadCameraLocations() {
 
 function saveCameraLocations() {
   try { localStorage.setItem(CAM_LOC_STORE_KEY, JSON.stringify(cameraLocations)); } catch (e) {}
+  scheduleSharedMapSync(false);
 }
 
 function loadGpsToggleEnabled() {
@@ -507,6 +518,150 @@ function loadGpsToggleEnabled() {
 
 function saveGpsToggleEnabled() {
   try { localStorage.setItem(GPS_TOGGLE_STORE_KEY, gpsToggleEnabled ? 'on' : 'off'); } catch (e) {}
+}
+
+function browserPositionFresh(maxAgeMs) {
+  const limit = Number(maxAgeMs || 20000);
+  if (!lastBrowserPosition) return false;
+  if (!Number.isFinite(Number(lastBrowserPosition.lat)) || !Number.isFinite(Number(lastBrowserPosition.lon))) return false;
+  return (Date.now() - Number(lastBrowserPosition.ts || 0)) <= limit;
+}
+
+function mapPinKindCode(kind) {
+  if (kind === 'fox') return 1;
+  if (kind === 'drone') return 2;
+  if (kind === 'self') return 3;
+  return 0;
+}
+
+function browserLocationMapPin() {
+  if (!lastBrowserPosition) return null;
+  const lat = Number(lastBrowserPosition.lat);
+  const lon = Number(lastBrowserPosition.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const fresh = browserPositionFresh(30000);
+  return {
+    mac: 'BROWSER-GPS',
+    name: fresh ? 'Current device location' : 'Last device location',
+    lat,
+    lon,
+    kind: 'self',
+    radiusM: Math.max(10, fresh ? 18 : 30),
+    source: fresh ? 'gps-live' : 'gps-last',
+    rssi: -30,
+    age: formatLocAge(lastBrowserPosition.ts)
+  };
+}
+
+function flockMapRenderablePins() {
+  const pins = flockMapPins();
+  if (!gpsEffectiveEnabled()) return pins;
+  const selfPin = browserLocationMapPin();
+  if (selfPin) pins.push(selfPin);
+  return pins;
+}
+
+function buildSharedMapPinsPayload() {
+  return flockMapRenderablePins().slice(0, 48).map(pin => ({
+    mac: String(pin.mac || '').toUpperCase(),
+    label: String(pin.name || '').slice(0, 24),
+    lat: Number(pin.lat),
+    lon: Number(pin.lon),
+    radiusM: Number(pin.radiusM || 0),
+    rssi: Number(pin.rssi || -85),
+    kind: mapPinKindCode(pin.kind)
+  }));
+}
+
+async function pushSharedMapPinsToDevice(force) {
+  const pins = buildSharedMapPinsPayload();
+  const payloadText = JSON.stringify(pins);
+  if (!force && payloadText === sharedMapLastPayload) return true;
+  if (sharedMapPushInFlight) {
+    sharedMapPushPending = true;
+    return false;
+  }
+
+  sharedMapPushInFlight = true;
+  try {
+    const ok = await apiPostOk('/api/map/pins', { pins });
+    if (ok) sharedMapLastPayload = payloadText;
+    return ok;
+  } finally {
+    sharedMapPushInFlight = false;
+    if (sharedMapPushPending) {
+      sharedMapPushPending = false;
+      scheduleSharedMapSync(true);
+    }
+  }
+}
+
+function scheduleSharedMapSync(immediate) {
+  if (sharedMapPushTimer) {
+    clearTimeout(sharedMapPushTimer);
+    sharedMapPushTimer = null;
+  }
+  if (immediate) {
+    void pushSharedMapPinsToDevice(true);
+    return;
+  }
+  sharedMapPushTimer = setTimeout(() => {
+    sharedMapPushTimer = null;
+    void pushSharedMapPinsToDevice(false);
+  }, SHARED_MAP_SYNC_DELAY_MS);
+}
+
+function shouldAutoMarkFlockDevice(device, position) {
+  if (!device || !device.flock || !position) return false;
+
+  const uptimeSec = Number(state.uptime || 0);
+  const lastSeenSec = Number(device.lastSeen || 0);
+  if (uptimeSec > 0 && lastSeenSec > 0 && (uptimeSec - lastSeenSec) > FLOCK_AUTO_MARK_STALE_SEC) {
+    return false;
+  }
+
+  const prev = getStoredLocation(device.mac);
+  if (!prev) return true;
+  if (String(prev.source || '').toLowerCase() === 'manual') return false;
+  if (!Number.isFinite(Number(prev.lat)) || !Number.isFinite(Number(prev.lon))) return true;
+
+  const ageMs = Date.now() - Number(prev.ts || 0);
+  if (ageMs < FLOCK_AUTO_MARK_REFRESH_MS) return false;
+
+  return approxDistanceM(prev.lat, prev.lon, position.lat, position.lon) >= FLOCK_AUTO_MARK_MOVE_M;
+}
+
+async function autoMarkFlockDevices() {
+  if (flockAutoMarkInFlight) return false;
+  if (Number(state.mode) !== 1) return false;
+  if (!gpsEffectiveEnabled() || !gpsClientReady || !browserPositionFresh(20000)) return false;
+  if (!Array.isArray(devices) || !devices.length) return false;
+
+  const position = {
+    lat: Number(lastBrowserPosition.lat),
+    lon: Number(lastBrowserPosition.lon)
+  };
+  flockAutoMarkInFlight = true;
+  let changed = false;
+  try {
+    devices.forEach(device => {
+      if (!shouldAutoMarkFlockDevice(device, position)) return;
+      saveCameraLocation(
+        device.mac,
+        position.lat,
+        position.lon,
+        'gps',
+        Number(device.rssi || -85),
+        'flock',
+        'flock'
+      );
+      changed = true;
+    });
+  } finally {
+    flockAutoMarkInFlight = false;
+  }
+
+  return changed;
 }
 
 function isIphoneFamily() {
@@ -587,12 +742,16 @@ function startGpsWatcher() {
       lon: pos.coords.longitude,
       ts: gpsWatchLastFixMs
     };
+    scheduleSharedMapSync(false);
     syncGpsClientStatus(true);
     renderGpsStatus();
     renderGpsToggleBlock();
     if (Number(state.mode) === 1) {
       renderFlockMapPanel();
       if (flockMapVisible) drawFlockMap();
+      void autoMarkFlockDevices().then(changed => {
+        if (changed) renderDevList();
+      });
     }
     if (Number(state.mode) === 3) renderSkyGpsWidgets();
   }, err => {
@@ -649,6 +808,8 @@ function setGpsToggle(enabled) {
   const caps = gpsCaps();
   if (enabled && !gpsSecureAvailable(caps)) {
     stopGpsWatcher();
+    lastBrowserPosition = null;
+    scheduleSharedMapSync(false);
     gpsToggleEnabled = false;
     saveGpsToggleEnabled();
     state.gpsTagging = false;
@@ -668,7 +829,11 @@ function setGpsToggle(enabled) {
   saveGpsToggleEnabled();
   state.gpsTagging = gpsToggleEnabled;
   if (gpsToggleEnabled) startGpsWatcher();
-  else stopGpsWatcher();
+  else {
+    stopGpsWatcher();
+    lastBrowserPosition = null;
+    scheduleSharedMapSync(false);
+  }
   api('/api/settings', {gpsTagging:gpsToggleEnabled});
   syncGpsClientStatus(true);
   renderGpsStatus();
@@ -961,6 +1126,19 @@ function saveCameraLocation(mac, lat, lon, source, rssi, mode, kind) {
   saveCameraLocations();
 }
 
+function syncPinToRegistry(mac) {
+  const loc = getStoredLocation(mac);
+  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lon)) return;
+  const regIdx = (foxRegistry || []).findIndex(r => locKey(r.mac) === locKey(mac));
+  if (regIdx < 0) return;
+  api('/api/fox/registry/update', {
+    mac: mac,
+    lat: loc.lat,
+    lon: loc.lon,
+    radiusM: loc.radiusM || 30
+  });
+}
+
 function promptManualLocation(mac, options) {
   const current = getStoredLocation(mac);
   const lat = prompt('Latitude (example 37.774900):', current ? String(current.lat) : '');
@@ -976,6 +1154,7 @@ function promptManualLocation(mac, options) {
   const rssi = options && Number.isFinite(Number(options.rssi)) ? Number(options.rssi) : -85;
   const kind = options && options.kind ? options.kind : null;
   saveCameraLocation(mac, latN, lonN, 'manual', rssi, mode, kind);
+  syncPinToRegistry(mac);
   return true;
 }
 
@@ -987,6 +1166,7 @@ function getCurrentPosition() {
         lon: pos.coords.longitude,
         ts: Date.now()
       };
+      scheduleSharedMapSync(false);
       resolve(pos);
     }, reject, {
       enableHighAccuracy: true,
@@ -1017,6 +1197,7 @@ async function markDeviceLocation(mac, options) {
   try {
     const pos = await getCurrentPosition();
     saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, mode, kind);
+    syncPinToRegistry(mac);
     toast('GPS location saved');
     if (rerender === 'fox' || Number(state.mode) === 2) renderFoxInner();
     else if (rerender === 'sky' || Number(state.mode) === 3) renderDroneCards();
@@ -1047,6 +1228,10 @@ function setCameraLocationLabel(mac, label) {
 function clearCameraLocation(mac) {
   delete cameraLocations[locKey(mac)];
   saveCameraLocations();
+  const regIdx = (foxRegistry || []).findIndex(r => locKey(r.mac) === locKey(mac));
+  if (regIdx >= 0) {
+    api('/api/fox/registry/update', { mac: mac, clearPin: true });
+  }
   if (Number(state.mode) === 2) renderFoxInner();
   else if (Number(state.mode) === 3) renderDroneCards();
   else if (Number(state.mode) === 1) renderDevList();
@@ -1243,6 +1428,13 @@ async function loadDeviceTileBitmap(z, x, y) {
   return null;
 }
 
+async function refreshDeviceMapTileStatus() {
+  const status = await api('/api/map/status');
+  flockMapDeviceTilesAvailable = !!(status && status.available);
+  if (gpsMapEligible()) renderFlockMapPanel();
+  return flockMapDeviceTilesAvailable;
+}
+
 function drawFlockMapGrid(ctx, width, height) {
   ctx.fillStyle = '#15181c';
   ctx.fillRect(0, 0, width, height);
@@ -1265,7 +1457,7 @@ function drawFlockMapGrid(ctx, width, height) {
 }
 
 async function drawFlockMapTiles(ctx, canvas, center, zoom, token) {
-  if (!flockMapTileDir) return false;
+  if (!flockMapTileDir && flockMapDeviceTilesAvailable === false) return false;
   const centerWorld = latLonToWorld(center.lat, center.lon, zoom);
   const startX = centerWorld.x - canvas.width / 2;
   const startY = centerWorld.y - canvas.height / 2;
@@ -1310,8 +1502,12 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
     if (px < -24 || px > canvas.width + 24 || py < -24 || py > canvas.height + 24) return;
 
     const radiusPx = Math.max(3, Math.min(48, Number(pin.radiusM || 0) / Math.max(0.01, metersPerPixel)));
-    const fillColor = pin.kind === 'drone' ? 'rgba(56,189,248,0.12)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.12)' : 'rgba(248,113,113,0.12)');
-    const strokeColor = pin.kind === 'drone' ? 'rgba(56,189,248,0.45)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.45)' : 'rgba(248,113,113,0.45)');
+    const fillColor = pin.kind === 'self'
+      ? 'rgba(34,211,238,0.14)'
+      : (pin.kind === 'drone' ? 'rgba(56,189,248,0.12)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.12)' : 'rgba(248,113,113,0.12)'));
+    const strokeColor = pin.kind === 'self'
+      ? 'rgba(34,211,238,0.55)'
+      : (pin.kind === 'drone' ? 'rgba(56,189,248,0.45)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.45)' : 'rgba(248,113,113,0.45)'));
     ctx.fillStyle = fillColor;
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1;
@@ -1320,7 +1516,9 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.92)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.92)' : 'rgba(248,113,113,0.92)');
+    ctx.fillStyle = pin.kind === 'self'
+      ? 'rgba(34,211,238,0.96)'
+      : (pin.kind === 'drone' ? 'rgba(56,189,248,0.92)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.92)' : 'rgba(248,113,113,0.92)'));
     ctx.beginPath();
     ctx.arc(px, py, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -1328,25 +1526,15 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const label = `${pin.name} ${pin.rssi} dBm ±${Math.round(Number(pin.radiusM || 0))}m`;
+    const label = pin.kind === 'self'
+      ? `${pin.name} ${pin.age || ''}`.trim()
+      : `${pin.name} ${pin.rssi} dBm ±${Math.round(Number(pin.radiusM || 0))}m`;
     const width = ctx.measureText(label).width + 10;
     ctx.fillStyle = 'rgba(9,9,11,0.78)';
     ctx.fillRect(px + 8, py - 10, width, 16);
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(label, px + 13, py - 8);
   });
-
-  if (lastBrowserPosition) {
-    ctx.strokeStyle = 'rgba(34,211,238,0.9)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2, canvas.height / 2, 8, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(34,211,238,0.18)';
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2, canvas.height / 2, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
 }
 
 async function drawFlockMap() {
@@ -1354,7 +1542,7 @@ async function drawFlockMap() {
   if (!canvas || !flockMapVisible) return;
 
   const ctx = canvas.getContext('2d');
-  const pins = flockMapPins();
+  const pins = flockMapRenderablePins();
   const center = flockMapCenter(pins);
   const zoom = flockMapZoom();
   const token = ++flockMapDrawToken;
@@ -1372,7 +1560,7 @@ async function drawFlockMap() {
   ctx.fillRect(8, canvas.height - 24, canvas.width - 16, 16);
   ctx.fillStyle = '#d4d4d8';
   ctx.font = '11px Segoe UI, Aptos, sans-serif';
-  ctx.fillText(`Zoom ${zoom} · ${pins.length} pinned devices${drewTiles ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
+  ctx.fillText(`Zoom ${zoom} · ${pins.length} map points${drewTiles ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
 
   if (!pins.length) {
     ctx.fillStyle = 'rgba(9,9,11,0.68)';
@@ -1396,16 +1584,16 @@ function dismissFlockMapAlert() {
 }
 
 async function loadFlockMapTiles() {
+  const deviceHasTiles = await refreshDeviceMapTileStatus();
+  if (deviceHasTiles) {
+    flockMapAlertDismissed = false;
+    renderFlockMapPanel();
+    await drawFlockMap();
+    toast('Using /sdcard/map tiles from the device');
+    return;
+  }
   if (!window.showDirectoryPicker) {
-    const status = await api('/api/map/status');
-    if (status && status.available) {
-      flockMapAlertDismissed = false;
-      renderFlockMapPanel();
-      await drawFlockMap();
-      toast('Using /sdcard/map tiles from the device');
-    } else {
-      toast('This browser cannot open local tile folders, and /sdcard/map is not available on the device');
-    }
+    toast('This browser cannot open local tile folders, and /sdcard/map is not available on the device');
     return;
   }
   try {
@@ -1447,7 +1635,7 @@ function renderFlockMapPanel() {
     return;
   }
 
-  const showAlert = !flockMapTileDir && !flockMapAlertDismissed;
+  const showAlert = !flockMapTileDir && flockMapDeviceTilesAvailable === false && !flockMapAlertDismissed;
   el.innerHTML = `
     ${showAlert ? `<div style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(248,113,113,.45);background:rgba(127,29,29,.18);border-radius:10px;color:#fecaca;font-size:12px">
       No map tiles are currently loading from a browser folder or /sdcard/map. The map is using a gray grid fallback. <a href="https://github.com/colonelpanichacks/ouispy-c6#offline-flock-map-addon" target="_blank">README instructions</a>
@@ -1468,6 +1656,9 @@ function toggleFlockMap(forceOpen) {
     return;
   }
   flockMapVisible = typeof forceOpen === 'boolean' ? forceOpen : !flockMapVisible;
+  if (flockMapVisible) {
+    void refreshDeviceMapTileStatus();
+  }
   renderFlockMapPanel();
 }
 
@@ -1915,6 +2106,9 @@ function renderFlock() {
   renderGpsToggleBlock();
   renderDevList();
   renderFlockMapPanel();
+  void autoMarkFlockDevices().then(changed => {
+    if (changed) renderDevList();
+  });
 }
 function renderDevList() {
   const el = $('#devList');
@@ -1959,7 +2153,11 @@ function updateFlockLive() {
   renderGpsStatus();
   renderGpsToggleBlock();
   renderFlockMapPanel();
-  if (++flockRefresh % 6 === 0) fetchDevices().then(() => { renderDevList(); if (flockMapVisible) drawFlockMap(); });
+  if (++flockRefresh % 6 === 0) fetchDevices().then(async () => {
+    const changed = await autoMarkFlockDevices();
+    renderDevList();
+    if (changed && flockMapVisible) drawFlockMap();
+  });
 }
 function flagsStr(f) {
   const parts = [];
@@ -2182,7 +2380,11 @@ function foxBuildConsoleItems() {
 
   const foxState = state.fox || {};
   return Array.from(items.values()).map(item => {
-    const pinned = getStoredLocation(item.mac);
+    const localPin = getStoredLocation(item.mac);
+    const regPin = (!localPin && item.registry && Number.isFinite(item.registry.pinnedLat) && item.registry.pinnedLat !== 0)
+      ? { lat: item.registry.pinnedLat, lon: item.registry.pinnedLon, radiusM: item.registry.pinnedRadiusM || 30, source: 'registry', ts: Date.now() }
+      : null;
+    const pinned = localPin || regPin;
     const currentTarget = String(foxState.target || '').toUpperCase() === item.mac;
     return Object.assign(item, {
       pinned: !!pinned,
@@ -2618,7 +2820,7 @@ function renderFoxInner() {
               <div class="fox-contact-name">${htmlEsc(foxDisplayName(item))}</div>
               <div class="fox-contact-sub">${htmlEsc(item.mac)}</div>
               <div class="fox-contact-meta">${metaChips}</div>
-              ${loc ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)}</div>` : ''}
+              ${loc ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : (loc.source === 'registry' ? 'saved' : 'gps')}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)}${loc.source !== 'registry' ? ' &middot; ' + formatLocAge(loc.ts) : ''}</div>` : ''}
             </div>
             <div class="fox-contact-actions">
               <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="event.stopPropagation();lockFox('${htmlEsc(item.mac)}', { rssi: ${Number.isFinite(Number(item.rssi)) && Number(item.rssi) > -127 ? Number(item.rssi) : -85}, mode: '${foxItemTrackMode(item)}', kind: '${foxItemTrackKind(item)}' })">Track</button>
@@ -2637,9 +2839,10 @@ function renderFoxInner() {
     const estimate = selected.currentTarget && Number(selected.gpsSamples || 0) > 0
       ? `<div class="fox-profile-map">Fox fused GPS estimate: ${formatCoord(selected.gpsLat)}, ${formatCoord(selected.gpsLon)} &middot; radius ~${Math.round(selected.gpsRadiusM || 0)} m &middot; ${selected.gpsSamples} samples</div>`
       : '';
+    const pinSourceLabel = loc ? (loc.source === 'manual' ? 'manual' : (loc.source === 'registry' ? 'saved on device' : 'gps')) : '';
     const pinInfo = loc
-      ? `<div class="fox-profile-map">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">open map</a></div>`
-      : `<div class="fox-profile-map">${gpsReady ? 'Browser GPS is ready. Use Mark GPS to pin this device profile immediately.' : 'No pin saved for this device yet.'}</div>`;
+      ? `<div class="fox-profile-map">&#128205; Pinned (${pinSourceLabel}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)}${loc.source !== 'registry' ? ' &middot; ' + formatLocAge(loc.ts) : ''} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">open map</a>${selected.saved && loc.source !== 'registry' ? ' &middot; <span style="color:var(--green)">synced to device</span>' : ''}</div>`
+      : `<div class="fox-profile-map">${gpsReady ? 'Browser GPS is ready. Use Mark GPS to pin this device\'s location to its profile.' : 'No pin saved for this device yet. Use Mark GPS or Manual to record its location.'}</div>`;
     const registryFields = selected.saved ? `
       <div class="fox-detail-grid">
         <div>
@@ -2765,6 +2968,7 @@ async function lockFox(mac, options) {
       const pos = await getCurrentPosition();
       await api('/api/target/gps', { type: 'fox', mac, lat: pos.coords.latitude, lon: pos.coords.longitude, rssi });
       saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, mode, kind);
+      syncPinToRegistry(mac);
       if (Number(state.mode) === 2) renderFoxInner();
     } catch (e) {}
   }
@@ -2894,9 +3098,9 @@ function renderFoxRegList() {
     const liveText = shortAgeLabel(r.lastSeenAgeSec);
     const liveRssi = Number(r.liveRssi);
     const liveRssiChip = Number.isFinite(liveRssi) && liveRssi > -127 ? `<span class="fox-chip">${liveRssi} dBm</span>` : '';
-    const loc = getStoredLocation(r.mac);
+    const loc = getStoredLocation(r.mac) || (Number.isFinite(r.pinnedLat) && r.pinnedLat !== 0 ? { lat: r.pinnedLat, lon: r.pinnedLon, radiusM: r.pinnedRadiusM || 30, source: 'registry', ts: Date.now() } : null);
     const locHtml = loc
-      ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">map</a></div>`
+      ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : (loc.source === 'registry' ? 'saved' : 'gps')}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)}${loc.source !== 'registry' ? ' &middot; ' + formatLocAge(loc.ts) : ''} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">map</a></div>`
       : '';
     return `
     <div class="fox-contact" style="margin-bottom:10px">
@@ -3610,6 +3814,8 @@ function updateSettingsLive() {
 // ── Init ──
 wsConnect();
 startGpsWatcher();
+void refreshDeviceMapTileStatus();
+scheduleSharedMapSync(true);
 setInterval(() => { if(ws && ws.readyState===1) ws.send('ping'); }, 5000);
 // Also poll state in case WS is slow
 setInterval(async () => {

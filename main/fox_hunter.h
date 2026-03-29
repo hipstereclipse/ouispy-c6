@@ -18,6 +18,7 @@ int  fox_hunter_registry_add(const uint8_t mac[6], const char *label,
 int  fox_hunter_registry_update(int index, const char *nickname,
 								const char *notes, const char *section,
 								const char *label, const char *original_name);
+int  fox_hunter_registry_set_gps(int index, double lat, double lon, float radius_m);
 int  fox_hunter_registry_remove(int index);
 void fox_hunter_registry_select(int index);
 int  fox_hunter_registry_view_count(void);

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "display.h"
+#include "map_tile.h"
 #include "driver/spi_master.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
@@ -122,6 +123,12 @@ void display_draw_rect(int x, int y, int w, int h, uint16_t color)
     for (int i = 0; i < w * h; i++) buf[i] = color;
     esp_lcd_panel_draw_bitmap(s_panel, x, y, x + w, y + h, buf);
     free(buf);
+}
+
+void display_blit_rgb565(int x, int y, int w, int h, const uint16_t *data)
+{
+    if (!data || w <= 0 || h <= 0) return;
+    esp_lcd_panel_draw_bitmap(s_panel, x, y, x + w, y + h, data);
 }
 
 void display_draw_text(int x, int y, const char *text, uint16_t fg, uint16_t bg)
@@ -252,18 +259,19 @@ void display_draw_text_scaled(int x, int y, const char *text, uint16_t fg, uint1
     }
 }
 
-static float map_zoom_radius_m(uint8_t idx)
+/* Tile zoom level for each of the 5 zoom index values */
+static int map_tile_zoom_for_idx(uint8_t idx)
 {
-    static const float zoom_levels[] = {80.0f, 180.0f, 420.0f, 900.0f, 1800.0f};
-    if (idx >= (sizeof(zoom_levels) / sizeof(zoom_levels[0]))) {
-        idx = (uint8_t)((sizeof(zoom_levels) / sizeof(zoom_levels[0])) - 1U);
-    }
-    return zoom_levels[idx];
+    static const int zooms[] = {9, 10, 11, 12, 13};
+    if (idx >= 5) idx = 4;
+    return zooms[idx];
 }
 
 static uint16_t map_pin_color(map_pin_kind_t kind)
 {
     switch (kind) {
+    case MAP_PIN_KIND_SELF:
+        return rgb565(34, 211, 238);
     case MAP_PIN_KIND_DRONE:
         return rgb565(56, 189, 248);
     case MAP_PIN_KIND_FOX:
@@ -360,29 +368,24 @@ void display_draw_shared_map_view(app_mode_t mode)
     display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, title, text_main, panel);
     display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "Shared pinned-device view", text_dim, panel);
 
-    const int map_x = 8;
-    const int map_y = 40;
-    const int map_w = LCD_H_RES - 16;
-    const int map_h = 166;
-    const int center_x = map_x + (map_w / 2);
-    const int center_y = map_y + (map_h / 2);
-    display_draw_bordered_rect(map_x, map_y, map_w, map_h, border, panel);
-    for (int x = map_x + 18; x < map_x + map_w - 1; x += 18) {
-        display_draw_rect(x, map_y + 1, 1, map_h - 2, grid);
-    }
-    for (int y = map_y + 18; y < map_y + map_h - 1; y += 18) {
-        display_draw_rect(map_x + 1, y, map_w - 2, 1, grid);
-    }
-    display_draw_rect(center_x - 16, center_y, 33, 1, accent);
-    display_draw_rect(center_x, center_y - 16, 1, 33, accent);
+    const int map_x = 0;
+    const int map_y = 34;
+    const int map_w = LCD_H_RES;
+    const int map_h = 210;
 
     if (pin_count <= 0) {
+        /* No pins — show placeholder */
+        display_draw_bordered_rect(8, map_y + 6, LCD_H_RES - 16, map_h - 12, border, panel);
+        for (int x = 26; x < LCD_H_RES - 16; x += 18)
+            display_draw_rect(x, map_y + 7, 1, map_h - 14, grid);
+        for (int y = map_y + 24; y < map_y + map_h - 12; y += 18)
+            display_draw_rect(9, y, LCD_H_RES - 18, 1, grid);
         display_draw_text_centered(102, "NO MAP POINTS", text_main, panel);
         display_draw_text_centered(114, "Open the web UI to save pins", text_dim, panel);
         display_draw_text_centered(126, "or track Fox/Sky targets live", text_dim, panel);
     } else {
-        double center_lat = 0.0;
-        double center_lon = 0.0;
+        /* Center on the mean position of all pins */
+        double center_lat = 0.0, center_lon = 0.0;
         for (int i = 0; i < pin_count; i++) {
             center_lat += pins[i].lat;
             center_lon += pins[i].lon;
@@ -390,62 +393,140 @@ void display_draw_shared_map_view(app_mode_t mode)
         center_lat /= (double)pin_count;
         center_lon /= (double)pin_count;
 
-        float radius_m = map_zoom_radius_m(g_app.local_map_zoom_idx);
-        float max_distance = 0.0f;
-        double lat_scale = cos(center_lat * (M_PI / 180.0));
-        if (fabs(lat_scale) < 0.1) lat_scale = (lat_scale < 0.0) ? -0.1 : 0.1;
-        for (int i = 0; i < pin_count; i++) {
-            float dx_m = (float)((pins[i].lon - center_lon) * 111320.0 * lat_scale);
-            float dy_m = (float)((pins[i].lat - center_lat) * 111320.0);
-            float dist_m = sqrtf((dx_m * dx_m) + (dy_m * dy_m));
-            if (dist_m > max_distance) max_distance = dist_m;
-        }
-        if (max_distance > (radius_m * 0.78f)) {
-            radius_m = max_distance * 1.35f;
-        }
-        if (radius_m < 40.0f) radius_m = 40.0f;
+        /* Choose tile zoom level */
+        int zoom = map_tile_zoom_for_idx(g_app.local_map_zoom_idx);
+        int best_zoom = map_tile_max_zoom();
+        bool tiles_available = (best_zoom >= 0);
 
-        float px_per_meter = ((float)(map_h < map_w ? map_h : map_w) * 0.42f) / radius_m;
+        /* If we have tiles but requested zoom is higher than available, clamp */
+        if (tiles_available && zoom > best_zoom) zoom = best_zoom;
+
+        /* Compute center pixel in global tile-pixel space */
+        double cpx, cpy;
+        map_tile_latlon_to_pixel(center_lat, center_lon, zoom, &cpx, &cpy);
+
+        /* The map viewport on the LCD: map_w × map_h pixels.
+         * Global pixel coords for the top-left corner: */
+        double origin_px = cpx - (map_w / 2.0);
+        double origin_py = cpy - (map_h / 2.0);
+
+        /* ── Draw tile background ── */
+        bool has_tiles = false;
+        if (tiles_available) {
+            /* Determine which tiles cover the viewport */
+            int tile_x0 = (int)floor(origin_px / MAP_TILE_SIZE);
+            int tile_y0 = (int)floor(origin_py / MAP_TILE_SIZE);
+            int tile_x1 = (int)floor((origin_px + map_w - 1) / MAP_TILE_SIZE);
+            int tile_y1 = (int)floor((origin_py + map_h - 1) / MAP_TILE_SIZE);
+
+            int max_tile = (1 << zoom) - 1;
+
+            for (int ty = tile_y0; ty <= tile_y1; ty++) {
+                for (int tx = tile_x0; tx <= tile_x1; tx++) {
+                    /* Wrap tile-x for world wrapping, skip out-of-range y */
+                    int wtx = tx & max_tile;
+                    if (ty < 0 || ty > max_tile) continue;
+
+                    /* Pixel offset of this tile's top-left corner relative to viewport origin */
+                    int tile_screen_x = (int)(tx * MAP_TILE_SIZE - origin_px);
+                    int tile_screen_y = (int)(ty * MAP_TILE_SIZE - origin_py);
+
+                    /* Source crop within the 256×256 tile */
+                    int sx = 0, sy = 0;
+                    int dx = map_x + tile_screen_x;
+                    int dy = map_y + tile_screen_y;
+                    int tw = MAP_TILE_SIZE, th = MAP_TILE_SIZE;
+
+                    /* Clip left */
+                    if (dx < map_x) { sx = map_x - dx; tw -= sx; dx = map_x; }
+                    /* Clip top */
+                    if (dy < map_y) { sy = map_y - dy; th -= sy; dy = map_y; }
+                    /* Clip right */
+                    if (dx + tw > map_x + map_w) tw = (map_x + map_w) - dx;
+                    /* Clip bottom */
+                    if (dy + th > map_y + map_h) th = (map_y + map_h) - dy;
+                    if (tw <= 0 || th <= 0) continue;
+
+                    if (map_tile_draw(zoom, wtx, ty, sx, sy, dx, dy, tw, th)) {
+                        has_tiles = true;
+                    }
+                }
+            }
+        }
+
+        if (!has_tiles) {
+            /* Fallback: draw grid when no tiles are available */
+            display_draw_rect(map_x, map_y, map_w, map_h, panel);
+            for (int x = map_x + 18; x < map_x + map_w; x += 18)
+                display_draw_rect(x, map_y, 1, map_h, grid);
+            for (int y = map_y + 18; y < map_y + map_h; y += 18)
+                display_draw_rect(map_x, y, map_w, 1, grid);
+        }
+
+        /* ── Center crosshair ── */
+        int cx = map_x + map_w / 2;
+        int cy = map_y + map_h / 2;
+        display_draw_rect(cx - 8, cy, 17, 1, accent);
+        display_draw_rect(cx, cy - 8, 1, 17, accent);
+
+        /* ── Draw pin markers ── */
         for (int i = 0; i < pin_count; i++) {
-            float dx_m = (float)((pins[i].lon - center_lon) * 111320.0 * lat_scale);
-            float dy_m = (float)((pins[i].lat - center_lat) * 111320.0);
-            int px = center_x + (int)lrintf(dx_m * px_per_meter);
-            int py = center_y - (int)lrintf(dy_m * px_per_meter);
-            if (px < map_x + 3 || px > map_x + map_w - 6 || py < map_y + 3 || py > map_y + map_h - 6) continue;
+            double ppx, ppy;
+            map_tile_latlon_to_pixel(pins[i].lat, pins[i].lon, zoom, &ppx, &ppy);
+            int px = map_x + (int)lrint(ppx - origin_px);
+            int py = map_y + (int)lrint(ppy - origin_py);
+
+            if (px < map_x + 2 || px > map_x + map_w - 5
+             || py < map_y + 2 || py > map_y + map_h - 5) continue;
 
             uint16_t pin_col = map_pin_color(pins[i].kind);
+            /* 5×5 filled square with 1px dark border for contrast */
+            display_draw_rect(px - 3, py - 3, 7, 7, rgb565(0, 0, 0));
             display_draw_rect(px - 2, py - 2, 5, 5, pin_col);
 
             char short_label[8] = {0};
-            snprintf(short_label, sizeof(short_label), "%c%s",
-                     (pins[i].kind == MAP_PIN_KIND_DRONE) ? 'D' : (pins[i].kind == MAP_PIN_KIND_FOX ? 'X' : 'F'),
-                     pins[i].label[0] ? "" : "*");
+            char kind_char = (pins[i].kind == MAP_PIN_KIND_DRONE) ? 'D'
+                           : (pins[i].kind == MAP_PIN_KIND_FOX)   ? 'X'
+                           : (pins[i].kind == MAP_PIN_KIND_SELF)  ? 'G' : 'F';
             if (pins[i].label[0]) {
-                short_label[0] = (pins[i].kind == MAP_PIN_KIND_DRONE) ? 'D' : (pins[i].kind == MAP_PIN_KIND_FOX ? 'X' : 'F');
-                short_label[1] = ':';
-                short_label[2] = pins[i].label[0];
-                short_label[3] = pins[i].label[1] ? pins[i].label[1] : '\0';
-                short_label[4] = pins[i].label[2] ? pins[i].label[2] : '\0';
+                snprintf(short_label, sizeof(short_label), "%c:%.3s", kind_char, pins[i].label);
+            } else {
+                short_label[0] = kind_char;
+                short_label[1] = '*';
+                short_label[2] = '\0';
             }
-            display_draw_text(px + 4, py - 4, short_label, text_main, panel);
+            /* Label with dark shadow for readability on tile imagery */
+            display_draw_text(px + 5, py - 3, short_label, rgb565(0, 0, 0), rgb565(0, 0, 0));
+            display_draw_text(px + 4, py - 4, short_label, text_main, rgb565(0, 0, 0));
         }
 
-        char summary[40];
-        snprintf(summary, sizeof(summary), "Pins:%d  Range:%um", pin_count, (unsigned)radius_m);
-        display_draw_text(10, 212, summary, text_main, bg);
+        /* ── Info bar below map ── */
+        char summary[48];
+        snprintf(summary, sizeof(summary), "Pins:%d  Z%d%s",
+                 pin_count, zoom, has_tiles ? "" : " (no tiles)");
+        display_draw_text(4, map_y + map_h + 2, summary, text_main, bg);
 
-        int list_y = 224;
+        /* Up to 3 pin details */
+        int list_y = map_y + map_h + 14;
         for (int i = 0; i < pin_count && i < 3; i++) {
             char line[40];
-            const char *kind = (pins[i].kind == MAP_PIN_KIND_DRONE) ? "D" : (pins[i].kind == MAP_PIN_KIND_FOX ? "X" : "F");
+            const char *kind = (pins[i].kind == MAP_PIN_KIND_DRONE) ? "D"
+                             : (pins[i].kind == MAP_PIN_KIND_FOX) ? "X"
+                             : (pins[i].kind == MAP_PIN_KIND_SELF) ? "G" : "F";
             snprintf(line, sizeof(line), "%s %s %ddBm", kind,
                      pins[i].label[0] ? pins[i].label : "Pinned", (int)pins[i].rssi);
-            display_draw_text(10, list_y, line, map_pin_color(pins[i].kind), bg);
+            display_draw_text(4, list_y, line, map_pin_color(pins[i].kind), bg);
             list_y += 11;
         }
     }
 
     display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
     display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border);
-    display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, "3x toggle map  2x zoom  hold close", text_dim, footer);
+    char foot[32];
+    int cur_zoom = map_tile_zoom_for_idx(g_app.local_map_zoom_idx);
+    if (mode == MODE_FLOCK_YOU)
+        snprintf(foot, sizeof(foot), "3x:back 2x:Z%d hold:sel", cur_zoom);
+    else
+        snprintf(foot, sizeof(foot), "3x:back 2x:Z%d", cur_zoom);
+    display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, foot, text_dim, footer);
 }

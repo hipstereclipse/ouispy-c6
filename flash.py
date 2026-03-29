@@ -73,6 +73,14 @@ BANNER = r"""
   ╚═══════════════════════════════════════════╝
 """
 
+# ── Map tile defaults ──
+MAP_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+MAP_USER_AGENT = "OUI-Spy-C6-Flasher/1.0 (tile prep; https://github.com/hipstereclipse/ouispy-c6)"
+MAP_DEFAULT_ZOOM_MIN = 9
+MAP_DEFAULT_ZOOM_MAX = 13
+MAP_TILE_SIZE = 256
+MAP_MAX_TILES = 50000  # safety limit
+
 # ── ANSI colors ──
 class C:
     RED     = "\033[91m"
@@ -933,6 +941,941 @@ def flash_firmware(port, build_dir, erase=False):
 
 
 # ═════════════════════════════════════════════
+#  MICROSD MAP TILE PREPARATION
+# ═════════════════════════════════════════════
+
+# Region catalog: (name, bbox=(min_lat, max_lat, min_lon, max_lon), regions)
+# Each region has (name, bbox, subdivisions) where subdivisions are (name, bbox).
+REGION_CATALOG = [
+    {
+        "name": "United States",
+        "bbox": (24.4, 49.4, -125.0, -66.9),
+        "regions": [
+            {
+                "name": "Northeast",
+                "bbox": (38.9, 47.5, -80.5, -66.9),
+                "subdivisions": [
+                    ("Connecticut",    (40.95, 42.05, -73.73, -71.79)),
+                    ("Delaware",       (38.45, 39.84, -75.79, -75.05)),
+                    ("Maine",          (43.06, 47.46, -71.08, -66.95)),
+                    ("Maryland",       (37.91, 39.72, -79.49, -75.05)),
+                    ("Massachusetts",  (41.24, 42.89, -73.51, -69.93)),
+                    ("New Hampshire",  (42.70, 45.31, -72.56, -70.70)),
+                    ("New Jersey",     (38.93, 41.36, -75.56, -73.89)),
+                    ("New York",       (40.50, 45.01, -79.76, -71.86)),
+                    ("Pennsylvania",   (39.72, 42.27, -80.52, -74.69)),
+                    ("Rhode Island",   (41.15, 42.02, -71.86, -71.12)),
+                    ("Vermont",        (42.73, 45.02, -73.44, -71.46)),
+                ],
+            },
+            {
+                "name": "Southeast",
+                "bbox": (24.4, 39.5, -91.7, -75.4),
+                "subdivisions": [
+                    ("Alabama",        (30.22, 35.01, -88.47, -84.89)),
+                    ("Arkansas",       (33.00, 36.50, -94.62, -89.64)),
+                    ("Florida",        (24.40, 31.00, -87.63, -80.03)),
+                    ("Georgia",        (30.36, 35.00, -85.61, -80.84)),
+                    ("Kentucky",       (36.50, 39.15, -89.57, -81.96)),
+                    ("Louisiana",      (28.93, 33.02, -94.04, -89.00)),
+                    ("Mississippi",    (30.17, 34.99, -91.66, -88.10)),
+                    ("North Carolina", (33.84, 36.59, -84.32, -75.46)),
+                    ("South Carolina", (32.05, 35.21, -83.35, -78.54)),
+                    ("Tennessee",      (34.98, 36.68, -90.31, -81.65)),
+                    ("Virginia",       (36.54, 39.47, -83.68, -75.24)),
+                    ("West Virginia",  (37.20, 40.64, -82.64, -77.72)),
+                ],
+            },
+            {
+                "name": "Midwest",
+                "bbox": (36.0, 49.4, -104.1, -80.5),
+                "subdivisions": [
+                    ("Illinois",       (36.97, 42.51, -91.51, -87.50)),
+                    ("Indiana",        (37.77, 41.76, -88.10, -84.78)),
+                    ("Iowa",           (40.38, 43.50, -96.64, -90.14)),
+                    ("Kansas",         (37.00, 40.00, -102.05, -94.59)),
+                    ("Michigan",       (41.70, 48.26, -90.42, -82.12)),
+                    ("Minnesota",      (43.50, 49.38, -97.24, -89.49)),
+                    ("Missouri",       (36.00, 40.61, -95.77, -89.10)),
+                    ("Nebraska",       (40.00, 43.00, -104.05, -95.31)),
+                    ("North Dakota",   (45.94, 49.00, -104.05, -96.55)),
+                    ("Ohio",           (38.40, 41.98, -84.82, -80.52)),
+                    ("South Dakota",   (42.48, 45.94, -104.06, -96.44)),
+                    ("Wisconsin",      (42.49, 47.08, -92.89, -86.25)),
+                ],
+            },
+            {
+                "name": "Southwest",
+                "bbox": (25.8, 37.0, -114.8, -93.5),
+                "subdivisions": [
+                    ("Arizona",        (31.33, 37.00, -114.81, -109.04)),
+                    ("New Mexico",     (31.33, 37.00, -109.05, -103.00)),
+                    ("Oklahoma",       (33.62, 37.00, -103.00, -94.43)),
+                    ("Texas",          (25.84, 36.50, -106.65, -93.51)),
+                ],
+            },
+            {
+                "name": "Mountain West",
+                "bbox": (37.0, 49.0, -117.0, -102.0),
+                "subdivisions": [
+                    ("Colorado",       (36.99, 41.00, -109.06, -102.04)),
+                    ("Idaho",          (42.00, 49.00, -117.24, -111.04)),
+                    ("Montana",        (44.36, 49.00, -116.05, -104.04)),
+                    ("Nevada",         (35.00, 42.00, -120.00, -114.04)),
+                    ("Utah",           (37.00, 42.00, -114.05, -109.04)),
+                    ("Wyoming",        (41.00, 45.00, -111.06, -104.05)),
+                ],
+            },
+            {
+                "name": "Pacific West",
+                "bbox": (32.5, 49.0, -124.8, -114.1),
+                "subdivisions": [
+                    ("California",     (32.53, 42.01, -124.48, -114.13)),
+                    ("Oregon",         (41.99, 46.29, -124.57, -116.46)),
+                    ("Washington",     (45.54, 49.00, -124.85, -116.92)),
+                ],
+            },
+            {
+                "name": "Non-Contiguous",
+                "bbox": (18.9, 71.4, -179.2, -129.9),
+                "subdivisions": [
+                    ("Alaska",         (51.21, 71.39, -179.15, -129.98)),
+                    ("Hawaii",         (18.91, 22.24, -160.24, -154.81)),
+                ],
+            },
+        ],
+    },
+    {
+        "name": "Canada",
+        "bbox": (41.7, 83.1, -141.0, -52.6),
+        "regions": [
+            {
+                "name": "Western Canada",
+                "bbox": (48.3, 60.0, -139.1, -110.0),
+                "subdivisions": [
+                    ("British Columbia",  (48.30, 60.00, -139.06, -114.04)),
+                    ("Alberta",           (49.00, 60.00, -120.00, -110.00)),
+                ],
+            },
+            {
+                "name": "Prairies",
+                "bbox": (49.0, 60.0, -110.0, -88.9),
+                "subdivisions": [
+                    ("Saskatchewan",      (49.00, 60.00, -110.00, -101.36)),
+                    ("Manitoba",          (49.00, 60.00, -102.00, -88.90)),
+                ],
+            },
+            {
+                "name": "Central Canada",
+                "bbox": (42.0, 62.6, -95.2, -57.1),
+                "subdivisions": [
+                    ("Ontario",           (42.00, 56.90, -95.16, -74.34)),
+                    ("Quebec",            (45.00, 62.59, -79.76, -57.10)),
+                ],
+            },
+            {
+                "name": "Atlantic Canada",
+                "bbox": (43.4, 60.4, -69.1, -52.6),
+                "subdivisions": [
+                    ("New Brunswick",          (44.60, 48.07, -69.06, -63.77)),
+                    ("Newfoundland & Labrador",(46.62, 60.37, -67.80, -52.62)),
+                    ("Nova Scotia",            (43.42, 47.03, -66.42, -59.68)),
+                    ("Prince Edward Island",   (45.95, 47.07, -64.42, -61.98)),
+                ],
+            },
+            {
+                "name": "Northern Canada",
+                "bbox": (60.0, 83.1, -141.0, -61.1),
+                "subdivisions": [
+                    ("Northwest Territories", (60.00, 78.76, -136.45, -101.98)),
+                    ("Nunavut",               (51.68, 83.11, -120.40, -61.08)),
+                    ("Yukon",                 (60.00, 69.65, -141.00, -123.82)),
+                ],
+            },
+        ],
+    },
+    {
+        "name": "United Kingdom",
+        "bbox": (49.9, 60.9, -8.7, 1.8),
+        "regions": [
+            {"name": "England",          "bbox": (49.9, 55.8, -5.7, 1.8),   "subdivisions": []},
+            {"name": "Scotland",         "bbox": (54.6, 60.9, -8.7, -0.7),  "subdivisions": []},
+            {"name": "Wales",            "bbox": (51.4, 53.4, -5.3, -2.7),  "subdivisions": []},
+            {"name": "Northern Ireland", "bbox": (54.0, 55.4, -8.2, -5.4),  "subdivisions": []},
+        ],
+    },
+    {
+        "name": "Germany",
+        "bbox": (47.3, 55.1, 5.9, 15.0),
+        "regions": [
+            {"name": "Northern Germany",  "bbox": (52.0, 55.1, 5.9, 15.0), "subdivisions": []},
+            {"name": "Western Germany",   "bbox": (49.0, 52.5, 5.9, 10.0), "subdivisions": []},
+            {"name": "Eastern Germany",   "bbox": (50.2, 54.7, 10.0, 15.0),"subdivisions": []},
+            {"name": "Southern Germany",  "bbox": (47.3, 50.5, 7.5, 13.8), "subdivisions": []},
+        ],
+    },
+    {
+        "name": "France",
+        "bbox": (41.3, 51.1, -5.1, 9.6),
+        "regions": [
+            {"name": "Northern France",  "bbox": (47.5, 51.1, -5.1, 9.6),  "subdivisions": []},
+            {"name": "Southern France",  "bbox": (41.3, 47.5, -1.8, 9.6),  "subdivisions": []},
+            {"name": "Western France",   "bbox": (43.0, 48.9, -5.1, 0.0),  "subdivisions": []},
+        ],
+    },
+    {
+        "name": "Australia",
+        "bbox": (-43.6, -10.7, 113.2, 153.6),
+        "regions": [
+            {
+                "name": "Eastern Australia",
+                "bbox": (-43.6, -10.7, 138.0, 153.6),
+                "subdivisions": [
+                    ("New South Wales",     (-37.51, -28.16, 141.00, 153.64)),
+                    ("Victoria",            (-39.16, -34.00, 141.00, 149.98)),
+                    ("Queensland",          (-29.18, -10.69, 138.00, 153.55)),
+                    ("Tasmania",            (-43.64, -39.57, 143.83, 148.51)),
+                    ("ACT",                 (-35.92, -35.12, 148.76, 149.40)),
+                ],
+            },
+            {
+                "name": "Central & Western Australia",
+                "bbox": (-38.1, -10.9, 112.9, 141.0),
+                "subdivisions": [
+                    ("South Australia",     (-38.06, -26.00, 129.00, 141.00)),
+                    ("Western Australia",   (-35.13, -13.69, 112.92, 129.00)),
+                    ("Northern Territory",  (-26.00, -10.97, 129.00, 138.00)),
+                ],
+            },
+        ],
+    },
+    {
+        "name": "Japan",
+        "bbox": (24.0, 45.5, 122.9, 153.9),
+        "regions": [
+            {"name": "Hokkaido",       "bbox": (41.3, 45.5, 139.3, 145.8),  "subdivisions": []},
+            {"name": "Tohoku",         "bbox": (36.8, 41.6, 139.0, 142.1),  "subdivisions": []},
+            {"name": "Kanto",          "bbox": (35.0, 37.0, 138.7, 140.9),  "subdivisions": []},
+            {"name": "Chubu",          "bbox": (34.6, 37.8, 136.0, 140.0),  "subdivisions": []},
+            {"name": "Kansai",         "bbox": (33.4, 35.8, 134.0, 136.9),  "subdivisions": []},
+            {"name": "Chugoku",        "bbox": (33.7, 35.7, 130.9, 134.5),  "subdivisions": []},
+            {"name": "Shikoku",        "bbox": (32.7, 34.5, 132.0, 134.8),  "subdivisions": []},
+            {"name": "Kyushu/Okinawa", "bbox": (24.0, 34.3, 122.9, 132.0),  "subdivisions": []},
+        ],
+    },
+    {
+        "name": "South Korea",
+        "bbox": (33.1, 38.6, 124.6, 131.9),
+        "regions": [],
+    },
+    {
+        "name": "Italy",
+        "bbox": (36.6, 47.1, 6.6, 18.5),
+        "regions": [
+            {"name": "Northern Italy",  "bbox": (43.5, 47.1, 6.6, 14.0),  "subdivisions": []},
+            {"name": "Central Italy",   "bbox": (40.8, 43.5, 9.5, 15.0),  "subdivisions": []},
+            {"name": "Southern Italy",  "bbox": (36.6, 41.5, 13.5, 18.5), "subdivisions": []},
+        ],
+    },
+    {
+        "name": "Spain",
+        "bbox": (36.0, 43.8, -9.3, 3.3),
+        "regions": [],
+    },
+    {
+        "name": "Mexico",
+        "bbox": (14.5, 32.7, -118.4, -86.7),
+        "regions": [],
+    },
+    {
+        "name": "Brazil",
+        "bbox": (-33.8, 5.3, -73.9, -34.8),
+        "regions": [],
+    },
+    {
+        "name": "India",
+        "bbox": (6.7, 35.5, 68.2, 97.4),
+        "regions": [],
+    },
+]
+
+
+def _latlon_to_tile(lat, lon, zoom):
+    """Convert lat/lon to tile x,y at given zoom level (Web Mercator)."""
+    import math
+    n = 2 ** zoom
+    x = int((lon + 180.0) / 360.0 * n)
+    lat_rad = math.radians(lat)
+    y = int((1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n)
+    x = max(0, min(n - 1, x))
+    y = max(0, min(n - 1, y))
+    return x, y
+
+
+def _count_tiles_bbox(bbox, zoom_min, zoom_max):
+    """Count how many tiles would be downloaded for a bounding box (min_lat, max_lat, min_lon, max_lon)."""
+    lat_min, lat_max, lon_min, lon_max = bbox
+    lat_min = max(lat_min, -85.0511)
+    lat_max = min(lat_max, 85.0511)
+    total = 0
+    for z in range(zoom_min, zoom_max + 1):
+        x0, y0 = _latlon_to_tile(lat_max, lon_min, z)
+        x1, y1 = _latlon_to_tile(lat_min, lon_max, z)
+        total += (x1 - x0 + 1) * (y1 - y0 + 1)
+    return total
+
+
+def _count_tiles(lat, lon, radius_km, zoom_min, zoom_max):
+    """Count tiles for a center+radius area (legacy wrapper)."""
+    import math
+    deg_lat = radius_km / 111.0
+    deg_lon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    bbox = (
+        max(lat - deg_lat, -85.0511),
+        min(lat + deg_lat, 85.0511),
+        lon - deg_lon,
+        lon + deg_lon,
+    )
+    return _count_tiles_bbox(bbox, zoom_min, zoom_max)
+
+
+def _suggest_zoom_range(bbox):
+    """Suggest appropriate zoom range based on bounding box size."""
+    lat_span = bbox[1] - bbox[0]
+    lon_span = bbox[3] - bbox[2]
+    area_deg2 = lat_span * lon_span
+    if area_deg2 > 800:
+        return 5, 8
+    if area_deg2 > 200:
+        return 6, 10
+    if area_deg2 > 50:
+        return 8, 11
+    if area_deg2 > 10:
+        return 9, 13
+    return 10, 14
+
+
+def _download_map_tiles_bbox(bbox, zoom_min, zoom_max, dest_dir, label=""):
+    """Download OSM tiles for a bounding box and save to dest_dir/map/{z}/{x}/{y}.png."""
+    lat_min, lat_max, lon_min, lon_max = bbox
+    lat_min = max(lat_min, -85.0511)
+    lat_max = min(lat_max, 85.0511)
+
+    map_dir = os.path.join(dest_dir, "map")
+    total = _count_tiles_bbox(bbox, zoom_min, zoom_max)
+    downloaded = 0
+    skipped = 0
+    errors = 0
+
+    color_print(f"\n  Downloading {total} tiles to: {map_dir}", C.CYAN)
+    color_print(f"  Zoom levels: {zoom_min} to {zoom_max}", C.CYAN)
+    if label:
+        color_print(f"  Region: {label}", C.CYAN)
+    color_print(f"  Bounds: {lat_min:.4f}°–{lat_max:.4f}° lat, {lon_min:.4f}°–{lon_max:.4f}° lon\n", C.CYAN)
+
+    for z in range(zoom_min, zoom_max + 1):
+        x0, y0 = _latlon_to_tile(lat_max, lon_min, z)
+        x1, y1 = _latlon_to_tile(lat_min, lon_max, z)
+
+        zoom_tiles = (x1 - x0 + 1) * (y1 - y0 + 1)
+        color_print(f"  Zoom {z}: {zoom_tiles} tiles (x={x0}-{x1}, y={y0}-{y1})", C.DIM)
+
+        for tx in range(x0, x1 + 1):
+            tile_dir = os.path.join(map_dir, str(z), str(tx))
+            os.makedirs(tile_dir, exist_ok=True)
+
+            for ty in range(y0, y1 + 1):
+                tile_path = os.path.join(tile_dir, f"{ty}.png")
+
+                if os.path.isfile(tile_path) and os.path.getsize(tile_path) > 100:
+                    skipped += 1
+                    downloaded += 1
+                    continue
+
+                url = MAP_TILE_URL.format(z=z, x=tx, y=ty)
+                try:
+                    req = Request(url, headers={"User-Agent": MAP_USER_AGENT})
+                    with urlopen(req, timeout=15) as resp:
+                        data = resp.read()
+                    with open(tile_path, "wb") as f:
+                        f.write(data)
+                    downloaded += 1
+                except (URLError, OSError) as e:
+                    errors += 1
+                    if errors <= 5:
+                        color_print(f"    Failed: z={z} x={tx} y={ty}: {e}", C.YELLOW)
+                    elif errors == 6:
+                        color_print(f"    (suppressing further error messages)", C.DIM)
+
+                # Rate limit: OSM tile usage policy
+                time.sleep(0.05)
+
+                if downloaded % 100 == 0 and downloaded > 0:
+                    pct = downloaded * 100 // total if total else 100
+                    print(f"\r  Progress: {downloaded}/{total} ({pct}%)", end="", flush=True)
+
+    print()
+    color_print(f"\n  Downloaded: {downloaded - skipped} new, {skipped} cached, {errors} failed", C.GREEN)
+    color_print(f"  Tile directory: {map_dir}", C.CYAN)
+    return errors == 0 or (downloaded - skipped) > 0
+
+
+def _find_removable_drives():
+    """Find removable drives (microSD cards) on the system."""
+    drives = []
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            for i in range(26):
+                if bitmask & (1 << i):
+                    letter = chr(65 + i)
+                    drive = f"{letter}:\\"
+                    drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                    # 2 = DRIVE_REMOVABLE
+                    if drive_type == 2:
+                        # Get volume label (may fail on corrupted/unrecognized cards)
+                        vol_buf = ctypes.create_unicode_buffer(256)
+                        fs_buf = ctypes.create_unicode_buffer(256)
+                        vol_ok = ctypes.windll.kernel32.GetVolumeInformationW(
+                            drive, vol_buf, 256, None, None, None, fs_buf, 256)
+                        label = vol_buf.value if vol_ok else ""
+                        fs_type = fs_buf.value if vol_ok else ""
+                        try:
+                            total, _, free = shutil.disk_usage(drive)
+                            size_mb = total // (1024 * 1024)
+                            free_mb = free // (1024 * 1024)
+                            desc = f"{label or 'Removable'} ({fs_type}, {size_mb}MB, {free_mb}MB free)"
+                        except OSError:
+                            desc = f"{label or 'Removable'}"
+                            if fs_type:
+                                desc += f" ({fs_type})"
+                            else:
+                                desc += " (unreadable — needs format)"
+                        drives.append((drive, desc))
+        except Exception:
+            pass
+    else:
+        # Linux/Mac: check /dev/sd* and /media mounts
+        import glob as _glob
+        for mount in _glob.glob("/media/*/*") + _glob.glob("/mnt/*"):
+            if os.path.ismount(mount):
+                try:
+                    total, _, free = shutil.disk_usage(mount)
+                    size_mb = total // (1024 * 1024)
+                    free_mb = free // (1024 * 1024)
+                    drives.append((mount, f"{os.path.basename(mount)} ({size_mb}MB, {free_mb}MB free)"))
+                except OSError:
+                    drives.append((mount, os.path.basename(mount)))
+    return drives
+
+
+def _format_sd_card(drive_path):
+    """Format the SD card as FAT32. Returns True on success."""
+    if sys.platform == "win32":
+        drive_letter = drive_path[0]
+        color_print(f"\n  Formatting {drive_letter}: as FAT32...", C.YELLOW)
+        color_print("  (This will erase ALL data on the card!)\n", C.RED)
+
+        sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+        format_exe = os.path.join(sys32, "format.com")
+        diskpart_exe = os.path.join(sys32, "diskpart.exe")
+
+        try:
+            # Try the simple format command first
+            r = subprocess.run(
+                [format_exe, f"{drive_letter}:", "/FS:FAT32", "/Q", "/V:OUISPY", "/Y"],
+                timeout=120, capture_output=True, text=True
+            )
+            if r.returncode == 0:
+                color_print("  Format complete!", C.GREEN)
+                return True
+
+            # Simple format failed — card may have corrupt partition table
+            # (e.g. non-standard sector size from embedded device).
+            # Fall back to diskpart: clean → create partition → format.
+            color_print("  Quick format failed, trying full partition reset...", C.YELLOW)
+            return _diskpart_format(drive_letter, diskpart_exe)
+        except Exception as e:
+            color_print(f"  Format error: {e}", C.RED)
+            # Try diskpart as last resort
+            try:
+                return _diskpart_format(drive_letter, diskpart_exe)
+            except Exception as e2:
+                color_print(f"  diskpart fallback also failed: {e2}", C.RED)
+                return False
+    else:
+        color_print("  Auto-format is only supported on Windows.", C.YELLOW)
+        color_print("  Please format your SD card as FAT32 manually,", C.CYAN)
+        color_print("  then re-run this tool.", C.CYAN)
+        return False
+
+
+def _diskpart_format(drive_letter, diskpart_exe=None):
+    """Use diskpart to clean and reformat a corrupted SD card on Windows."""
+    import tempfile
+
+    if diskpart_exe is None:
+        sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+        diskpart_exe = os.path.join(sys32, "diskpart.exe")
+
+    if not os.path.isfile(diskpart_exe):
+        color_print(f"  diskpart not found at {diskpart_exe}", C.RED)
+        return False
+
+    # Check admin privileges — diskpart requires elevation
+    try:
+        import ctypes
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            color_print("  diskpart requires Administrator privileges.", C.RED)
+            color_print("  Please re-run flash.py as Administrator (right-click → Run as administrator).", C.YELLOW)
+            return False
+    except Exception:
+        pass
+
+    # Map drive letter → volume number → disk number via diskpart
+    # Step 1: list volumes to find which volume is on this drive letter
+    list_script = "list volume\n"
+    vol_num = None
+    disk_num = None
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write(list_script)
+        script_path = f.name
+
+    try:
+        r = subprocess.run(
+            [diskpart_exe, "/s", script_path],
+            timeout=30, capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            color_print(f"  diskpart list failed: {r.stderr.strip()}", C.RED)
+            return False
+
+        # Parse output to find volume with matching drive letter
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 4 and parts[0] == "Volume":
+                try:
+                    vnum = int(parts[1])
+                except ValueError:
+                    continue
+                if parts[2].upper() == drive_letter.upper():
+                    vol_num = vnum
+                    break
+
+        if vol_num is None:
+            # Also check for volumes with no letter assignment (Removable, RAW)
+            for line in r.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 4 and parts[0] == "Volume":
+                    try:
+                        vnum = int(parts[1])
+                    except ValueError:
+                        continue
+                    rest = line.lower()
+                    if "removable" in rest and ("raw" in rest or "0  b" in rest.replace(" ", "")):
+                        vol_num = vnum
+                        break
+
+        if vol_num is None:
+            color_print(f"  Could not find volume for drive {drive_letter}:", C.RED)
+            color_print(f"  diskpart output:\n{r.stdout}", C.DIM)
+            return False
+    finally:
+        os.unlink(script_path)
+
+    # Step 2: find which disk this volume is on
+    detail_script = f"select volume {vol_num}\ndetail volume\n"
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write(detail_script)
+        script_path = f.name
+
+    try:
+        r = subprocess.run(
+            [diskpart_exe, "/s", script_path],
+            timeout=30, capture_output=True, text=True
+        )
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "Disk":
+                try:
+                    disk_num = int(parts[1])
+                    break
+                except ValueError:
+                    continue
+        if disk_num is None:
+            color_print("  Could not determine disk number for this volume.", C.RED)
+            return False
+    finally:
+        os.unlink(script_path)
+
+    # Safety: refuse to touch disk 0 (usually the system drive)
+    if disk_num == 0:
+        color_print("  Refusing to format Disk 0 (system drive).", C.RED)
+        return False
+
+    color_print(f"  Found: Volume {vol_num} on Disk {disk_num}", C.DIM)
+    color_print(f"  Cleaning and reformatting Disk {disk_num}...", C.YELLOW)
+
+    # Step 3: clean, create partition, format
+    fmt_script = (
+        f"select disk {disk_num}\n"
+        f"clean\n"
+        f"create partition primary\n"
+        f"select partition 1\n"
+        f"active\n"
+        f"format fs=fat32 quick label=OUISPY\n"
+        f"assign letter={drive_letter}\n"
+    )
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write(fmt_script)
+        script_path = f.name
+
+    try:
+        r = subprocess.run(
+            [diskpart_exe, "/s", script_path],
+            timeout=120, capture_output=True, text=True
+        )
+        if r.returncode == 0 and "DiskPart successfully" in r.stdout:
+            color_print("  Format complete! (via diskpart)", C.GREEN)
+            return True
+        else:
+            color_print(f"  diskpart format failed.", C.RED)
+            if r.stdout.strip():
+                color_print(f"  Output: {r.stdout.strip()[-200:]}", C.DIM)
+            return False
+    finally:
+        os.unlink(script_path)
+
+
+def _pick_number(prompt, min_val, max_val):
+    """Prompt user to pick a number in range. Returns the 0-based index or None for back."""
+    while True:
+        raw = input(f"  {C.BOLD}{prompt}: {C.RESET}").strip().lower()
+        if raw in ("b", "back", "q", "quit", "0"):
+            return None
+        try:
+            val = int(raw)
+            if min_val <= val <= max_val:
+                return val - 1  # 0-based index
+        except ValueError:
+            pass
+        color_print(f"  Enter a number {min_val}–{max_val}, or 0 to go back.", C.RED)
+
+
+def _select_region():
+    """Interactive region picker. Returns (bbox, label) or (None, None)."""
+
+    # Step 1: Choose country
+    while True:
+        print()
+        color_print("  Step 1: Choose a country\n", C.BOLD)
+        for i, country in enumerate(REGION_CATALOG):
+            print(f"    [{i + 1:>2}] {country['name']}")
+        manual_idx = len(REGION_CATALOG) + 1
+        print(f"    [{manual_idx:>2}] Enter coordinates manually")
+        print(f"    [ 0] Cancel\n")
+
+        choice = _pick_number(f"Select country [1-{manual_idx}]", 0, manual_idx)
+        if choice is None:
+            return None, None
+
+        if choice == manual_idx - 1:
+            # Manual coordinate entry
+            return _manual_coordinates()
+
+        country = REGION_CATALOG[choice]
+        result = _select_country_scope(country)
+        if result is not None:
+            return result
+        # result is None → user chose "back", loop to country list
+
+
+def _manual_coordinates():
+    """Fallback: enter lat/lon + radius manually. Returns (bbox, label) or (None, None)."""
+    import math
+    color_print("\n  Enter the center coordinates of your area.\n", C.DIM)
+    color_print("  Tip: Find coordinates at https://www.openstreetmap.org", C.DIM)
+    color_print("       (right-click the map → 'Show address' to see lat/lon)\n", C.DIM)
+
+    while True:
+        lat_str = input(f"  {C.BOLD}Latitude (e.g. 40.7128): {C.RESET}").strip()
+        lon_str = input(f"  {C.BOLD}Longitude (e.g. -74.0060): {C.RESET}").strip()
+        try:
+            lat = float(lat_str)
+            lon = float(lon_str)
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                break
+            color_print("  Latitude must be -90..90, longitude -180..180.", C.RED)
+        except ValueError:
+            color_print("  Invalid number. Enter decimal degrees.", C.RED)
+
+    radius_str = input(f"  {C.BOLD}Coverage radius in km (default: 15): {C.RESET}").strip()
+    radius_km = 15
+    if radius_str:
+        try:
+            radius_km = float(radius_str)
+            radius_km = max(1, min(200, radius_km))
+        except ValueError:
+            pass
+
+    deg_lat = radius_km / 111.0
+    deg_lon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    bbox = (
+        max(lat - deg_lat, -85.0511),
+        min(lat + deg_lat, 85.0511),
+        lon - deg_lon,
+        lon + deg_lon,
+    )
+    label = f"Manual ({lat:.4f}, {lon:.4f}) ±{radius_km:.0f} km"
+    return bbox, label
+
+
+def _select_country_scope(country):
+    """Let user choose: entire country, a region, or a subdivision. Returns (bbox, label) or None to go back."""
+    regions = country.get("regions", [])
+    has_regions = bool(regions)
+    has_subdivisions = has_regions and any(r.get("subdivisions") for r in regions)
+
+    while True:
+        print()
+        color_print(f"  {country['name']} — Choose download scope\n", C.BOLD)
+        options = []
+        options.append(f"Entire country")
+        if has_regions:
+            options.append(f"Select a region")
+        if has_subdivisions:
+            options.append(f"Select a state/province")
+        options.append("Back")
+
+        for i, opt in enumerate(options):
+            print(f"    [{i + 1}] {opt}")
+        print()
+
+        choice = _pick_number(f"Select [1-{len(options)}]", 1, len(options))
+        if choice is None or options[choice] == "Back":
+            return None
+
+        if choice == 0:
+            # Entire country
+            return country["bbox"], country["name"]
+
+        if options[choice] == "Select a region":
+            result = _select_from_regions(country["name"], regions, select_sub=False)
+            if result is not None:
+                return result
+            continue
+
+        if options[choice] == "Select a state/province":
+            result = _select_from_regions(country["name"], regions, select_sub=True)
+            if result is not None:
+                return result
+            continue
+
+
+def _select_from_regions(country_name, regions, select_sub=False):
+    """Pick a region, and optionally drill into its subdivisions. Returns (bbox, label) or None to go back."""
+    while True:
+        print()
+        if select_sub:
+            color_print(f"  {country_name} — Choose a region to browse states/provinces\n", C.BOLD)
+        else:
+            color_print(f"  {country_name} — Choose a region\n", C.BOLD)
+
+        for i, r in enumerate(regions):
+            extra = ""
+            if r.get("subdivisions"):
+                extra = f"  ({len(r['subdivisions'])} subdivisions)"
+            print(f"    [{i + 1:>2}] {r['name']}{extra}")
+        print(f"    [ 0] Back\n")
+
+        choice = _pick_number(f"Select region [1-{len(regions)}]", 0, len(regions))
+        if choice is None:
+            return None
+
+        region = regions[choice]
+
+        if not select_sub:
+            return region["bbox"], f"{country_name} > {region['name']}"
+
+        # Drill into subdivisions
+        subdivisions = region.get("subdivisions", [])
+        if not subdivisions:
+            color_print(f"  No further subdivisions for {region['name']}.", C.YELLOW)
+            color_print(f"  Selecting entire region instead.", C.DIM)
+            return region["bbox"], f"{country_name} > {region['name']}"
+
+        result = _select_subdivision(country_name, region["name"], subdivisions)
+        if result is not None:
+            return result
+        # None → user chose back, loop to region list
+
+
+def _select_subdivision(country_name, region_name, subdivisions):
+    """Pick a state/province from a region's subdivisions. Returns (bbox, label) or None to go back."""
+    while True:
+        print()
+        color_print(f"  {country_name} > {region_name} — Choose a state/province\n", C.BOLD)
+        for i, (name, _bbox) in enumerate(subdivisions):
+            print(f"    [{i + 1:>2}] {name}")
+        print(f"    [ 0] Back\n")
+
+        choice = _pick_number(f"Select [1-{len(subdivisions)}]", 0, len(subdivisions))
+        if choice is None:
+            return None
+
+        name, bbox = subdivisions[choice]
+        return bbox, f"{country_name} > {region_name} > {name}"
+
+
+def prepare_map_sd():
+    """Interactive wizard to download map tiles and prepare a microSD card."""
+    section("MicroSD Map Tile Preparation")
+    color_print("  This tool downloads OpenStreetMap tiles for offline use", C.CYAN)
+    color_print("  on the OUI-Spy device's map view (Flock You + Sky Spy).\n", C.CYAN)
+    color_print("  You'll need:", C.BOLD)
+    color_print("    - A microSD card (any size, FAT32 formatted)", C.CYAN)
+    color_print("    - Internet connection to download tiles\n", C.CYAN)
+
+    # Step 1: Select region
+    bbox, label = _select_region()
+    if bbox is None:
+        color_print("  Cancelled.", C.YELLOW)
+        return
+
+    color_print(f"\n  Selected: {label}", C.GREEN)
+    color_print(f"  Bounds:   {bbox[0]:.2f}° to {bbox[1]:.2f}° lat, {bbox[2]:.2f}° to {bbox[3]:.2f}° lon", C.DIM)
+
+    # Step 2: Zoom levels (with smart defaults based on region size)
+    default_min, default_max = _suggest_zoom_range(bbox)
+    print()
+    color_print("  Zoom levels control detail vs. storage:", C.DIM)
+    color_print("    5  = ~1500 km view  (continent)", C.DIM)
+    color_print("    8  = ~200 km view   (large region)", C.DIM)
+    color_print("    9  = ~300 km view   (city region)", C.DIM)
+    color_print("    11 = ~75 km view    (city level)", C.DIM)
+    color_print("    13 = ~19 km view    (neighborhood)", C.DIM)
+    color_print("    15 = ~5 km view     (street level)\n", C.DIM)
+    color_print(f"  Suggested for this region: {default_min}-{default_max}", C.CYAN)
+
+    zoom_str = input(f"  {C.BOLD}Zoom range (default: {default_min}-{default_max}): {C.RESET}").strip()
+    zoom_min = default_min
+    zoom_max = default_max
+    if zoom_str:
+        parts = re.split(r"[-\u2013,\s]+", zoom_str.strip())
+        try:
+            if len(parts) == 2:
+                zoom_min = int(parts[0])
+                zoom_max = int(parts[1])
+            elif len(parts) == 1:
+                zoom_max = int(parts[0])
+            zoom_min = max(1, min(19, zoom_min))
+            zoom_max = max(zoom_min, min(19, zoom_max))
+        except ValueError:
+            color_print("  Using suggested defaults.", C.YELLOW)
+            zoom_min = default_min
+            zoom_max = default_max
+
+    # Preview tile count
+    tile_count = _count_tiles_bbox(bbox, zoom_min, zoom_max)
+    est_size_mb = tile_count * 15 / 1024  # ~15 KB average per tile
+
+    print()
+    color_print(f"  Region:            {label}", C.CYAN)
+    color_print(f"  Tiles to download: {tile_count:,}", C.CYAN)
+    color_print(f"  Estimated size:    ~{est_size_mb:.0f} MB", C.CYAN)
+    color_print(f"  Zoom levels:       {zoom_min} to {zoom_max}", C.CYAN)
+
+    if tile_count > MAP_MAX_TILES:
+        color_print(f"\n  Too many tiles ({tile_count:,} > {MAP_MAX_TILES:,}).", C.RED)
+        color_print("  Select a smaller region or reduce the zoom range.", C.CYAN)
+        input(f"\n{C.DIM}  Press Enter to go back...{C.RESET}")
+        return
+
+    if tile_count == 0:
+        color_print("\n  No tiles to download.", C.RED)
+        input(f"\n{C.DIM}  Press Enter to go back...{C.RESET}")
+        return
+
+    # Step 3: Choose destination
+    print()
+    drives = _find_removable_drives()
+
+    if drives:
+        color_print("  Step 3: Choose destination\n", C.BOLD)
+        color_print("    [1] Download to a removable drive (microSD card)", C.CYAN)
+        color_print("    [2] Download to a local folder\n", C.CYAN)
+        dest_choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
+    else:
+        color_print("  No removable drives detected.", C.YELLOW)
+        color_print("  Tiles will be saved to a local folder.", C.DIM)
+        dest_choice = "2"
+
+    dest_dir = None
+
+    if dest_choice != "2" and drives:
+        print()
+        color_print("  Removable drives found:\n", C.BOLD)
+        for i, (path, desc) in enumerate(drives):
+            print(f"    [{i + 1}] {path}  — {desc}")
+        print()
+        while True:
+            drive_choice = input(f"  {C.BOLD}Select drive [1-{len(drives)}]: {C.RESET}").strip()
+            try:
+                idx = int(drive_choice) - 1
+                if 0 <= idx < len(drives):
+                    dest_dir = drives[idx][0]
+                    break
+            except ValueError:
+                pass
+            color_print("  Invalid choice.", C.RED)
+
+        print()
+        if ask_yes("  Format the SD card as FAT32 first? (erases all data)", default_yes=False):
+            if not ask_yes(f"  CONFIRM: Erase ALL data on {dest_dir}?", default_yes=False):
+                color_print("  Format cancelled.", C.YELLOW)
+            else:
+                if not _format_sd_card(dest_dir):
+                    if not ask_yes("  Continue without formatting?"):
+                        return
+    else:
+        default_map_dir = os.path.join(get_project_dir(), "sdcard")
+        color_print(f"\n  Default folder: {default_map_dir}", C.DIM)
+        custom = input(f"  {C.BOLD}Folder path (Enter for default): {C.RESET}").strip()
+        dest_dir = custom if custom else default_map_dir
+
+    if not dest_dir:
+        return
+
+    # Step 4: Download
+    print()
+    if not ask_yes(f"  Download {tile_count:,} tiles to {dest_dir}?"):
+        color_print("  Cancelled.", C.YELLOW)
+        return
+
+    success = _download_map_tiles_bbox(bbox, zoom_min, zoom_max, dest_dir, label)
+
+    if success:
+        section("Map preparation complete!")
+        color_print("  Your microSD card is ready.\n", C.GREEN)
+        color_print(f"  Region: {label}", C.CYAN)
+        color_print("  File structure on the SD card:", C.BOLD)
+        color_print("    /map/{zoom}/{x}/{y}.png\n", C.CYAN)
+        color_print("  To use:", C.BOLD)
+        color_print("    1. Insert the microSD card into the OUI-Spy C6 board", C.CYAN)
+        color_print("    2. Power on or reset the device", C.CYAN)
+        color_print("    3. Triple-click in Flock You or Sky Spy mode to toggle map", C.CYAN)
+        color_print("    4. Double-click while in map view to cycle zoom levels", C.CYAN)
+    else:
+        color_print("\n  Some tiles failed to download. The card may still work", C.YELLOW)
+        color_print("  with partial coverage. Re-run to retry failed tiles.", C.CYAN)
+
+    input(f"\n{C.DIM}  Press Enter to continue...{C.RESET}")
+
+
+# ═════════════════════════════════════════════
 #  MAIN WIZARD
 # ═════════════════════════════════════════════
 
@@ -943,6 +1886,7 @@ def main():
     specified_port = None
     erase = False
     monitor = True
+    run_map_tool = False
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -960,16 +1904,34 @@ def main():
             os.environ["OUISPY_FORCE_BUILD"] = "1"; i += 1; continue
         if args[i] == "--download":
             os.environ["OUISPY_FORCE_DOWNLOAD"] = "1"; i += 1; continue
+        if args[i] == "--map":
+            run_map_tool = True; i += 1; continue
         if args[i] in ("--help", "-h"):
-            print("Usage: python flash.py [--port PORT] [--erase] [--baud RATE] [--monitor-baud RATE] [--no-monitor] [--download] [--build]")
+            print("Usage: python flash.py [--port PORT] [--erase] [--baud RATE] [--monitor-baud RATE] [--no-monitor] [--download] [--build] [--map]")
             print("\n  No arguments needed — the script handles everything automatically.")
             print("  --download   Skip menu, download prebuilt firmware from GitHub")
             print("  --build      Skip menu, build from local source code")
+            print("  --map        Skip menu, go directly to map tile SD card preparation")
             print("  It will flash and then open a serial monitor by default.\n")
             sys.exit(0)
         i += 1
 
     color_print(BANNER, C.PURPLE)
+
+    # Direct launch of map tool via CLI flag
+    if run_map_tool:
+        prepare_map_sd()
+        return
+
+    # ── Top-level menu ──
+    section("What would you like to do?")
+    color_print("    [1] Flash firmware to the board (default)", C.CYAN)
+    color_print("    [2] Prepare microSD card with offline map tiles\n", C.CYAN)
+    top_choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
+
+    if top_choice == "2":
+        prepare_map_sd()
+        return
 
     # ── 1. Python dependencies ──
     section("Checking Python dependencies")

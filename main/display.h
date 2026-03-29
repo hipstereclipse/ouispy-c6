@@ -29,4 +29,5 @@ void display_draw_status(const char *mode_name, uint16_t accent_color);
 void display_draw_hline(int x, int y, int w, uint16_t color);
 void display_draw_bordered_rect(int x, int y, int w, int h, uint16_t border, uint16_t fill);
 void display_draw_text_scaled(int x, int y, const char *text, uint16_t fg, uint16_t bg, int scale);
+void display_blit_rgb565(int x, int y, int w, int h, const uint16_t *data);
 void display_draw_shared_map_view(app_mode_t mode);

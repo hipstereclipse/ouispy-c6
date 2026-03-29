@@ -72,5 +72,11 @@ CONFIG_MBEDTLS_PEM_WRITE_C=n
 CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
 CONFIG_MBEDTLS_X509_CSR_PARSE_C=n
 
+# ── FAT filesystem (microSD) ──
+# 512-byte sectors for Windows/macOS/Linux compatibility
+CONFIG_FATFS_SECTOR_512=y
+# Enable long filenames (heap-allocated — ~600 B per open file)
+CONFIG_FATFS_LFN_HEAP=y
+
 # Reduce system socket pool
 CONFIG_LWIP_MAX_SOCKETS=10

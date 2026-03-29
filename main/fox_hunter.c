@@ -531,6 +531,28 @@ static void fox_scan_cb(const uint8_t *addr, int8_t rssi,
         d->last_seen  = now;
         d->hit_count  = 1;
         g_app.fox_nearby_count++;
+    } else {
+        /* Array full — evict the stalest entry to make room */
+        int victim = 0;
+        uint32_t oldest = g_app.fox_nearby[0].last_seen;
+        for (int i = 1; i < g_app.fox_nearby_count; i++) {
+            if (g_app.fox_nearby[i].last_seen < oldest) {
+                oldest = g_app.fox_nearby[i].last_seen;
+                victim = i;
+            }
+        }
+        /* Only evict if the victim is staler than the new device */
+        if (oldest < now) {
+            ble_device_t *d = &g_app.fox_nearby[victim];
+            memset(d, 0, sizeof(*d));
+            memcpy(d->mac, addr, 6);
+            strncpy(d->name, name_str, DEVICE_NAME_LEN - 1);
+            d->rssi       = rssi;
+            d->rssi_best  = rssi;
+            d->first_seen = now;
+            d->last_seen  = now;
+            d->hit_count  = 1;
+        }
     }
 
     xSemaphoreGive(g_app.device_mutex);
@@ -1185,6 +1207,19 @@ int fox_hunter_registry_update(int index, const char *nickname,
                  e->original_name[0] ? e->original_name : "unknown");
         fox_log_identity_event("registry_updated", e->mac, primary_label, extra);
     }
+    return 0;
+}
+
+int fox_hunter_registry_set_gps(int index, double lat, double lon, float radius_m)
+{
+    if (index < 0 || index >= g_app.fox_registry_count) return -1;
+
+    fox_reg_entry_t *e = &g_app.fox_registry[index];
+    e->pinned_lat = lat;
+    e->pinned_lon = lon;
+    e->pinned_radius_m = radius_m;
+
+    nvs_store_save_fox_registry();
     return 0;
 }
 

@@ -107,6 +107,9 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 
 The shared pinned-device map can render offline slippy-map tiles for saved Flock, Fox, and Sky locations.
 
+- Shared map points now include the browser/device current location while GPS is live, or the last known browser/device location when a recent fix exists
+- Browser GPS map points are mirrored into the device's local LCD shared-map view so the on-device map no longer depends only on manually saved pins
+
 - Requirements:
   - Open the device over `https://192.168.4.1`
   - Enable `GPS Tagging` in Settings or the Flock page toggle
@@ -117,12 +120,13 @@ The shared pinned-device map can render offline slippy-map tiles for saved Flock
   - Double-click the map canvas to cycle zoom levels
 - Tiles:
   - Preferred device-backed path: copy a `map` folder onto the microSD card at `/sdcard/map` using standard slippy-map layout: `z/x/y.png`, `jpg`, `jpeg`, or `webp`
-  - In the web UI, `Load Device/Folder Tiles` first checks `/sdcard/map` served by the device itself
+  - In the web UI, `Load Device/Folder Tiles` first checks `/sdcard/map` served by the device itself, even on browsers that also support local folder selection
   - Browsers that support directory selection can still load a local folder manually using the same `z/x/y.ext` layout
   - If no offline tiles are loaded, the map still shows a gray grid with relative pinned devices
 - Notes:
   - Browser directory selection is no longer required when `/sdcard/map` is present on the device
   - The firmware now serves tiles directly through `/api/map/tile`, so the embedded map remains usable even in browsers that cannot open local folders
+  - The browser map can render `png`, `jpg`, `jpeg`, or `webp` tiles, but the on-device LCD renderer currently expects PNG tiles under `/sdcard/map`
   - Pins come from locations you saved in the web UI, so populate those first for a meaningful map
 
 ### Fox Hunter Web Console

@@ -39,6 +39,7 @@ static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
 #define GPS_READY_TIMEOUT_MS 20000
 #define LOG_RECENT_LIMIT 32
+#define WEB_MAX_URI_HANDLERS 32
 static const char *MAP_ROOT_PATH = "/sdcard/map";
 
 /* Embedded index.html */
@@ -331,6 +332,117 @@ static esp_err_t get_map_tile(httpd_req_t *req)
         return httpd_resp_send_chunk(req, NULL, 0);
     }
     return ESP_FAIL;
+}
+
+static map_pin_kind_t map_pin_kind_from_json(const cJSON *kind_item)
+{
+    if (!kind_item) return MAP_PIN_KIND_FLOCK;
+
+    if (cJSON_IsNumber(kind_item)) {
+        int kind = kind_item->valueint;
+        if (kind == (int)MAP_PIN_KIND_FOX) return MAP_PIN_KIND_FOX;
+        if (kind == (int)MAP_PIN_KIND_DRONE) return MAP_PIN_KIND_DRONE;
+        if (kind == (int)MAP_PIN_KIND_SELF) return MAP_PIN_KIND_SELF;
+        return MAP_PIN_KIND_FLOCK;
+    }
+
+    if (cJSON_IsString(kind_item) && kind_item->valuestring) {
+        if (strcmp(kind_item->valuestring, "fox") == 0) return MAP_PIN_KIND_FOX;
+        if (strcmp(kind_item->valuestring, "drone") == 0) return MAP_PIN_KIND_DRONE;
+        if (strcmp(kind_item->valuestring, "self") == 0) return MAP_PIN_KIND_SELF;
+    }
+
+    return MAP_PIN_KIND_FLOCK;
+}
+
+static esp_err_t post_map_pins(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > 8192) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid body");
+    }
+
+    char *buf = calloc(1, (size_t)req->content_len + 1U);
+    if (!buf) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+    }
+
+    int len = httpd_req_recv(req, buf, req->content_len);
+    if (len <= 0) {
+        free(buf);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    }
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON");
+    }
+
+    cJSON *pins = cJSON_IsArray(root) ? root : cJSON_GetObjectItem(root, "pins");
+    if (!pins || !cJSON_IsArray(pins)) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing pins array");
+    }
+
+    map_pin_t next_pins[MAX_SHARED_MAP_PINS];
+    memset(next_pins, 0, sizeof(next_pins));
+    int next_count = 0;
+
+    cJSON *pin_item = NULL;
+    cJSON_ArrayForEach(pin_item, pins) {
+        if (!cJSON_IsObject(pin_item) || next_count >= MAX_SHARED_MAP_PINS) continue;
+
+        cJSON *lat_item = cJSON_GetObjectItem(pin_item, "lat");
+        cJSON *lon_item = cJSON_GetObjectItem(pin_item, "lon");
+        if (!cJSON_IsNumber(lat_item) || !cJSON_IsNumber(lon_item)) continue;
+
+        double lat = lat_item->valuedouble;
+        double lon = lon_item->valuedouble;
+        if (!isfinite(lat) || !isfinite(lon)) continue;
+
+        map_pin_t *pin = &next_pins[next_count++];
+        memset(pin, 0, sizeof(*pin));
+        pin->lat = lat;
+        pin->lon = lon;
+        pin->kind = map_pin_kind_from_json(cJSON_GetObjectItem(pin_item, "kind"));
+        pin->rssi = -85;
+
+        cJSON *mac_item = cJSON_GetObjectItem(pin_item, "mac");
+        if (cJSON_IsString(mac_item) && mac_item->valuestring) {
+            mac_from_str(mac_item->valuestring, pin->mac);
+        }
+
+        cJSON *label_item = cJSON_GetObjectItem(pin_item, "label");
+        if (cJSON_IsString(label_item) && label_item->valuestring) {
+            strncpy(pin->label, label_item->valuestring, sizeof(pin->label) - 1);
+        }
+
+        cJSON *radius_item = cJSON_GetObjectItem(pin_item, "radiusM");
+        if (cJSON_IsNumber(radius_item) && isfinite(radius_item->valuedouble)) {
+            pin->radius_m = (float)radius_item->valuedouble;
+        }
+
+        cJSON *rssi_item = cJSON_GetObjectItem(pin_item, "rssi");
+        if (cJSON_IsNumber(rssi_item)) {
+            pin->rssi = (int8_t)rssi_item->valueint;
+        }
+    }
+
+    memset(g_app.shared_map_pins, 0, sizeof(g_app.shared_map_pins));
+    if (next_count > 0) {
+        memcpy(g_app.shared_map_pins, next_pins, (size_t)next_count * sizeof(next_pins[0]));
+    }
+    g_app.shared_map_pin_count = (uint8_t)next_count;
+    g_app.ui_refresh_token++;
+
+    cJSON_Delete(root);
+
+    char resp[48];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"count\":%d}", next_count);
+    httpd_resp_set_type(req, "application/json");
+    set_security_headers(req);
+    return httpd_resp_sendstr(req, resp);
 }
 
 /* ── JSON helper: escape a C string for safe JSON embedding ── */
@@ -803,7 +915,7 @@ static esp_err_t get_fox_registry(httpd_req_t *req)
     set_security_headers(req);
     httpd_resp_sendstr_chunk(req, "[");
 
-    char buf[640];
+    char buf[720];
     for (int i = 0; i < g_app.fox_registry_count; i++) {
         fox_reg_entry_t *e = &g_app.fox_registry[i];
         char ms[18];
@@ -820,16 +932,25 @@ static esp_err_t get_fox_registry(httpd_req_t *req)
         fox_registry_live_info_t li;
         fox_registry_live_info_for_mac(e->mac, &li);
         int age = li.source[0] ? (int)li.age_sec : -1;
+        bool has_pin = (e->pinned_lat != 0.0 || e->pinned_lon != 0.0);
 
-        snprintf(buf, sizeof(buf),
+        int n = snprintf(buf, sizeof(buf),
             "%s{\"mac\":\"%s\",\"label\":\"%s\",\"originalName\":\"%s\","
             "\"nickname\":\"%s\",\"notes\":\"%s\",\"section\":\"%s\","
             "\"online\":%s,\"lastSeenAgeSec\":%d,"
-            "\"liveRssi\":%d,\"liveHits\":%u,\"lastSeenSource\":\"%s\"}",
+            "\"liveRssi\":%d,\"liveHits\":%u,\"lastSeenSource\":\"%s\"",
             i ? "," : "",
             ms, sl, so, snk, snt, ss,
             li.online ? "true" : "false", age,
             (int)li.rssi, (unsigned)li.hits, li.source);
+        if (has_pin && n > 0 && n < (int)sizeof(buf) - 1) {
+            n += snprintf(buf + n, sizeof(buf) - n,
+                ",\"pinnedLat\":%.6f,\"pinnedLon\":%.6f,\"pinnedRadiusM\":%.1f",
+                e->pinned_lat, e->pinned_lon, (double)e->pinned_radius_m);
+        }
+        if (n > 0 && n < (int)sizeof(buf) - 1) {
+            buf[n] = '}'; buf[n + 1] = '\0';
+        }
         httpd_resp_sendstr_chunk(req, buf);
     }
 
@@ -952,6 +1073,24 @@ static esp_err_t post_fox_registry_update(httpd_req_t *req)
     if (name_item && cJSON_IsString(name_item)) original_name = name_item->valuestring;
 
     int rc = fox_hunter_registry_update(idx, nickname, notes, section, label, original_name);
+
+    /* Update pinned GPS location if provided */
+    cJSON *lat_item = cJSON_GetObjectItem(root, "lat");
+    cJSON *lon_item = cJSON_GetObjectItem(root, "lon");
+    if (lat_item && lon_item && cJSON_IsNumber(lat_item) && cJSON_IsNumber(lon_item)) {
+        double lat = lat_item->valuedouble;
+        double lon = lon_item->valuedouble;
+        float radius_m = 30.0f;
+        cJSON *rad_item = cJSON_GetObjectItem(root, "radiusM");
+        if (rad_item && cJSON_IsNumber(rad_item)) radius_m = (float)rad_item->valuedouble;
+        fox_hunter_registry_set_gps(idx, lat, lon, radius_m);
+    }
+    /* Allow clearing pinned GPS */
+    cJSON *clear_pin = cJSON_GetObjectItem(root, "clearPin");
+    if (clear_pin && cJSON_IsTrue(clear_pin)) {
+        fox_hunter_registry_set_gps(idx, 0.0, 0.0, 0.0f);
+    }
+
     cJSON_Delete(root);
 
     if (rc < 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
@@ -1448,79 +1587,93 @@ static esp_err_t post_sky_track(httpd_req_t *req)
 }
 
 /* ── Register routes and start server ── */
+static void register_route(httpd_handle_t srv, const httpd_uri_t *uri)
+{
+    if (!srv || !uri) return;
+
+    esp_err_t err = httpd_register_uri_handler(srv, uri);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to register route %s [%d]: %s",
+                 uri->uri ? uri->uri : "<null>", (int)uri->method, esp_err_to_name(err));
+    }
+}
+
 static void web_register_routes(httpd_handle_t srv)
 {
     /* Static page */
     httpd_uri_t uri_index = { .uri="/", .method=HTTP_GET, .handler=get_index };
-    httpd_register_uri_handler(srv, &uri_index);
+    register_route(srv, &uri_index);
 
     /* API endpoints */
     httpd_uri_t uri_state = { .uri="/api/state", .method=HTTP_GET, .handler=get_state };
-    httpd_register_uri_handler(srv, &uri_state);
+    register_route(srv, &uri_state);
 
     httpd_uri_t uri_devices = { .uri="/api/devices", .method=HTTP_GET, .handler=get_devices };
-    httpd_register_uri_handler(srv, &uri_devices);
+    register_route(srv, &uri_devices);
 
     httpd_uri_t uri_drones = { .uri="/api/drones", .method=HTTP_GET, .handler=get_drones };
-    httpd_register_uri_handler(srv, &uri_drones);
+    register_route(srv, &uri_drones);
 
     httpd_uri_t uri_logs = { .uri="/api/logs", .method=HTTP_GET, .handler=get_logs };
-    httpd_register_uri_handler(srv, &uri_logs);
+    register_route(srv, &uri_logs);
 
     httpd_uri_t uri_logs_manage = { .uri="/api/logs/manage", .method=HTTP_POST, .handler=post_logs_manage };
-    httpd_register_uri_handler(srv, &uri_logs_manage);
+    register_route(srv, &uri_logs_manage);
 
     httpd_uri_t uri_map_status = { .uri="/api/map/status", .method=HTTP_GET, .handler=get_map_status };
-    httpd_register_uri_handler(srv, &uri_map_status);
+    register_route(srv, &uri_map_status);
 
     httpd_uri_t uri_map_tile = { .uri="/api/map/tile", .method=HTTP_GET, .handler=get_map_tile };
-    httpd_register_uri_handler(srv, &uri_map_tile);
+    register_route(srv, &uri_map_tile);
+
+    httpd_uri_t uri_map_pins = { .uri="/api/map/pins", .method=HTTP_POST, .handler=post_map_pins };
+    register_route(srv, &uri_map_pins);
 
     httpd_uri_t uri_mode = { .uri="/api/mode", .method=HTTP_POST, .handler=post_mode };
-    httpd_register_uri_handler(srv, &uri_mode);
+    register_route(srv, &uri_mode);
 
     httpd_uri_t uri_gps_status = { .uri="/api/gps/status", .method=HTTP_POST, .handler=post_gps_status };
-    httpd_register_uri_handler(srv, &uri_gps_status);
+    register_route(srv, &uri_gps_status);
 
     httpd_uri_t uri_target_gps = { .uri="/api/target/gps", .method=HTTP_POST, .handler=post_target_gps };
-    httpd_register_uri_handler(srv, &uri_target_gps);
+    register_route(srv, &uri_target_gps);
 
     httpd_uri_t uri_sky_track = { .uri="/api/sky/track", .method=HTTP_POST, .handler=post_sky_track };
-    httpd_register_uri_handler(srv, &uri_sky_track);
+    register_route(srv, &uri_sky_track);
 
     httpd_uri_t uri_fox = { .uri="/api/fox/target", .method=HTTP_POST, .handler=post_fox_target };
-    httpd_register_uri_handler(srv, &uri_fox);
+    register_route(srv, &uri_fox);
 
     httpd_uri_t uri_fox_led = { .uri="/api/fox/ledmode", .method=HTTP_POST, .handler=post_fox_ledmode };
-    httpd_register_uri_handler(srv, &uri_fox_led);
+    register_route(srv, &uri_fox_led);
 
     httpd_uri_t uri_fox_reg_get = { .uri="/api/fox/registry", .method=HTTP_GET, .handler=get_fox_registry };
-    httpd_register_uri_handler(srv, &uri_fox_reg_get);
+    register_route(srv, &uri_fox_reg_get);
 
     httpd_uri_t uri_fox_reg_post = { .uri="/api/fox/registry", .method=HTTP_POST, .handler=post_fox_registry };
-    httpd_register_uri_handler(srv, &uri_fox_reg_post);
+    register_route(srv, &uri_fox_reg_post);
 
     httpd_uri_t uri_fox_reg_del = { .uri="/api/fox/registry", .method=HTTP_DELETE, .handler=delete_fox_registry };
-    httpd_register_uri_handler(srv, &uri_fox_reg_del);
+    register_route(srv, &uri_fox_reg_del);
 
     httpd_uri_t uri_fox_reg_update = { .uri="/api/fox/registry/update", .method=HTTP_POST, .handler=post_fox_registry_update };
-    httpd_register_uri_handler(srv, &uri_fox_reg_update);
+    register_route(srv, &uri_fox_reg_update);
 
     httpd_uri_t uri_settings = { .uri="/api/settings", .method=HTTP_POST, .handler=post_settings };
-    httpd_register_uri_handler(srv, &uri_settings);
+    register_route(srv, &uri_settings);
 
     httpd_uri_t uri_csv = { .uri="/api/export/csv", .method=HTTP_GET, .handler=get_export_csv };
-    httpd_register_uri_handler(srv, &uri_csv);
+    register_route(srv, &uri_csv);
 
     httpd_uri_t uri_fox_nearby = { .uri="/api/fox/nearby", .method=HTTP_GET, .handler=get_fox_nearby };
-    httpd_register_uri_handler(srv, &uri_fox_nearby);
+    register_route(srv, &uri_fox_nearby);
 
     /* WebSocket */
     httpd_uri_t uri_ws = {
         .uri="/ws", .method=HTTP_GET, .handler=ws_handler,
         .is_websocket=true, .handle_ws_control_frames=true,
     };
-    httpd_register_uri_handler(srv, &uri_ws);
+    register_route(srv, &uri_ws);
 }
 
 void web_server_start(void)
@@ -1528,7 +1681,7 @@ void web_server_start(void)
     bool started = false;
 
     httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
-    ssl_config.httpd.max_uri_handlers = 20;
+    ssl_config.httpd.max_uri_handlers = WEB_MAX_URI_HANDLERS;
     ssl_config.httpd.stack_size = 6144;
     ssl_config.httpd.max_open_sockets = 2;
     ssl_config.httpd.lru_purge_enable = true;
@@ -1548,7 +1701,7 @@ void web_server_start(void)
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = WEB_MAX_URI_HANDLERS;
     config.stack_size       = 6144;
     config.max_open_sockets = 3;
     config.lru_purge_enable = true;

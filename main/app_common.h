@@ -192,6 +192,9 @@ typedef struct {
     char     nickname[FOX_REG_NICK_LEN];
     char     notes[FOX_REG_NOTES_LEN];
     char     section[FOX_REG_SECTION_LEN]; /* auto|wifi|flock|drone|ble|known */
+    double   pinned_lat;                   /* 0 = no pin saved */
+    double   pinned_lon;
+    float    pinned_radius_m;
 } fox_reg_entry_t;
 
 /* Alias: fox nearby list reuses ble_device_t storage */
@@ -201,6 +204,7 @@ typedef enum {
     MAP_PIN_KIND_FLOCK = 0,
     MAP_PIN_KIND_FOX,
     MAP_PIN_KIND_DRONE,
+    MAP_PIN_KIND_SELF,
 } map_pin_kind_t;
 
 typedef struct {

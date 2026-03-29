@@ -373,6 +373,9 @@ static void flock_display_task(void *arg)
     int last_gps_active = -1;
     int last_logging_active = -1;
     int last_logging_blocked = -1;
+    int last_map_open = -1;
+    bool was_map_open = false;
+    uint32_t last_refresh_token = 0;
 
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         uint32_t now_ms = uptime_ms();
@@ -386,7 +389,9 @@ static void flock_display_task(void *arg)
                    || (g_app.wifi_clients != last_wifi_clients)
                    || ((int)gps_tag_active != last_gps_active)
                    || ((int)logging_active != last_logging_active)
-                   || ((int)logging_blocked != last_logging_blocked);
+                   || ((int)logging_blocked != last_logging_blocked)
+                   || ((int)g_app.local_map_open != last_map_open)
+                   || (g_app.ui_refresh_token != last_refresh_token);
 
         if (!dirty) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -399,6 +404,22 @@ static void flock_display_task(void *arg)
         last_gps_active = (int)gps_tag_active;
         last_logging_active = (int)logging_active;
         last_logging_blocked = (int)logging_blocked;
+        last_map_open = (int)g_app.local_map_open;
+        last_refresh_token = g_app.ui_refresh_token;
+
+        /* When local map is open, render the shared map view instead */
+        if (g_app.local_map_open) {
+            display_draw_shared_map_view(MODE_FLOCK_YOU);
+            was_map_open = true;
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+        /* Full clear when returning from map view to flush leftover tile pixels */
+        if (was_map_open) {
+            display_fill(rgb565(9, 9, 11));
+            was_map_open = false;
+        }
 
         /* Dark zinc base with vivid red accent */
         uint16_t bg = rgb565(9, 9, 11);
