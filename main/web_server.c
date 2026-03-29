@@ -36,9 +36,8 @@
 static const char *TAG = "websrv";
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
-#define GPS_READY_TIMEOUT_MS 8000
-#define LOG_RECENT_LIMIT 16
-#define LOG_LINE_MAX 224
+#define GPS_READY_TIMEOUT_MS 20000
+#define LOG_RECENT_LIMIT 32
 
 /* Embedded index.html */
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -48,30 +47,24 @@ extern const uint8_t servercert_pem_end[]   asm("_binary_servercert_pem_end");
 extern const uint8_t prvtkey_pem_start[]    asm("_binary_prvtkey_pem_start");
 extern const uint8_t prvtkey_pem_end[]      asm("_binary_prvtkey_pem_end");
 
-typedef struct {
-    uint32_t ts;
-    char source[16];
-    char kind[24];
-    char message[LOG_LINE_MAX];
-} log_entry_t;
-
-static const char *EVENT_LOG_PATH = "/sdcard/ouispy_logs/events.log";
-static const char *IDENTITY_LOG_PATH = "/sdcard/ouispy_logs/identity.log";
-
 static const char *logging_status_label(void)
 {
-    if (storage_ext_logging_active()) return "Active";
-    if (storage_ext_logging_blocked()) return "Waiting for microSD";
-    return "Off";
+    if (storage_ext_logging_active()) return "SD + RAM";
+    if (storage_ext_logging_blocked()) return "RAM only (SD waiting)";
+    return "RAM only";
 }
 
-static int log_entry_cmp_desc(const void *lhs, const void *rhs)
+static const char *log_bucket_name(storage_log_bucket_t bucket)
 {
-    const log_entry_t *a = (const log_entry_t *)lhs;
-    const log_entry_t *b = (const log_entry_t *)rhs;
-    if (a->ts < b->ts) return 1;
-    if (a->ts > b->ts) return -1;
-    return strcmp(a->source, b->source);
+    switch (bucket) {
+    case STORAGE_LOG_BUCKET_IDENTITY:
+        return "identity";
+    case STORAGE_LOG_BUCKET_DIAGNOSTICS:
+        return "diagnostics";
+    case STORAGE_LOG_BUCKET_EVENTS:
+    default:
+        return "events";
+    }
 }
 
 static float clampf(float v, float lo, float hi)
@@ -159,120 +152,54 @@ static void update_sky_fused_pin(double sample_lat, double sample_lon, int rssi)
     g_app.sky_tracked_radius_m = clampf((g_app.sky_tracked_radius_m * 0.72f) + (instant_radius * 0.28f), 40.0f, 500.0f);
 }
 
-static int read_recent_log_file(const char *path, const char *source, log_entry_t *entries, int max_entries)
-{
-    if (!path || !source || !entries || max_entries <= 0) return 0;
-
-    FILE *f = fopen(path, "r");
-    if (!f) return 0;
-
-    size_t line_buf_sz = (size_t)(LOG_LINE_MAX + 48);
-    char (*lines)[LOG_LINE_MAX + 48] = calloc((size_t)max_entries, line_buf_sz);
-    if (!lines) { fclose(f); return 0; }
-
-    int total = 0;
-    char line[LOG_LINE_MAX + 48];
-    while (fgets(line, (int)sizeof(line), f)) {
-        snprintf(lines[total % max_entries], line_buf_sz, "%s", line);
-        total++;
-    }
-    fclose(f);
-
-    int count = (total < max_entries) ? total : max_entries;
-    int start = (total > max_entries) ? (total - max_entries) : 0;
-    int parsed = 0;
-
-    for (int i = 0; i < count; i++) {
-        int src_idx = (start + i) % max_entries;
-        char *cur = lines[src_idx];
-        char *newline = strchr(cur, '\n');
-        if (newline) *newline = '\0';
-
-        char *comma1 = strchr(cur, ',');
-        if (!comma1) continue;
-        *comma1 = '\0';
-        char *comma2 = strchr(comma1 + 1, ',');
-        if (!comma2) continue;
-        *comma2 = '\0';
-
-        char *ts = cur;
-        char *kind = comma1 + 1;
-        char *message = comma2 + 1;
-        if (!ts[0] || !kind[0] || !message[0]) continue;
-
-        log_entry_t *entry = &entries[parsed++];
-        memset(entry, 0, sizeof(*entry));
-        entry->ts = (uint32_t)strtoul(ts, NULL, 10);
-        snprintf(entry->source, sizeof(entry->source), "%s", source);
-        snprintf(entry->kind, sizeof(entry->kind), "%s", kind);
-        snprintf(entry->message, sizeof(entry->message), "%s", message);
-    }
-
-    free(lines);
-    return parsed;
-}
-
 static char *build_logs_json(void)
 {
-    log_entry_t *events   = calloc(LOG_RECENT_LIMIT, sizeof(log_entry_t));
-    log_entry_t *identity = calloc(LOG_RECENT_LIMIT, sizeof(log_entry_t));
-    log_entry_t *merged   = calloc(LOG_RECENT_LIMIT * 2, sizeof(log_entry_t));
-    if (!events || !identity || !merged) {
-        free(events); free(identity); free(merged);
+    storage_log_entry_t *recent = calloc(LOG_RECENT_LIMIT, sizeof(storage_log_entry_t));
+    if (!recent) {
         return NULL;
     }
-    int event_count = read_recent_log_file(EVENT_LOG_PATH, "events", events, LOG_RECENT_LIMIT);
-    int identity_count = read_recent_log_file(IDENTITY_LOG_PATH, "identity", identity, LOG_RECENT_LIMIT);
-    int merged_count = 0;
-
-    for (int i = 0; i < event_count; i++) merged[merged_count++] = events[i];
-    for (int i = 0; i < identity_count; i++) merged[merged_count++] = identity[i];
-    if (merged_count > 1) {
-        qsort(merged, (size_t)merged_count, sizeof(merged[0]), log_entry_cmp_desc);
-    }
+    int recent_count = storage_ext_get_recent_entries(recent, LOG_RECENT_LIMIT);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "loggingEnabled", g_app.use_microsd_logs);
     cJSON_AddBoolToObject(root, "loggingActive", storage_ext_logging_active());
     cJSON_AddBoolToObject(root, "loggingBlocked", storage_ext_logging_blocked());
+    cJSON_AddBoolToObject(root, "advancedLoggingEnabled", g_app.advanced_logging_enabled);
+    cJSON_AddBoolToObject(root, "gpsDiagnosticsEnabled", g_app.gps_diagnostics_enabled);
+    cJSON_AddBoolToObject(root, "webDiagnosticsEnabled", g_app.web_diagnostics_enabled);
+    cJSON_AddNumberToObject(root, "serialLogVerbosity", g_app.serial_log_verbosity);
     cJSON_AddStringToObject(root, "status", logging_status_label());
     cJSON_AddStringToObject(root, "microsdStatus", storage_ext_status_str(storage_ext_get_status()));
 
     cJSON *all_arr = cJSON_AddArrayToObject(root, "all");
-    for (int i = 0; i < merged_count; i++) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddNumberToObject(item, "ts", merged[i].ts);
-        cJSON_AddStringToObject(item, "source", merged[i].source);
-        cJSON_AddStringToObject(item, "kind", merged[i].kind);
-        cJSON_AddStringToObject(item, "message", merged[i].message);
-        cJSON_AddItemToArray(all_arr, item);
-    }
-
     cJSON *events_arr = cJSON_AddArrayToObject(root, "events");
-    for (int i = 0; i < event_count; i++) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddNumberToObject(item, "ts", events[i].ts);
-        cJSON_AddStringToObject(item, "source", events[i].source);
-        cJSON_AddStringToObject(item, "kind", events[i].kind);
-        cJSON_AddStringToObject(item, "message", events[i].message);
-        cJSON_AddItemToArray(events_arr, item);
-    }
-
     cJSON *identity_arr = cJSON_AddArrayToObject(root, "identity");
-    for (int i = 0; i < identity_count; i++) {
+    cJSON *diag_arr = cJSON_AddArrayToObject(root, "diagnostics");
+    for (int i = 0; i < recent_count; i++) {
+        const char *source = log_bucket_name(recent[i].bucket);
         cJSON *item = cJSON_CreateObject();
-        cJSON_AddNumberToObject(item, "ts", identity[i].ts);
-        cJSON_AddStringToObject(item, "source", identity[i].source);
-        cJSON_AddStringToObject(item, "kind", identity[i].kind);
-        cJSON_AddStringToObject(item, "message", identity[i].message);
-        cJSON_AddItemToArray(identity_arr, item);
+        cJSON_AddNumberToObject(item, "ts", recent[i].ts);
+        cJSON_AddStringToObject(item, "source", source);
+        cJSON_AddStringToObject(item, "kind", recent[i].kind);
+        cJSON_AddStringToObject(item, "message", recent[i].message);
+        cJSON_AddItemToArray(all_arr, item);
+        switch (recent[i].bucket) {
+        case STORAGE_LOG_BUCKET_IDENTITY:
+            cJSON_AddItemToArray(identity_arr, cJSON_Duplicate(item, 1));
+            break;
+        case STORAGE_LOG_BUCKET_DIAGNOSTICS:
+            cJSON_AddItemToArray(diag_arr, cJSON_Duplicate(item, 1));
+            break;
+        case STORAGE_LOG_BUCKET_EVENTS:
+        default:
+            cJSON_AddItemToArray(events_arr, cJSON_Duplicate(item, 1));
+            break;
+        }
     }
 
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    free(events);
-    free(identity);
-    free(merged);
+    free(recent);
     return json;
 }
 
@@ -349,7 +276,7 @@ static char *build_state_json(void)
         "\"displaySleepSec\":%u,\"menuLedColor\":%u,"
         "\"soundProfileFlock\":%u,\"soundProfileFox\":%u,\"soundProfileSky\":%u,"
         "\"shortcutModeBtn\":%u,\"shortcutActionBtn\":%u,\"shortcutBackBtn\":%u,"
-        "\"useMicrosdLogs\":%s,\"loggingActive\":%s,\"loggingBlocked\":%s,"
+        "\"useMicrosdLogs\":%s,\"advancedLoggingEnabled\":%s,\"gpsDiagnosticsEnabled\":%s,\"webDiagnosticsEnabled\":%s,\"serialLogVerbosity\":%u,\"loggingActive\":%s,\"loggingBlocked\":%s,"
         "\"loggingStatus\":\"%s\",\"gpsTagging\":%s,"
         "\"gpsClientReady\":%s,\"gpsTagActive\":%s,"
         "\"microsdAvailable\":%s,\"microsdStatus\":\"%s\","
@@ -381,6 +308,10 @@ static char *build_state_json(void)
         (unsigned)g_app.shortcut_action_btn,
         (unsigned)g_app.shortcut_back_btn,
         g_app.use_microsd_logs ? "true" : "false",
+        g_app.advanced_logging_enabled ? "true" : "false",
+        g_app.gps_diagnostics_enabled ? "true" : "false",
+        g_app.web_diagnostics_enabled ? "true" : "false",
+        (unsigned)g_app.serial_log_verbosity,
         storage_ext_logging_active() ? "true" : "false",
         storage_ext_logging_blocked() ? "true" : "false",
         logging_status_label(),
@@ -908,8 +839,17 @@ static esp_err_t post_gps_status(httpd_req_t *req)
     cJSON *ready = cJSON_GetObjectItem(root, "ready");
     if (ready) {
         bool is_ready = cJSON_IsTrue(ready);
+        bool changed = (g_app.gps_client_ready != is_ready);
         g_app.gps_client_ready = is_ready;
         g_app.gps_client_ready_ms = is_ready ? uptime_ms() : 0;
+        if (changed && g_app.gps_diagnostics_enabled) {
+            char log_msg[96];
+            snprintf(log_msg, sizeof(log_msg), "gps_client_ready=%s clients=%u secure_window_ms=%u",
+                     is_ready ? "true" : "false",
+                     (unsigned)g_app.wifi_clients,
+                     (unsigned)GPS_READY_TIMEOUT_MS);
+            storage_ext_append_diagnostic("gps", log_msg);
+        }
     }
 
     cJSON_Delete(root);
@@ -1011,6 +951,23 @@ static esp_err_t post_settings(httpd_req_t *req)
     cJSON *sd_logs = cJSON_GetObjectItem(root, "useMicrosdLogs");
     if (sd_logs) g_app.use_microsd_logs = cJSON_IsTrue(sd_logs);
 
+    cJSON *adv_logs = cJSON_GetObjectItem(root, "advancedLoggingEnabled");
+    if (adv_logs) g_app.advanced_logging_enabled = cJSON_IsTrue(adv_logs);
+
+    cJSON *gps_diag = cJSON_GetObjectItem(root, "gpsDiagnosticsEnabled");
+    if (gps_diag) g_app.gps_diagnostics_enabled = cJSON_IsTrue(gps_diag);
+
+    cJSON *web_diag = cJSON_GetObjectItem(root, "webDiagnosticsEnabled");
+    if (web_diag) g_app.web_diagnostics_enabled = cJSON_IsTrue(web_diag);
+
+    cJSON *serial_log = cJSON_GetObjectItem(root, "serialLogVerbosity");
+    if (serial_log && cJSON_IsNumber(serial_log)) {
+        int val = serial_log->valueint;
+        if (val < 0) val = 0;
+        if (val >= SERIAL_LOG_COUNT) val = SERIAL_LOG_COUNT - 1;
+        g_app.serial_log_verbosity = (uint8_t)val;
+    }
+
     cJSON *gps_tagging = cJSON_GetObjectItem(root, "gpsTagging");
     if (gps_tagging) {
         g_app.gps_tagging_enabled = cJSON_IsTrue(gps_tagging);
@@ -1019,6 +976,8 @@ static esp_err_t post_settings(httpd_req_t *req)
             g_app.gps_client_ready_ms = 0;
         }
     }
+
+    app_apply_runtime_logging_prefs();
 
     if (old_ap_broadcast != g_app.ap_broadcast_enabled ||
         old_single_ap_name != g_app.single_ap_name_enabled) {
@@ -1032,6 +991,18 @@ static esp_err_t post_settings(httpd_req_t *req)
     }
 
     nvs_store_save_prefs();
+    if (g_app.advanced_logging_enabled) {
+        char log_msg[160];
+        snprintf(log_msg, sizeof(log_msg),
+                 "settings_updated sd=%s adv=%s gpsdiag=%s webdiag=%s serial=%u gps=%s",
+                 g_app.use_microsd_logs ? "on" : "off",
+                 g_app.advanced_logging_enabled ? "on" : "off",
+                 g_app.gps_diagnostics_enabled ? "on" : "off",
+                 g_app.web_diagnostics_enabled ? "on" : "off",
+                 (unsigned)g_app.serial_log_verbosity,
+                 g_app.gps_tagging_enabled ? "on" : "off");
+        storage_ext_append_diagnostic("system", log_msg);
+    }
     cJSON_Delete(root);
     httpd_resp_sendstr(req, "{\"ok\":true}");
     return ESP_OK;
@@ -1070,6 +1041,11 @@ static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
         ESP_LOGI(TAG, "WS handshake fd=%d", httpd_req_to_sockfd(req));
+        if (g_app.web_diagnostics_enabled) {
+            char log_msg[64];
+            snprintf(log_msg, sizeof(log_msg), "ws_handshake fd=%d", httpd_req_to_sockfd(req));
+            storage_ext_append_diagnostic("web", log_msg);
+        }
         return ESP_OK;
     }
 
@@ -1105,6 +1081,12 @@ static esp_err_t ws_handler(httpd_req_t *req)
         .len = strlen(json),
     };
     ret = httpd_ws_send_frame(req, &resp);
+    if (ret != ESP_OK && g_app.web_diagnostics_enabled) {
+        char log_msg[96];
+        snprintf(log_msg, sizeof(log_msg), "ws_send_failed fd=%d err=%s",
+                 httpd_req_to_sockfd(req), esp_err_to_name(ret));
+        storage_ext_append_diagnostic("web", log_msg);
+    }
     if (payload) free(payload);
     free(json);
     return ret;
@@ -1128,6 +1110,12 @@ static void broadcast_on_server(httpd_handle_t server, const char *json)
                 esp_err_t send_err = httpd_ws_send_data(server, fds[i], &pkt);
                 if (send_err != ESP_OK) {
                     ESP_LOGW(TAG, "WS send failed fd=%d err=%s", fds[i], esp_err_to_name(send_err));
+                    if (g_app.web_diagnostics_enabled) {
+                        char log_msg[96];
+                        snprintf(log_msg, sizeof(log_msg), "ws_broadcast_failed fd=%d err=%s",
+                                 fds[i], esp_err_to_name(send_err));
+                        storage_ext_append_diagnostic("web", log_msg);
+                    }
                 }
             }
         }

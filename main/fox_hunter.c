@@ -40,7 +40,7 @@ static TaskHandle_t s_beep_task = NULL;
 #define FOX_FOLLOWING_RECENT_MS    12000
 #define FOX_FOLLOWING_MIN_SEEN_MS  20000
 #define FOX_DETECTED_RECENT_MS     30000
-#define FOX_GPS_READY_TIMEOUT_MS    8000
+#define FOX_GPS_READY_TIMEOUT_MS    20000
 
 typedef struct {
     int nearby_count;
@@ -50,6 +50,31 @@ typedef struct {
     ble_device_t following[FOX_FOLLOWING_SECTION_MAX];
     ble_device_t detected[FOX_DETECTED_SECTION_MAX];
 } fox_candidate_snapshot_t;
+
+static void fox_log_identity_event(const char *event,
+                                   const uint8_t mac[6],
+                                   const char *label,
+                                   const char *extra)
+{
+    char mac_str[18] = "none";
+    char msg[192];
+
+    if (mac) {
+        mac_to_str(mac, mac_str, sizeof(mac_str));
+    }
+
+    if (label && label[0] && extra && extra[0]) {
+        snprintf(msg, sizeof(msg), "%s mac=%s label=%s %s", event, mac_str, label, extra);
+    } else if (label && label[0]) {
+        snprintf(msg, sizeof(msg), "%s mac=%s label=%s", event, mac_str, label);
+    } else if (extra && extra[0]) {
+        snprintf(msg, sizeof(msg), "%s mac=%s %s", event, mac_str, extra);
+    } else {
+        snprintf(msg, sizeof(msg), "%s mac=%s", event, mac_str);
+    }
+
+    storage_ext_append_identity("fox", msg);
+}
 
 static inline bool fox_gps_tag_active(uint32_t now_ms)
 {
@@ -526,6 +551,8 @@ static void fox_beep_task(void *arg)
     int last_gps_active = -1;
     int last_logging_active = -1;
     int last_logging_blocked = -1;
+    int last_show_lost_screen = -1;
+    uint32_t last_ui_refresh_token = UINT32_MAX;
     char last_target_header[DEVICE_NAME_LEN] = {0};
     int last_reg_cursor = -1;
     int last_reg_count = -1;
@@ -547,16 +574,23 @@ static void fox_beep_task(void *arg)
 
         int8_t live_rssi = target_visible ? g_app.fox_rssi : -128;
 
+        bool view_switched = (g_app.fox_registry_open != last_registry_open);
+        bool target_state_switched = (g_app.fox_target_set != last_target_set)
+                     || (target_visible != last_target_visible)
+                     || (((int)show_lost_screen) != last_show_lost_screen);
+
         bool dirty = !display_drawn
                    || (g_app.fox_target_set != last_target_set)
                    || (target_visible != last_target_visible)
                    || (live_rssi != last_rssi)
                    || (g_app.fox_led_mode != last_led_mode)
                    || (g_app.wifi_clients != last_wifi_clients)
-                   || (g_app.fox_registry_open != last_registry_open)
+               || view_switched
                    || ((int)gps_tag_active != last_gps_active)
                    || ((int)logging_active != last_logging_active)
                    || ((int)logging_blocked != last_logging_blocked)
+                   || ((int)show_lost_screen != last_show_lost_screen)
+                   || (g_app.ui_refresh_token != last_ui_refresh_token)
                    || (strcmp(target_header, last_target_header) != 0)
                    || (g_app.fox_registry_open && (g_app.ui_cursor != last_reg_cursor
                        || g_app.fox_registry_count != last_reg_count
@@ -564,6 +598,7 @@ static void fox_beep_task(void *arg)
 
         /* ── Display: only redraw when visual state changed ── */
         if (dirty) {
+            bool full_redraw = !display_drawn || view_switched || target_state_switched;
             last_target_set = g_app.fox_target_set;
             last_target_visible = target_visible;
             last_rssi = live_rssi;
@@ -573,6 +608,8 @@ static void fox_beep_task(void *arg)
             last_gps_active = (int)gps_tag_active;
             last_logging_active = (int)logging_active;
             last_logging_blocked = (int)logging_blocked;
+            last_show_lost_screen = (int)show_lost_screen;
+            last_ui_refresh_token = g_app.ui_refresh_token;
             snprintf(last_target_header, sizeof(last_target_header), "%s", target_header);
             last_reg_cursor = g_app.ui_cursor;
             last_reg_count = g_app.fox_registry_count;
@@ -593,6 +630,10 @@ static void fox_beep_task(void *arg)
             const char *ap_ssid = NULL;
             const char *ap_pass = NULL;
             app_mode_ap_credentials(MODE_FOX_HUNTER, &ap_ssid, &ap_pass, NULL);
+
+            if (full_redraw) {
+                display_fill(bg);
+            }
 
             /* Status bar */
             display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, dim_accent);
@@ -980,6 +1021,7 @@ void fox_hunter_start(void)
         char mac_str[18];
         mac_to_str(g_app.fox_target_mac, mac_str, sizeof(mac_str));
         ESP_LOGI(TAG, "Loaded target: %s", mac_str);
+        fox_log_identity_event("target_loaded", g_app.fox_target_mac, NULL, "source=nvs");
     }
 
     /* Balanced scan: good responsiveness while preserving WiFi coexistence */
@@ -1007,11 +1049,13 @@ void fox_hunter_set_target(const uint8_t mac[6])
     g_app.fox_target_found = false;
     g_app.fox_rssi         = -100;
     g_app.fox_rssi_best    = -100;
+    g_app.ui_refresh_token++;
     nvs_store_save_fox_target(mac);
 
     char mac_str[18];
     mac_to_str(mac, mac_str, sizeof(mac_str));
     ESP_LOGI(TAG, "Target set: %s", mac_str);
+    fox_log_identity_event("target_set", mac, NULL, "source=fox_hunter");
 }
 
 void fox_hunter_set_target_from_flock(int device_index)
@@ -1022,6 +1066,12 @@ void fox_hunter_set_target_from_flock(int device_index)
 
 void fox_hunter_clear_target(void)
 {
+    uint8_t prev_mac[6] = {0};
+    bool had_target = g_app.fox_target_set;
+    if (had_target) {
+        memcpy(prev_mac, g_app.fox_target_mac, sizeof(prev_mac));
+    }
+
     memset(g_app.fox_target_mac, 0, sizeof(g_app.fox_target_mac));
     g_app.fox_target_set = false;
     g_app.fox_target_found = false;
@@ -1031,8 +1081,12 @@ void fox_hunter_clear_target(void)
     g_app.fox_registry_open = false;
     g_app.ui_cursor = 0;
     g_app.ui_item_count = 0;
+    g_app.ui_refresh_token++;
     nvs_store_clear_fox_target();
     ESP_LOGI(TAG, "Target cleared");
+    if (had_target) {
+        fox_log_identity_event("target_cleared", prev_mac, NULL, "source=fox_hunter");
+    }
 }
 
 bool fox_hunter_has_target(void)
@@ -1069,7 +1123,15 @@ int fox_hunter_registry_add(const uint8_t mac[6], const char *label,
                 reg_copy_field(existing->section, sizeof(existing->section), section);
                 changed = true;
             }
-            if (changed) nvs_store_save_fox_registry();
+            if (changed) {
+                char extra[96];
+                snprintf(extra, sizeof(extra), "section=%s name=%s", existing->section,
+                         existing->original_name[0] ? existing->original_name : "unknown");
+                nvs_store_save_fox_registry();
+                fox_log_identity_event("registry_updated", existing->mac,
+                                       existing->label[0] ? existing->label : existing->nickname,
+                                       extra);
+            }
             return i; /* already exists */
         }
     }
@@ -1085,6 +1147,12 @@ int fox_hunter_registry_add(const uint8_t mac[6], const char *label,
     g_app.fox_registry_count++;
     nvs_store_save_fox_registry();
     ESP_LOGI(TAG, "Registry add [%d]: %s", g_app.fox_registry_count - 1, label ? label : "");
+    {
+        char extra[96];
+        snprintf(extra, sizeof(extra), "section=%s name=%s", e->section,
+                 e->original_name[0] ? e->original_name : "unknown");
+        fox_log_identity_event("registry_added", e->mac, e->label[0] ? e->label : label, extra);
+    }
     return g_app.fox_registry_count - 1;
 }
 
@@ -1107,18 +1175,39 @@ int fox_hunter_registry_update(int index, const char *nickname,
     }
 
     nvs_store_save_fox_registry();
+    {
+        char primary_label[FOX_REG_NICK_LEN + 1] = {0};
+        char extra[128];
+        snprintf(primary_label, sizeof(primary_label), "%s",
+                 e->nickname[0] ? e->nickname : (e->label[0] ? e->label : "saved_target"));
+        snprintf(extra, sizeof(extra), "section=%s name=%s",
+                 e->section,
+                 e->original_name[0] ? e->original_name : "unknown");
+        fox_log_identity_event("registry_updated", e->mac, primary_label, extra);
+    }
     return 0;
 }
 
 int fox_hunter_registry_remove(int index)
 {
     if (index < 0 || index >= g_app.fox_registry_count) return -1;
+    fox_reg_entry_t removed = g_app.fox_registry[index];
     if (index < g_app.fox_registry_count - 1) {
         memmove(&g_app.fox_registry[index], &g_app.fox_registry[index + 1],
                 (g_app.fox_registry_count - 1 - index) * sizeof(fox_reg_entry_t));
     }
     g_app.fox_registry_count--;
     nvs_store_save_fox_registry();
+    {
+        char primary_label[FOX_REG_NICK_LEN + 1] = {0};
+        char extra[128];
+        snprintf(primary_label, sizeof(primary_label), "%s",
+                 removed.nickname[0] ? removed.nickname : (removed.label[0] ? removed.label : "saved_target"));
+        snprintf(extra, sizeof(extra), "section=%s name=%s",
+                 removed.section[0] ? removed.section : "auto",
+                 removed.original_name[0] ? removed.original_name : "unknown");
+        fox_log_identity_event("registry_removed", removed.mac, primary_label, extra);
+    }
     return 0;
 }
 
@@ -1127,6 +1216,7 @@ void fox_hunter_registry_select(int index)
     if (index < 0 || index >= g_app.fox_registry_count) return;
     fox_hunter_set_target(g_app.fox_registry[index].mac);
     g_app.fox_registry_open = false;
+    g_app.ui_refresh_token++;
 }
 
 void fox_hunter_registry_select_view_index(int index)
@@ -1147,16 +1237,19 @@ void fox_hunter_registry_select_view_index(int index)
         if (local_index >= 0 && local_index < snap.nearby_count) {
             fox_hunter_set_target(snap.nearby[local_index].mac);
             g_app.fox_registry_open = false;
+            g_app.ui_refresh_token++;
         } else {
             int follow_index = local_index - snap.nearby_count;
             if (follow_index >= 0 && follow_index < snap.following_count) {
                 fox_hunter_set_target(snap.following[follow_index].mac);
                 g_app.fox_registry_open = false;
+                g_app.ui_refresh_token++;
             } else {
                 int detected_index = follow_index - snap.following_count;
                 if (detected_index >= 0 && detected_index < snap.detected_count) {
                     fox_hunter_set_target(snap.detected[detected_index].mac);
                     g_app.fox_registry_open = false;
+                    g_app.ui_refresh_token++;
                 }
             }
         }

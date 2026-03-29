@@ -273,6 +273,7 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 .log-source{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--border);text-transform:uppercase;letter-spacing:.6px}
 .log-source.identity{border-color:rgba(248,113,113,.45);color:var(--rose);background:rgba(248,113,113,.08)}
 .log-source.events{border-color:rgba(74,222,128,.45);color:var(--green);background:rgba(74,222,128,.08)}
+.log-source.diagnostics{border-color:rgba(56,189,248,.45);color:var(--cyan);background:rgba(56,189,248,.08)}
 .log-kind{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;color:var(--text)}
 .log-time{font-size:11px;color:var(--dim)}
 .log-msg{font-family:'SF Mono','Consolas','Courier New',monospace;font-size:11px;line-height:1.5;color:var(--dim);white-space:pre-wrap;word-break:break-word}
@@ -342,6 +343,10 @@ let gpsClientReady = false;
 let gpsReadyLastPushMs = 0;
 let gpsReadyLastSent = null;
 let gpsReadyPushInFlight = false;
+let gpsWatchId = null;
+let gpsWatchLastFixMs = 0;
+let gpsWatchStartMs = 0;
+let gpsWatchRestartTimer = null;
 let lastBrowserPosition = null;
 let flockMapVisible = false;
 let flockMapTapCount = 0;
@@ -451,40 +456,95 @@ function gpsSecureAvailable(caps) {
   return c.supported && c.secure;
 }
 
-
-async function computeGpsClientReady() {
+function computedGpsReady() {
   const caps = gpsCaps();
   if (!gpsToggleEnabled || !caps.supported || !caps.secure) return false;
-
-  // On Safari/iPhone, Permissions API may not support geolocation query.
-  // Use a real getCurrentPosition probe as the definitive check.
-  if (navigator.permissions && navigator.permissions.query) {
-    try {
-      const perm = await navigator.permissions.query({name:'geolocation'});
-      if (perm.state === 'denied') return false;
-      return true;
-    } catch (e) {
-      // Safari throws for geolocation query — fall through to probe
-    }
-  }
-
-  // Probe actual geolocation to detect permission (triggers prompt on first use)
-  try {
-    await new Promise((res, rej) => {
-      navigator.geolocation.getCurrentPosition(res, rej, {timeout:3000, maximumAge:60000});
-    });
-    return true;
-  } catch (e) {
-    // PERMISSION_DENIED = 1
-    if (e && e.code === 1) return false;
-    // Timeout or position unavailable — permission wasn't denied, just slow
-    return true;
-  }
+  const now = Date.now();
+  if (gpsWatchLastFixMs && (now - gpsWatchLastFixMs) <= 20000) return true;
+  if (gpsWatchId !== null && gpsWatchStartMs && (now - gpsWatchStartMs) <= 20000) return true;
+  return false;
 }
 
-async function pushGpsClientStatus(force) {
+function gpsWatcherLooksStale() {
+  const now = Date.now();
+  if (gpsWatchId === null) return false;
+  if (gpsWatchLastFixMs) return (now - gpsWatchLastFixMs) > 18000;
+  if (gpsWatchStartMs) return (now - gpsWatchStartMs) > 18000;
+  return false;
+}
+
+function scheduleGpsWatcherRestart(delayMs) {
+  if (gpsWatchRestartTimer) clearTimeout(gpsWatchRestartTimer);
+  gpsWatchRestartTimer = setTimeout(() => {
+    gpsWatchRestartTimer = null;
+    stopGpsWatcher();
+    startGpsWatcher();
+    syncGpsClientStatus(true);
+  }, Math.max(250, Number(delayMs || 0)));
+}
+
+function stopGpsWatcher() {
+  if (gpsWatchRestartTimer) {
+    clearTimeout(gpsWatchRestartTimer);
+    gpsWatchRestartTimer = null;
+  }
+  if (gpsWatchId !== null && navigator.geolocation) {
+    try { navigator.geolocation.clearWatch(gpsWatchId); } catch (e) {}
+  }
+  gpsWatchId = null;
+  gpsWatchStartMs = 0;
+  gpsWatchLastFixMs = 0;
+}
+
+function startGpsWatcher() {
+  const caps = gpsCaps();
+  if (!gpsToggleEnabled || !caps.supported || !caps.secure || !navigator.geolocation) {
+    stopGpsWatcher();
+    return;
+  }
+  if (gpsWatchId !== null) {
+    if (!gpsWatcherLooksStale()) return;
+    stopGpsWatcher();
+  }
+
+  gpsWatchStartMs = Date.now();
+  gpsWatchId = navigator.geolocation.watchPosition(pos => {
+    gpsWatchLastFixMs = Date.now();
+    lastBrowserPosition = {
+      lat: pos.coords.latitude,
+      lon: pos.coords.longitude,
+      ts: gpsWatchLastFixMs
+    };
+    syncGpsClientStatus(true);
+    renderGpsStatus();
+    renderGpsToggleBlock();
+    if (Number(state.mode) === 1) {
+      renderFlockMapPanel();
+      if (flockMapVisible) drawFlockMap();
+    }
+    if (Number(state.mode) === 3) renderSkyGpsWidgets();
+  }, err => {
+    if (err && err.code === 1) {
+      stopGpsWatcher();
+      syncGpsClientStatus(true);
+      renderGpsStatus();
+      renderGpsToggleBlock();
+      if (Number(state.mode) === 3) renderSkyGpsWidgets();
+      return;
+    }
+    if (gpsWatchLastFixMs && (Date.now() - gpsWatchLastFixMs) <= 20000) return;
+    scheduleGpsWatcherRestart(900);
+    syncGpsClientStatus(true);
+  }, {
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 2000
+  });
+}
+
+async function syncGpsClientStatus(force) {
   if (document.hidden && !force) return;
-  const ready = await computeGpsClientReady();
+  const ready = computedGpsReady();
   const changed = (gpsClientReady !== ready);
   gpsClientReady = ready;
 
@@ -498,13 +558,14 @@ async function pushGpsClientStatus(force) {
 
   const now = Date.now();
   const sendChanged = (gpsReadyLastSent !== ready);
-  const stale = (now - gpsReadyLastPushMs) > 30000;
+  const stale = (now - gpsReadyLastPushMs) > 12000;
   if (!force && !sendChanged && !stale) return;
   if (gpsReadyPushInFlight) return;
 
   gpsReadyPushInFlight = true;
-  await api('/api/gps/status', {ready: !!ready});
+  const ok = await apiPostOk('/api/gps/status', {ready: !!ready});
   gpsReadyPushInFlight = false;
+  if (!ok) return;
   gpsReadyLastSent = ready;
   gpsReadyLastPushMs = now;
 }
@@ -515,11 +576,12 @@ function gpsEffectiveEnabled() {
 function setGpsToggle(enabled) {
   const caps = gpsCaps();
   if (enabled && !gpsSecureAvailable(caps)) {
+    stopGpsWatcher();
     gpsToggleEnabled = false;
     saveGpsToggleEnabled();
     state.gpsTagging = false;
     api('/api/settings', {gpsTagging:false});
-    pushGpsClientStatus(true);
+    syncGpsClientStatus(true);
     if (!caps.supported) toast('GPS unavailable in this browser');
     else if (caps.iphone && !caps.secure) toast('iPhone GPS requires HTTPS');
     else toast('GPS requires HTTPS');
@@ -533,8 +595,10 @@ function setGpsToggle(enabled) {
   gpsToggleEnabled = !!enabled;
   saveGpsToggleEnabled();
   state.gpsTagging = gpsToggleEnabled;
+  if (gpsToggleEnabled) startGpsWatcher();
+  else stopGpsWatcher();
   api('/api/settings', {gpsTagging:gpsToggleEnabled});
-  pushGpsClientStatus(true);
+  syncGpsClientStatus(true);
   renderGpsStatus();
   renderGpsToggleBlock();
   if (Number(state.mode) === 1) renderDevList();
@@ -1168,7 +1232,8 @@ function wsConnect() {
     $('#wsDot').className = 'dot on';
     wsRetryMs = 1500;
     ws.send('hi');
-    pushGpsClientStatus(true);
+    startGpsWatcher();
+    syncGpsClientStatus(true);
   };
   ws.onclose = () => {
     wsConnectInFlight = false;
@@ -1282,6 +1347,12 @@ function loggingChipClass() {
 
 function loggingStatusText() {
   return state.loggingStatus || (state.loggingActive ? 'Active' : (state.loggingBlocked ? 'Waiting for microSD' : 'Off'));
+}
+
+function loggingSummaryText() {
+  const mode = state.loggingStatus || 'RAM only';
+  const diag = state.advancedLoggingEnabled ? 'Advanced diagnostics on.' : 'Advanced diagnostics off.';
+  return mode + '. ' + diag;
 }
 
 function updateHeaderLoggingStatus() {
@@ -1464,6 +1535,7 @@ function renderModeSelectInfo() {
           <button class="btn sm" id="mmLogFilterAll" onclick="setMainMenuLogFilter('all')">All</button>
           <button class="btn sm" id="mmLogFilterEvents" onclick="setMainMenuLogFilter('events')">Events</button>
           <button class="btn sm" id="mmLogFilterIdentity" onclick="setMainMenuLogFilter('identity')">Identity</button>
+          <button class="btn sm" id="mmLogFilterDiagnostics" onclick="setMainMenuLogFilter('diagnostics')">Diagnostics</button>
           <button class="btn sm" onclick="refreshMainMenuLogs(true)">Refresh</button>
         </div>
       </div>
@@ -1495,15 +1567,15 @@ function renderMainMenuLogs() {
   const allBtn = $('#mmLogFilterAll');
   const eventsBtn = $('#mmLogFilterEvents');
   const identityBtn = $('#mmLogFilterIdentity');
+  const diagBtn = $('#mmLogFilterDiagnostics');
   if (allBtn) allBtn.classList.toggle('primary', logFilter === 'all');
   if (eventsBtn) eventsBtn.classList.toggle('primary', logFilter === 'events');
   if (identityBtn) identityBtn.classList.toggle('primary', logFilter === 'identity');
+  if (diagBtn) diagBtn.classList.toggle('primary', logFilter === 'diagnostics');
 
   const summary = $('#mainMenuLogSummary');
   if (summary) {
-    summary.textContent = state.loggingActive
-      ? 'microSD logging is active.'
-      : (state.loggingBlocked ? 'Logging enabled — waiting for microSD.' : 'Logging is currently off.');
+    summary.textContent = loggingSummaryText();
   }
 
   if (!logsData) {
@@ -2582,6 +2654,24 @@ function renderSettings() {
           <label>Use microSD for logs</label>
           <label class="toggle"><input type="checkbox" ${state.useMicrosdLogs?'checked':''} onchange="updateSetting('useMicrosdLogs',this.checked)"><span class="slider"></span></label>
         </div>
+        <div class="setting-row">
+          <label>Advanced diagnostics</label>
+          <label class="toggle"><input type="checkbox" ${state.advancedLoggingEnabled?'checked':''} onchange="updateSetting('advancedLoggingEnabled',this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <label>GPS diagnostics</label>
+          <label class="toggle"><input type="checkbox" ${state.gpsDiagnosticsEnabled?'checked':''} onchange="updateSetting('gpsDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <label>Web diagnostics</label>
+          <label class="toggle"><input type="checkbox" ${state.webDiagnosticsEnabled?'checked':''} onchange="updateSetting('webDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <label>Serial log verbosity</label>
+          <select class="sel-sm" style="width:140px" onchange="updateSetting('serialLogVerbosity',parseInt(this.value))">
+            ${['Error','Warn','Info','Debug','Verbose'].map((n,i) => `<option value="${i}" ${Number(state.serialLogVerbosity||2)===i?'selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -2595,6 +2685,8 @@ function renderSettings() {
         <div>Drones Tracked: <strong id="settingsDrones">${state.droneCount||0}</strong></div>
         <div>Log Capacity: <strong id="settingsLogCapacity">${state.logCapacityKb||768} kB</strong></div>
         <div>Logging Status: <strong id="settingsLoggingStatus">${loggingStatusText()}</strong></div>
+        <div>Advanced Logging: <strong id="settingsAdvLogging">${state.advancedLoggingEnabled ? 'Enabled' : 'Disabled'}</strong></div>
+        <div>Serial Verbosity: <strong id="settingsSerialLogging">${['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)]}</strong></div>
         <div>microSD Status: <strong id="settingsMicrosd">${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
         <div>GPS Status: <strong id="settingsGpsStatus">${state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled')}</strong></div>
       </div>
@@ -2607,6 +2699,7 @@ function renderSettings() {
           <button class="btn sm" id="logFilterAll" onclick="setLogFilter('all')">All</button>
           <button class="btn sm" id="logFilterEvents" onclick="setLogFilter('events')">Events</button>
           <button class="btn sm" id="logFilterIdentity" onclick="setLogFilter('identity')">Identity</button>
+          <button class="btn sm" id="logFilterDiagnostics" onclick="setLogFilter('diagnostics')">Diagnostics</button>
           <button class="btn sm" onclick="refreshLogs(true)">Refresh</button>
         </div>
       </div>
@@ -2650,6 +2743,10 @@ function updateSetting(key, val) {
   else if(key==='shortcutBackBtn') body.shortcutBackBtn = parseInt(val);
   else if(key==='gpsTagging') body.gpsTagging = !!val;
   else if(key==='useMicrosdLogs') body.useMicrosdLogs = !!val;
+  else if(key==='advancedLoggingEnabled') body.advancedLoggingEnabled = !!val;
+  else if(key==='gpsDiagnosticsEnabled') body.gpsDiagnosticsEnabled = !!val;
+  else if(key==='webDiagnosticsEnabled') body.webDiagnosticsEnabled = !!val;
+  else if(key==='serialLogVerbosity') body.serialLogVerbosity = parseInt(val);
   if (key === 'gpsTagging') {
     gpsToggleEnabled = !!val;
     saveGpsToggleEnabled();
@@ -2680,15 +2777,15 @@ function renderSettingsLogs() {
   const allBtn = $('#logFilterAll');
   const eventsBtn = $('#logFilterEvents');
   const identityBtn = $('#logFilterIdentity');
+  const diagBtn = $('#logFilterDiagnostics');
   if (allBtn) allBtn.classList.toggle('primary', logFilter === 'all');
   if (eventsBtn) eventsBtn.classList.toggle('primary', logFilter === 'events');
   if (identityBtn) identityBtn.classList.toggle('primary', logFilter === 'identity');
+  if (diagBtn) diagBtn.classList.toggle('primary', logFilter === 'diagnostics');
 
   const summary = $('#settingsLogSummary');
   if (summary) {
-    summary.textContent = state.loggingActive
-      ? 'microSD logging is active and recent entries are visible below.'
-      : (state.loggingBlocked ? 'Logging is enabled but waiting for a mounted microSD card.' : 'Logging is currently off.');
+    summary.textContent = loggingSummaryText();
   }
 
   if (!logsData) {
@@ -2725,6 +2822,8 @@ function updateSettingsLive() {
   const dronesEl = $('#settingsDrones'); if (dronesEl) dronesEl.textContent = state.droneCount||0;
   const cap = $('#settingsLogCapacity'); if (cap) cap.textContent = (state.logCapacityKb||768) + ' kB';
   const logStatus = $('#settingsLoggingStatus'); if (logStatus) logStatus.textContent = loggingStatusText();
+  const advLog = $('#settingsAdvLogging'); if (advLog) advLog.textContent = state.advancedLoggingEnabled ? 'Enabled' : 'Disabled';
+  const serialLog = $('#settingsSerialLogging'); if (serialLog) serialLog.textContent = ['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)] || 'Info';
   const sd = $('#settingsMicrosd'); if (sd) sd.textContent = state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found');
   const gps = $('#settingsGpsStatus');
   if (gps) gps.textContent = state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled');
@@ -2736,6 +2835,7 @@ function updateSettingsLive() {
 
 // ── Init ──
 wsConnect();
+startGpsWatcher();
 setInterval(() => { if(ws && ws.readyState===1) ws.send('ping'); }, 5000);
 // Also poll state in case WS is slow
 setInterval(async () => {
@@ -2745,8 +2845,17 @@ setInterval(async () => {
 }, 3500);
 
 setInterval(() => {
-  pushGpsClientStatus(false);
-}, 8000);
+  if (gpsToggleEnabled) startGpsWatcher();
+  else stopGpsWatcher();
+  if (gpsToggleEnabled && gpsWatcherLooksStale()) scheduleGpsWatcherRestart(200);
+  syncGpsClientStatus(false);
+}, 4000);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (gpsToggleEnabled) startGpsWatcher();
+  syncGpsClientStatus(true);
+});
 </script>
 </body>
 </html>

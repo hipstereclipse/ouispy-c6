@@ -149,12 +149,21 @@ def _open_serial_with_retry(port, baudrate, retry_seconds):
     last_error = None
     while time.time() < deadline:
         try:
-            ser = serial.Serial(port=port, baudrate=baudrate, timeout=0.25)
-            try:
-                ser.dtr = False
-                ser.rts = False
-            except Exception:
-                pass
+            # Important for ESP32-C6 USB-Serial/JTAG on Windows: opening the
+            # port with pyserial defaults can assert DTR/RTS momentarily and
+            # reset the target on every reconnect. Configure the line states
+            # before opening the port so reconnects do not trigger a reboot.
+            ser = serial.Serial()
+            ser.port = port
+            ser.baudrate = baudrate
+            ser.timeout = 0.25
+            ser.write_timeout = 0.25
+            ser.dsrdtr = False
+            ser.rtscts = False
+            ser.xonxoff = False
+            ser.dtr = False
+            ser.rts = False
+            ser.open()
             try:
                 ser.reset_input_buffer()
             except Exception:

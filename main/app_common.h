@@ -102,6 +102,15 @@ typedef enum {
     SHORTCUT_COUNT,
 } shortcut_action_t;
 
+typedef enum {
+    SERIAL_LOG_ERROR = 0,
+    SERIAL_LOG_WARN,
+    SERIAL_LOG_INFO,
+    SERIAL_LOG_DEBUG,
+    SERIAL_LOG_VERBOSE,
+    SERIAL_LOG_COUNT,
+} serial_log_verbosity_t;
+
 /* ── Detection Method Bitmask ────────────────────────────── */
 
 #define DETECT_OUI      0x01
@@ -251,6 +260,10 @@ typedef struct {
     uint8_t         shortcut_action_btn;
     uint8_t         shortcut_back_btn;
     bool            use_microsd_logs;
+    bool            advanced_logging_enabled;
+    bool            gps_diagnostics_enabled;
+    bool            web_diagnostics_enabled;
+    uint8_t         serial_log_verbosity;
     bool            gps_tagging_enabled;
     bool            gps_client_ready;      /* phone/browser currently able to send GPS */
     uint32_t        gps_client_ready_ms;   /* last readiness update timestamp */
@@ -269,6 +282,7 @@ typedef struct {
     int             ui_item_count;    /* selectable items in view */
     bool            log_viewer_open;  /* true = showing log viewer on LCD */
     int             log_scroll_pos;   /* scroll offset in log viewer */
+    uint32_t        ui_refresh_token;
     uint32_t        last_input_ms;
     bool            display_sleeping;
 } app_state_t;
@@ -280,6 +294,7 @@ extern app_state_t g_app;
 /* ── Utility Functions ───────────────────────────────────── */
 
 void     app_state_init(void);
+void     app_apply_runtime_logging_prefs(void);
 void     app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel);
 uint32_t uptime_ms(void);
 void     mac_to_str(const uint8_t mac[6], char *buf, size_t buf_len);

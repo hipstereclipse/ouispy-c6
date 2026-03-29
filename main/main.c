@@ -28,7 +28,7 @@ static const char *TAG = "main";
 #define LED_PHASE_BLE_INIT      15,  35,  65
 #define LED_PHASE_SNIFFER_INIT  15,  50,  55
 #define LED_PHASE_MODE_START    30,  42,  28
-#define UI_GPS_READY_TIMEOUT_MS 8000
+#define UI_GPS_READY_TIMEOUT_MS 20000
 
 enum {
     SET_ITEM_AP_BROADCAST = 0,
@@ -43,6 +43,10 @@ enum {
     SET_ITEM_SHORTCUT_BACK,
     SET_ITEM_GPS_TAGGING,
     SET_ITEM_SD_LOGS,
+    SET_ITEM_ADV_LOGS,
+    SET_ITEM_GPS_DIAG,
+    SET_ITEM_WEB_DIAG,
+    SET_ITEM_SERIAL_LOG,
     SET_ITEM_SD_FORMAT,
     SET_ITEM_BACK,
     SET_ITEM_COUNT,
@@ -75,6 +79,18 @@ static void mode_ap_credentials(app_mode_t mode, const char **ssid, const char *
 }
 
 static const uint16_t SLEEP_OPTIONS[] = {0, 15, 30, 60, 120, 300};
+
+static const char *serial_log_name(uint8_t idx)
+{
+    switch (idx) {
+    case SERIAL_LOG_ERROR: return "ERROR";
+    case SERIAL_LOG_WARN: return "WARN";
+    case SERIAL_LOG_DEBUG: return "DEBUG";
+    case SERIAL_LOG_VERBOSE: return "VERBOSE";
+    case SERIAL_LOG_INFO:
+    default: return "INFO";
+    }
+}
 
 static bool ui_gps_tag_active(void)
 {
@@ -263,9 +279,8 @@ static void render_mode_select_screen(int cursor)
         {"2: FOX HUNTER", "BLE tracker",    rgb565(251, 146, 60)},
         {"3: SKY SPY",    "Drone detector", rgb565(56, 189, 248)},
         {"4: SETTINGS",   "Customize unit", rgb565(168, 85, 247)},
-        {"5: VIEW LOGS",  "SD card logs",   rgb565(74, 222, 128)},
     };
-    const int entry_count = 5;
+    const int entry_count = 4;
 
     if (cursor < 0) cursor = 0;
     if (cursor >= entry_count) cursor = entry_count - 1;
@@ -380,6 +395,10 @@ static void render_settings_screen(int cursor)
         "Shortcut BTN19",
         "GPS Tagging",
         "microSD Logs",
+        "Advanced Logs",
+        "GPS Diagnostics",
+        "Web Diagnostics",
+        "Serial Logging",
         "Format microSD",
         "Back to Menu",
     };
@@ -435,7 +454,19 @@ static void render_settings_screen(int cursor)
             snprintf(val, sizeof(val), "%s", g_app.gps_tagging_enabled ? "ON" : "OFF");
             break;
         case SET_ITEM_SD_LOGS:
-            snprintf(val, sizeof(val), "%s", g_app.use_microsd_logs ? "PREFER SD" : "INTERNAL");
+            snprintf(val, sizeof(val), "%s", g_app.use_microsd_logs ? "PREFER SD" : "RAM ONLY");
+            break;
+        case SET_ITEM_ADV_LOGS:
+            snprintf(val, sizeof(val), "%s", g_app.advanced_logging_enabled ? "ON" : "OFF");
+            break;
+        case SET_ITEM_GPS_DIAG:
+            snprintf(val, sizeof(val), "%s", g_app.gps_diagnostics_enabled ? "ON" : "OFF");
+            break;
+        case SET_ITEM_WEB_DIAG:
+            snprintf(val, sizeof(val), "%s", g_app.web_diagnostics_enabled ? "ON" : "OFF");
+            break;
+        case SET_ITEM_SERIAL_LOG:
+            snprintf(val, sizeof(val), "%s", serial_log_name(g_app.serial_log_verbosity));
             break;
         case SET_ITEM_SD_FORMAT:
             snprintf(val, sizeof(val), "%s", storage_ext_status_str(storage_ext_get_status()));
@@ -835,6 +866,31 @@ static void apply_settings_item_action(void)
         log_msg = g_app.use_microsd_logs ? "sd_logs_enabled" : "sd_logs_disabled";
         break;
 
+    case SET_ITEM_ADV_LOGS:
+        g_app.advanced_logging_enabled = !g_app.advanced_logging_enabled;
+        buzzer_play_profile(SOUND_PROFILE_RETRO);
+        log_msg = g_app.advanced_logging_enabled ? "advanced_logs_enabled" : "advanced_logs_disabled";
+        break;
+
+    case SET_ITEM_GPS_DIAG:
+        g_app.gps_diagnostics_enabled = !g_app.gps_diagnostics_enabled;
+        buzzer_beep(40);
+        log_msg = g_app.gps_diagnostics_enabled ? "gps_diagnostics_enabled" : "gps_diagnostics_disabled";
+        break;
+
+    case SET_ITEM_WEB_DIAG:
+        g_app.web_diagnostics_enabled = !g_app.web_diagnostics_enabled;
+        buzzer_beep(40);
+        log_msg = g_app.web_diagnostics_enabled ? "web_diagnostics_enabled" : "web_diagnostics_disabled";
+        break;
+
+    case SET_ITEM_SERIAL_LOG:
+        g_app.serial_log_verbosity = (g_app.serial_log_verbosity + 1) % SERIAL_LOG_COUNT;
+        app_apply_runtime_logging_prefs();
+        buzzer_beep(40);
+        log_msg = "serial_logging_updated";
+        break;
+
     case SET_ITEM_SD_FORMAT: {
         storage_status_t status = storage_ext_get_status();
         if (status == STORAGE_STATUS_NOT_FOUND) {
@@ -868,6 +924,7 @@ static void apply_settings_item_action(void)
     }
 
     nvs_store_save_prefs();
+    app_apply_runtime_logging_prefs();
     if (log_msg) {
         storage_ext_append_log("settings", log_msg);
     }
@@ -1000,6 +1057,7 @@ static void on_button_event(button_id_t btn, button_event_t evt)
             g_app.fox_registry_open = false;
             g_app.ui_cursor = 0;
             g_app.ui_item_count = 0;
+            g_app.ui_refresh_token++;
             buzzer_tone(800, 40);
         } else if (g_app.current_mode == MODE_FOX_HUNTER) {
             if (g_app.fox_target_set) {
@@ -1039,6 +1097,7 @@ static void on_button_event(button_id_t btn, button_event_t evt)
                 g_app.fox_registry_open = true;
                 g_app.ui_cursor = 0;
                 g_app.ui_item_count = fox_hunter_registry_view_count();
+                g_app.ui_refresh_token++;
                 buzzer_tone(1200, 40);
             } else if (g_app.ui_item_count > 0) {
                 fox_hunter_registry_select_view_index(g_app.ui_cursor);

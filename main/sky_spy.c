@@ -41,7 +41,7 @@ static const uint8_t PARROT_OUI[][3] = {
 #define BLE_SERVICE_REMOTEID  0xFFFA
 #define DJI_BLE_CID           0x2CA3
 #define DRONE_TIMEOUT_MS      30000
-#define SKY_GPS_READY_TIMEOUT_MS 8000
+#define SKY_GPS_READY_TIMEOUT_MS 20000
 
 static inline bool sky_gps_tag_active(uint32_t now_ms)
 {

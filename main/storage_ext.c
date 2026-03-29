@@ -13,11 +13,18 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#define LOG_RING_SIZE                96
+#define LOG_KIND_MAX_CHARS           23
+#define LOG_MESSAGE_MAX_CHARS        223
+
 static const char *TAG = "storage_ext";
 static bool s_sd_ready = false;
 static storage_status_t s_sd_status = STORAGE_STATUS_NOT_FOUND;
 static sdmmc_card_t *s_card = NULL;
 static int64_t s_last_probe_us = 0;
+static storage_log_entry_t s_log_ring[LOG_RING_SIZE];
+static int s_log_ring_head = 0;
+static int s_log_ring_count = 0;
 
 #define SD_RUNTIME_PROBE_INTERVAL_US (2000000LL)
 #define LOG_MIN_FREE_KB              128U
@@ -26,6 +33,7 @@ static int64_t s_last_probe_us = 0;
 
 static const char *EVENT_LOG_PATH = "/sdcard/ouispy_logs/events.log";
 static const char *IDENTITY_LOG_PATH = "/sdcard/ouispy_logs/identity.log";
+static const char *DIAGNOSTIC_LOG_PATH = "/sdcard/ouispy_logs/diagnostics.log";
 
 static void ensure_log_dir(void);
 static void refresh_card_runtime_status(void);
@@ -43,12 +51,40 @@ static bool log_message_contains_device_identity(const char *message)
     return colon_count >= 5;
 }
 
-static const char *log_path_for_entry(const char *kind, const char *message)
+static bool log_kind_is_diagnostic(const char *kind)
 {
-    if ((kind && strcmp(kind, "identity") == 0) || log_message_contains_device_identity(message)) {
-        return IDENTITY_LOG_PATH;
+    if (!kind || !kind[0]) return false;
+    return strncmp(kind, "diag_", 5) == 0
+        || strcmp(kind, "web") == 0
+        || strcmp(kind, "gps") == 0
+        || strcmp(kind, "system") == 0
+        || strcmp(kind, "http") == 0;
+}
+
+static storage_log_bucket_t log_bucket_for_entry(const char *kind, const char *message)
+{
+    if (log_kind_is_diagnostic(kind)) {
+        return STORAGE_LOG_BUCKET_DIAGNOSTICS;
     }
-    return EVENT_LOG_PATH;
+    if ((kind && strcmp(kind, "identity") == 0) || log_message_contains_device_identity(message)) {
+        return STORAGE_LOG_BUCKET_IDENTITY;
+    }
+    return STORAGE_LOG_BUCKET_EVENTS;
+}
+
+static void log_ring_append(storage_log_bucket_t bucket, uint32_t ts, const char *kind, const char *message)
+{
+    storage_log_entry_t *entry = &s_log_ring[s_log_ring_head];
+    memset(entry, 0, sizeof(*entry));
+    entry->ts = ts;
+    entry->bucket = bucket;
+    snprintf(entry->kind, sizeof(entry->kind), "%.*s", LOG_KIND_MAX_CHARS, kind ? kind : "event");
+    snprintf(entry->message, sizeof(entry->message), "%.*s", LOG_MESSAGE_MAX_CHARS, message ? message : "");
+
+    s_log_ring_head = (s_log_ring_head + 1) % LOG_RING_SIZE;
+    if (s_log_ring_count < LOG_RING_SIZE) {
+        s_log_ring_count++;
+    }
 }
 
 static void trim_log_keep_recent(const char *path, size_t keep_bytes)
@@ -213,6 +249,9 @@ void storage_ext_init(void)
     s_sd_status = STORAGE_STATUS_NOT_FOUND;
     s_card = NULL;
     s_last_probe_us = 0;
+    memset(s_log_ring, 0, sizeof(s_log_ring));
+    s_log_ring_head = 0;
+    s_log_ring_count = 0;
     refresh_storage_dependent_limits();
 
     mount_sd_card(false, true);
@@ -283,23 +322,60 @@ bool storage_ext_logging_blocked(void)
     return g_app.use_microsd_logs && (storage_ext_get_status() != STORAGE_STATUS_AVAILABLE);
 }
 
-esp_err_t storage_ext_append_log(const char *kind, const char *message)
+static esp_err_t storage_ext_append_bucketed(storage_log_bucket_t bucket, const char *kind, const char *message)
 {
     if (!kind || !message) return ESP_ERR_INVALID_ARG;
+    uint32_t now_sec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+    log_ring_append(bucket, now_sec, kind, message);
+
     refresh_card_runtime_status();
-    if (!g_app.use_microsd_logs || !s_sd_ready) return ESP_ERR_INVALID_STATE;
+    if (!g_app.use_microsd_logs || !s_sd_ready) return ESP_OK;
 
     ensure_log_dir();
     prune_noncritical_logs_if_needed();
 
-    const char *path = log_path_for_entry(kind, message);
+    const char *path = EVENT_LOG_PATH;
+    if (bucket == STORAGE_LOG_BUCKET_IDENTITY) {
+        path = IDENTITY_LOG_PATH;
+    } else if (bucket == STORAGE_LOG_BUCKET_DIAGNOSTICS) {
+        path = DIAGNOSTIC_LOG_PATH;
+    }
     FILE *f = fopen(path, "a");
     if (!f) return ESP_FAIL;
 
-    uint32_t now_sec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     fprintf(f, "%lu,%s,%s\n", (unsigned long)now_sec, kind, message);
     fclose(f);
     return ESP_OK;
+}
+
+esp_err_t storage_ext_append_log(const char *kind, const char *message)
+{
+    return storage_ext_append_bucketed(log_bucket_for_entry(kind, message), kind, message);
+}
+
+esp_err_t storage_ext_append_identity(const char *kind, const char *message)
+{
+    return storage_ext_append_bucketed(STORAGE_LOG_BUCKET_IDENTITY,
+                                       kind ? kind : "identity",
+                                       message ? message : "");
+}
+
+esp_err_t storage_ext_append_diagnostic(const char *kind, const char *message)
+{
+    if (!g_app.advanced_logging_enabled) return ESP_OK;
+    return storage_ext_append_log(kind ? kind : "diag_event", message ? message : "");
+}
+
+int storage_ext_get_recent_entries(storage_log_entry_t *entries, int max_entries)
+{
+    if (!entries || max_entries <= 0) return 0;
+
+    int count = (s_log_ring_count < max_entries) ? s_log_ring_count : max_entries;
+    for (int i = 0; i < count; i++) {
+        int src_idx = (s_log_ring_head - 1 - i + LOG_RING_SIZE) % LOG_RING_SIZE;
+        entries[i] = s_log_ring[src_idx];
+    }
+    return count;
 }
 
 int storage_ext_read_recent_lines(char lines[][64], int max_lines)

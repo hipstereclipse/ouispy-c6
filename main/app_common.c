@@ -5,10 +5,28 @@
 #include "app_common.h"
 #include "storage_ext.h"
 #include "esp_timer.h"
+#include "esp_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 app_state_t g_app;
+
+static esp_log_level_t serial_log_level_from_pref(uint8_t pref)
+{
+    switch (pref) {
+    case SERIAL_LOG_ERROR:
+        return ESP_LOG_ERROR;
+    case SERIAL_LOG_WARN:
+        return ESP_LOG_WARN;
+    case SERIAL_LOG_DEBUG:
+        return ESP_LOG_DEBUG;
+    case SERIAL_LOG_VERBOSE:
+        return ESP_LOG_VERBOSE;
+    case SERIAL_LOG_INFO:
+    default:
+        return ESP_LOG_INFO;
+    }
+}
 
 void app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel)
 {
@@ -59,6 +77,10 @@ void app_state_init(void)
     g_app.shortcut_action_btn = SHORTCUT_FOX_LED_MODE;
     g_app.shortcut_back_btn = SHORTCUT_MODE_SELECT;
     g_app.use_microsd_logs = false;
+    g_app.advanced_logging_enabled = false;
+    g_app.gps_diagnostics_enabled = false;
+    g_app.web_diagnostics_enabled = false;
+    g_app.serial_log_verbosity = SERIAL_LOG_INFO;
     g_app.gps_tagging_enabled = false;
     g_app.gps_client_ready = false;
     g_app.gps_client_ready_ms = 0;
@@ -75,6 +97,12 @@ void app_state_init(void)
     
     /* Set drone capacity based on microSD availability */
     g_app.max_drones_allowed = storage_ext_is_available() ? MAX_DRONES : MAX_DRONES_NO_SD;
+    app_apply_runtime_logging_prefs();
+}
+
+void app_apply_runtime_logging_prefs(void)
+{
+    esp_log_level_set("*", serial_log_level_from_pref(g_app.serial_log_verbosity));
 }
 
 uint32_t uptime_ms(void)

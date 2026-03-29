@@ -26,7 +26,7 @@ static const char *TAG = "flock";
 #define FLOCK_LED_WARNING_FLASH_MS   120
 #define FLOCK_LED_WARNING_FLASHES     3
 #define FLOCK_LED_STALE_MS          4000
-#define FLOCK_GPS_READY_TIMEOUT_MS  8000
+#define FLOCK_GPS_READY_TIMEOUT_MS  20000
 
 static inline bool flock_gps_tag_active(uint32_t now_ms)
 {
