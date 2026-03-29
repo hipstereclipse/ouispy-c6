@@ -94,6 +94,7 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - GPS toggle is synchronized to firmware state (`gpsTagging`) so web + device stay in sync
 - GPS status is now surfaced across the web interface and in the on-device Settings screen, not only in Flock You
 - Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls with per-source filters
+- The on-device Settings screen now uses grouped submenus for Connectivity, Display, Sound Profiles, Button Shortcuts, Logging, and Maintenance so you can reach related options without scrolling one flat list
 - microSD status is surfaced as `Available`, `Needs Format`, or `Not Found` in both the LCD UI and web UI
 - microSD usage now updates live as logs accumulate, including used/total card capacity in both the LCD and web UI
 - Unformatted but detected cards can be formatted directly from the on-device Settings menu

@@ -13,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 static const char *TAG = "display";
 
@@ -249,4 +250,202 @@ void display_draw_text_scaled(int x, int y, const char *text, uint16_t fg, uint1
         free(cbuf);
         x += cw;
     }
+}
+
+static float map_zoom_radius_m(uint8_t idx)
+{
+    static const float zoom_levels[] = {80.0f, 180.0f, 420.0f, 900.0f, 1800.0f};
+    if (idx >= (sizeof(zoom_levels) / sizeof(zoom_levels[0]))) {
+        idx = (uint8_t)((sizeof(zoom_levels) / sizeof(zoom_levels[0])) - 1U);
+    }
+    return zoom_levels[idx];
+}
+
+static uint16_t map_pin_color(map_pin_kind_t kind)
+{
+    switch (kind) {
+    case MAP_PIN_KIND_DRONE:
+        return rgb565(56, 189, 248);
+    case MAP_PIN_KIND_FOX:
+        return rgb565(251, 146, 60);
+    case MAP_PIN_KIND_FLOCK:
+    default:
+        return rgb565(248, 113, 113);
+    }
+}
+
+static bool map_pin_matches_mac(const map_pin_t *pin, const uint8_t mac[6])
+{
+    return pin && mac && memcmp(pin->mac, mac, 6) == 0;
+}
+
+static int collect_local_map_pins(map_pin_t *out_pins, int max_pins)
+{
+    if (!out_pins || max_pins <= 0) return 0;
+
+    int count = 0;
+    for (int i = 0; i < g_app.shared_map_pin_count && count < max_pins; i++) {
+        map_pin_t *src = &g_app.shared_map_pins[i];
+        if (!isfinite(src->lat) || !isfinite(src->lon)) continue;
+        out_pins[count++] = *src;
+    }
+
+    if (g_app.fox_target_gps_samples > 0 && isfinite(g_app.fox_target_lat) && isfinite(g_app.fox_target_lon) && count < max_pins) {
+        bool exists = false;
+        for (int i = 0; i < count; i++) {
+            if (g_app.fox_target_set && map_pin_matches_mac(&out_pins[i], g_app.fox_target_mac)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            map_pin_t *pin = &out_pins[count++];
+            memset(pin, 0, sizeof(*pin));
+            if (g_app.fox_target_set) memcpy(pin->mac, g_app.fox_target_mac, sizeof(pin->mac));
+            snprintf(pin->label, sizeof(pin->label), "Fox target");
+            pin->lat = g_app.fox_target_lat;
+            pin->lon = g_app.fox_target_lon;
+            pin->radius_m = g_app.fox_target_radius_m;
+            pin->rssi = g_app.fox_rssi;
+            pin->kind = MAP_PIN_KIND_FOX;
+        }
+    }
+
+    if (g_app.sky_tracked_gps_samples > 0 && isfinite(g_app.sky_tracked_lat) && isfinite(g_app.sky_tracked_lon) && count < max_pins) {
+        bool exists = false;
+        uint8_t tracked_mac[6] = {0};
+        if (g_app.sky_tracked_drone_idx >= 0 && g_app.sky_tracked_drone_idx < g_app.drone_count) {
+            memcpy(tracked_mac, g_app.drones[g_app.sky_tracked_drone_idx].mac, sizeof(tracked_mac));
+        }
+        for (int i = 0; i < count; i++) {
+            if (map_pin_matches_mac(&out_pins[i], tracked_mac)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            map_pin_t *pin = &out_pins[count++];
+            memset(pin, 0, sizeof(*pin));
+            memcpy(pin->mac, tracked_mac, sizeof(pin->mac));
+            snprintf(pin->label, sizeof(pin->label), "Sky track");
+            pin->lat = g_app.sky_tracked_lat;
+            pin->lon = g_app.sky_tracked_lon;
+            pin->radius_m = g_app.sky_tracked_radius_m;
+            pin->rssi = -70;
+            pin->kind = MAP_PIN_KIND_DRONE;
+        }
+    }
+
+    return count;
+}
+
+void display_draw_shared_map_view(app_mode_t mode)
+{
+    map_pin_t pins[MAX_SHARED_MAP_PINS + 2];
+    int pin_count = collect_local_map_pins(pins, (int)(sizeof(pins) / sizeof(pins[0])));
+
+    uint16_t bg = (mode == MODE_SKY_SPY) ? rgb565(3, 8, 3) : rgb565(9, 9, 11);
+    uint16_t panel = (mode == MODE_SKY_SPY) ? rgb565(4, 18, 4) : rgb565(20, 20, 24);
+    uint16_t border = (mode == MODE_SKY_SPY) ? rgb565(12, 96, 12) : rgb565(63, 63, 70);
+    uint16_t grid = (mode == MODE_SKY_SPY) ? rgb565(0, 42, 0) : rgb565(52, 52, 58);
+    uint16_t accent = (mode == MODE_SKY_SPY) ? rgb565(20, 255, 0) : rgb565(248, 113, 113);
+    uint16_t text_main = (mode == MODE_SKY_SPY) ? rgb565(188, 255, 188) : rgb565(250, 250, 250);
+    uint16_t text_dim = (mode == MODE_SKY_SPY) ? rgb565(80, 160, 80) : rgb565(161, 161, 170);
+    uint16_t footer = (mode == MODE_SKY_SPY) ? rgb565(2, 4, 2) : rgb565(9, 9, 11);
+    const char *title = (mode == MODE_SKY_SPY) ? "SKY MAP" : "FLOCK MAP";
+
+    display_fill(bg);
+    display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, panel);
+    display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
+    display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, title, text_main, panel);
+    display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "Shared pinned-device view", text_dim, panel);
+
+    const int map_x = 8;
+    const int map_y = 40;
+    const int map_w = LCD_H_RES - 16;
+    const int map_h = 166;
+    const int center_x = map_x + (map_w / 2);
+    const int center_y = map_y + (map_h / 2);
+    display_draw_bordered_rect(map_x, map_y, map_w, map_h, border, panel);
+    for (int x = map_x + 18; x < map_x + map_w - 1; x += 18) {
+        display_draw_rect(x, map_y + 1, 1, map_h - 2, grid);
+    }
+    for (int y = map_y + 18; y < map_y + map_h - 1; y += 18) {
+        display_draw_rect(map_x + 1, y, map_w - 2, 1, grid);
+    }
+    display_draw_rect(center_x - 16, center_y, 33, 1, accent);
+    display_draw_rect(center_x, center_y - 16, 1, 33, accent);
+
+    if (pin_count <= 0) {
+        display_draw_text_centered(102, "NO MAP POINTS", text_main, panel);
+        display_draw_text_centered(114, "Open the web UI to save pins", text_dim, panel);
+        display_draw_text_centered(126, "or track Fox/Sky targets live", text_dim, panel);
+    } else {
+        double center_lat = 0.0;
+        double center_lon = 0.0;
+        for (int i = 0; i < pin_count; i++) {
+            center_lat += pins[i].lat;
+            center_lon += pins[i].lon;
+        }
+        center_lat /= (double)pin_count;
+        center_lon /= (double)pin_count;
+
+        float radius_m = map_zoom_radius_m(g_app.local_map_zoom_idx);
+        float max_distance = 0.0f;
+        double lat_scale = cos(center_lat * (M_PI / 180.0));
+        if (fabs(lat_scale) < 0.1) lat_scale = (lat_scale < 0.0) ? -0.1 : 0.1;
+        for (int i = 0; i < pin_count; i++) {
+            float dx_m = (float)((pins[i].lon - center_lon) * 111320.0 * lat_scale);
+            float dy_m = (float)((pins[i].lat - center_lat) * 111320.0);
+            float dist_m = sqrtf((dx_m * dx_m) + (dy_m * dy_m));
+            if (dist_m > max_distance) max_distance = dist_m;
+        }
+        if (max_distance > (radius_m * 0.78f)) {
+            radius_m = max_distance * 1.35f;
+        }
+        if (radius_m < 40.0f) radius_m = 40.0f;
+
+        float px_per_meter = ((float)(map_h < map_w ? map_h : map_w) * 0.42f) / radius_m;
+        for (int i = 0; i < pin_count; i++) {
+            float dx_m = (float)((pins[i].lon - center_lon) * 111320.0 * lat_scale);
+            float dy_m = (float)((pins[i].lat - center_lat) * 111320.0);
+            int px = center_x + (int)lrintf(dx_m * px_per_meter);
+            int py = center_y - (int)lrintf(dy_m * px_per_meter);
+            if (px < map_x + 3 || px > map_x + map_w - 6 || py < map_y + 3 || py > map_y + map_h - 6) continue;
+
+            uint16_t pin_col = map_pin_color(pins[i].kind);
+            display_draw_rect(px - 2, py - 2, 5, 5, pin_col);
+
+            char short_label[8] = {0};
+            snprintf(short_label, sizeof(short_label), "%c%s",
+                     (pins[i].kind == MAP_PIN_KIND_DRONE) ? 'D' : (pins[i].kind == MAP_PIN_KIND_FOX ? 'X' : 'F'),
+                     pins[i].label[0] ? "" : "*");
+            if (pins[i].label[0]) {
+                short_label[0] = (pins[i].kind == MAP_PIN_KIND_DRONE) ? 'D' : (pins[i].kind == MAP_PIN_KIND_FOX ? 'X' : 'F');
+                short_label[1] = ':';
+                short_label[2] = pins[i].label[0];
+                short_label[3] = pins[i].label[1] ? pins[i].label[1] : '\0';
+                short_label[4] = pins[i].label[2] ? pins[i].label[2] : '\0';
+            }
+            display_draw_text(px + 4, py - 4, short_label, text_main, panel);
+        }
+
+        char summary[40];
+        snprintf(summary, sizeof(summary), "Pins:%d  Range:%um", pin_count, (unsigned)radius_m);
+        display_draw_text(10, 212, summary, text_main, bg);
+
+        int list_y = 224;
+        for (int i = 0; i < pin_count && i < 3; i++) {
+            char line[40];
+            const char *kind = (pins[i].kind == MAP_PIN_KIND_DRONE) ? "D" : (pins[i].kind == MAP_PIN_KIND_FOX ? "X" : "F");
+            snprintf(line, sizeof(line), "%s %s %ddBm", kind,
+                     pins[i].label[0] ? pins[i].label : "Pinned", (int)pins[i].rssi);
+            display_draw_text(10, list_y, line, map_pin_color(pins[i].kind), bg);
+            list_y += 11;
+        }
+    }
+
+    display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
+    display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border);
+    display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, "3x toggle map  2x zoom  hold close", text_dim, footer);
 }

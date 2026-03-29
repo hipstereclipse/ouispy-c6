@@ -52,10 +52,24 @@ enum {
     SET_ITEM_COUNT,
 };
 
+typedef enum {
+    SETTINGS_CAT_CONNECTIVITY = 0,
+    SETTINGS_CAT_DISPLAY,
+    SETTINGS_CAT_SOUND,
+    SETTINGS_CAT_CONTROLS,
+    SETTINGS_CAT_LOGGING,
+    SETTINGS_CAT_MAINTENANCE,
+    SETTINGS_CAT_COUNT,
+} settings_category_t;
+
+#define SETTINGS_ROOT_EXIT_ENTRY   (-1)
+#define SETTINGS_SUBMENU_BACK_ENTRY (-2)
+
 /* ── Display task handles ── */
 static TaskHandle_t s_select_task = NULL;
 static TaskHandle_t s_settings_task = NULL;
 static TaskHandle_t s_reset_warn_task = NULL;
+static int s_settings_category = -1;
 
 /* ── AP configuration per mode ── */
 typedef struct {
@@ -79,6 +93,55 @@ static void mode_ap_credentials(app_mode_t mode, const char **ssid, const char *
 }
 
 static const uint16_t SLEEP_OPTIONS[] = {0, 15, 30, 60, 120, 300};
+
+static const int SETTINGS_CAT_CONNECTIVITY_ITEMS[] = {
+    SET_ITEM_AP_BROADCAST,
+    SET_ITEM_SINGLE_AP_NAME,
+    SET_ITEM_GPS_TAGGING,
+};
+
+static const int SETTINGS_CAT_DISPLAY_ITEMS[] = {
+    SET_ITEM_SLEEP_TIMEOUT,
+    SET_ITEM_MENU_LED,
+};
+
+static const int SETTINGS_CAT_SOUND_ITEMS[] = {
+    SET_ITEM_SOUND_FLOCK,
+    SET_ITEM_SOUND_FOX,
+    SET_ITEM_SOUND_SKY,
+};
+
+static const int SETTINGS_CAT_CONTROLS_ITEMS[] = {
+    SET_ITEM_SHORTCUT_MODE,
+    SET_ITEM_SHORTCUT_ACTION,
+    SET_ITEM_SHORTCUT_BACK,
+};
+
+static const int SETTINGS_CAT_LOGGING_ITEMS[] = {
+    SET_ITEM_SD_LOGS,
+    SET_ITEM_ADV_LOGS,
+    SET_ITEM_GPS_DIAG,
+    SET_ITEM_WEB_DIAG,
+    SET_ITEM_SERIAL_LOG,
+};
+
+static const int SETTINGS_CAT_MAINTENANCE_ITEMS[] = {
+    SET_ITEM_SD_FORMAT,
+};
+
+static const struct {
+    const char *title;
+    const char *summary;
+    const int *items;
+    int item_count;
+} SETTINGS_CATEGORIES[SETTINGS_CAT_COUNT] = {
+    [SETTINGS_CAT_CONNECTIVITY] = {"Connectivity", "AP name, broadcast, GPS", SETTINGS_CAT_CONNECTIVITY_ITEMS, 3},
+    [SETTINGS_CAT_DISPLAY] = {"Display", "Sleep timeout and menu LED", SETTINGS_CAT_DISPLAY_ITEMS, 2},
+    [SETTINGS_CAT_SOUND] = {"Sound Profiles", "Per-applet audio behavior", SETTINGS_CAT_SOUND_ITEMS, 3},
+    [SETTINGS_CAT_CONTROLS] = {"Button Shortcuts", "Quick actions per button", SETTINGS_CAT_CONTROLS_ITEMS, 3},
+    [SETTINGS_CAT_LOGGING] = {"Logging", "Storage, diagnostics, serial", SETTINGS_CAT_LOGGING_ITEMS, 5},
+    [SETTINGS_CAT_MAINTENANCE] = {"Maintenance", "microSD tools and service", SETTINGS_CAT_MAINTENANCE_ITEMS, 1},
+};
 
 static const char *serial_log_name(uint8_t idx)
 {
@@ -188,6 +251,142 @@ static const char *shortcut_name(uint8_t idx)
     case SHORTCUT_NONE:
     default: return "NONE";
     }
+}
+
+static bool settings_is_root_menu(void)
+{
+    return (s_settings_category < 0 || s_settings_category >= SETTINGS_CAT_COUNT);
+}
+
+static void settings_sync_item_count(void)
+{
+    if (settings_is_root_menu()) {
+        g_app.ui_item_count = SETTINGS_CAT_COUNT + 1;
+        return;
+    }
+    g_app.ui_item_count = SETTINGS_CATEGORIES[s_settings_category].item_count + 1;
+}
+
+static const char *settings_item_label(int item)
+{
+    switch (item) {
+    case SET_ITEM_AP_BROADCAST: return "AP Broadcast";
+    case SET_ITEM_SINGLE_AP_NAME: return "Single AP Name";
+    case SET_ITEM_SLEEP_TIMEOUT: return "Sleep Timeout";
+    case SET_ITEM_MENU_LED: return "Menu LED";
+    case SET_ITEM_SOUND_FLOCK: return "Sound: Flock";
+    case SET_ITEM_SOUND_FOX: return "Sound: Fox";
+    case SET_ITEM_SOUND_SKY: return "Sound: Sky";
+    case SET_ITEM_SHORTCUT_MODE: return "Shortcut BTN10";
+    case SET_ITEM_SHORTCUT_ACTION: return "Shortcut BTN11";
+    case SET_ITEM_SHORTCUT_BACK: return "Shortcut BTN19";
+    case SET_ITEM_GPS_TAGGING: return "GPS Tagging";
+    case SET_ITEM_SD_LOGS: return "microSD Logs";
+    case SET_ITEM_ADV_LOGS: return "Advanced Logs";
+    case SET_ITEM_GPS_DIAG: return "GPS Diagnostics";
+    case SET_ITEM_WEB_DIAG: return "Web Diagnostics";
+    case SET_ITEM_SERIAL_LOG: return "Serial Logging";
+    case SET_ITEM_SD_FORMAT: return "Format microSD";
+    case SET_ITEM_BACK: return "Back to Menu";
+    default: return "Setting";
+    }
+}
+
+static void settings_item_value(int item, char *val, size_t val_sz)
+{
+    switch (item) {
+    case SET_ITEM_AP_BROADCAST:
+        snprintf(val, val_sz, "%s", g_app.ap_broadcast_enabled ? "ON" : "OFF");
+        break;
+    case SET_ITEM_SLEEP_TIMEOUT:
+        snprintf(val, val_sz, "%s", g_app.display_sleep_timeout_sec == 0 ? "OFF" : "SECONDS");
+        break;
+    case SET_ITEM_SINGLE_AP_NAME:
+        snprintf(val, val_sz, "%s", g_app.single_ap_name_enabled ? "UNISPY" : "PER MODE");
+        break;
+    case SET_ITEM_MENU_LED:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.menu_led_color));
+        break;
+    case SET_ITEM_SOUND_FLOCK:
+        snprintf(val, val_sz, "%s", sound_profile_name(g_app.sound_profile_flock));
+        break;
+    case SET_ITEM_SOUND_FOX:
+        snprintf(val, val_sz, "%s", sound_profile_name(g_app.sound_profile_fox));
+        break;
+    case SET_ITEM_SOUND_SKY:
+        snprintf(val, val_sz, "%s", sound_profile_name(g_app.sound_profile_sky));
+        break;
+    case SET_ITEM_SHORTCUT_MODE:
+        snprintf(val, val_sz, "%s", shortcut_name(g_app.shortcut_mode_btn));
+        break;
+    case SET_ITEM_SHORTCUT_ACTION:
+        snprintf(val, val_sz, "%s", shortcut_name(g_app.shortcut_action_btn));
+        break;
+    case SET_ITEM_SHORTCUT_BACK:
+        snprintf(val, val_sz, "%s", shortcut_name(g_app.shortcut_back_btn));
+        break;
+    case SET_ITEM_GPS_TAGGING:
+        snprintf(val, val_sz, "%s", g_app.gps_tagging_enabled ? "ON" : "OFF");
+        break;
+    case SET_ITEM_SD_LOGS:
+        snprintf(val, val_sz, "%s", g_app.use_microsd_logs ? "PREFER SD" : "RAM ONLY");
+        break;
+    case SET_ITEM_ADV_LOGS:
+        snprintf(val, val_sz, "%s", g_app.advanced_logging_enabled ? "ON" : "OFF");
+        break;
+    case SET_ITEM_GPS_DIAG:
+        snprintf(val, val_sz, "%s", g_app.gps_diagnostics_enabled ? "ON" : "OFF");
+        break;
+    case SET_ITEM_WEB_DIAG:
+        snprintf(val, val_sz, "%s", g_app.web_diagnostics_enabled ? "ON" : "OFF");
+        break;
+    case SET_ITEM_SERIAL_LOG:
+        snprintf(val, val_sz, "%s", serial_log_name(g_app.serial_log_verbosity));
+        break;
+    case SET_ITEM_SD_FORMAT:
+        snprintf(val, val_sz, "%s", storage_ext_status_str(storage_ext_get_status()));
+        break;
+    case SET_ITEM_BACK:
+        snprintf(val, val_sz, "%s", "> EXIT");
+        break;
+    default:
+        snprintf(val, val_sz, "%s", "");
+        break;
+    }
+}
+
+static int settings_visible_entry_at(int cursor)
+{
+    if (settings_is_root_menu()) {
+        return (cursor >= SETTINGS_CAT_COUNT) ? SETTINGS_ROOT_EXIT_ENTRY : cursor;
+    }
+
+    if (cursor >= SETTINGS_CATEGORIES[s_settings_category].item_count) {
+        return SETTINGS_SUBMENU_BACK_ENTRY;
+    }
+    return SETTINGS_CATEGORIES[s_settings_category].items[cursor];
+}
+
+static int settings_current_leaf_item(void)
+{
+    if (settings_is_root_menu()) return -1;
+    if (g_app.ui_cursor < 0 || g_app.ui_cursor >= SETTINGS_CATEGORIES[s_settings_category].item_count) return -1;
+    return SETTINGS_CATEGORIES[s_settings_category].items[g_app.ui_cursor];
+}
+
+static void settings_open_category(int category)
+{
+    if (category < 0 || category >= SETTINGS_CAT_COUNT) return;
+    s_settings_category = category;
+    g_app.ui_cursor = 0;
+    settings_sync_item_count();
+}
+
+static void settings_close_category(void)
+{
+    s_settings_category = -1;
+    g_app.ui_cursor = 0;
+    settings_sync_item_count();
 }
 
 static uint8_t mode_sound_profile(app_mode_t mode)
@@ -370,14 +569,18 @@ static void render_settings_screen(int cursor)
     uint16_t text_dim = rgb565(161, 161, 170);
     bool gps_tag_active = ui_gps_tag_active();
 
-    char val[28];
+    char val[32];
+    bool root_menu = settings_is_root_menu();
+    int visible_count = root_menu ? (SETTINGS_CAT_COUNT + 1) : (SETTINGS_CATEGORIES[s_settings_category].item_count + 1);
+    const char *header_title = root_menu ? "SETTINGS" : SETTINGS_CATEGORIES[s_settings_category].title;
+    const char *header_hint = root_menu ? "Hold=open section  Triple=exit" : "Hold=change  Triple=back";
     if (cursor < 0) cursor = 0;
-    if (cursor >= SET_ITEM_COUNT) cursor = SET_ITEM_COUNT - 1;
+    if (cursor >= visible_count) cursor = visible_count - 1;
 
     display_fill(bg);
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, rgb565(38, 24, 54));
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 8, "SETTINGS", rgb565(235, 220, 255), rgb565(38, 24, 54));
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "Click=next DblClk=prev Hold=change", text_dim, rgb565(38, 24, 54));
+    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 8, header_title, rgb565(235, 220, 255), rgb565(38, 24, 54));
+    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, header_hint, text_dim, rgb565(38, 24, 54));
     display_draw_text(120, DISPLAY_STATUS_BAR_Y + 8, "GPS", text_dim, rgb565(38, 24, 54));
     display_draw_text(140, DISPLAY_STATUS_BAR_Y + 8,
                       gps_tag_active ? "ON" : "OFF",
@@ -385,100 +588,41 @@ static void render_settings_screen(int cursor)
                       rgb565(38, 24, 54));
     ui_draw_logging_badge(rgb565(38, 24, 54));
 
-    const char *labels[SET_ITEM_COUNT] = {
-        "AP Broadcast",
-        "Single AP Name",
-        "Sleep Timeout",
-        "Menu LED",
-        "Sound: Flock",
-        "Sound: Fox",
-        "Sound: Sky",
-        "Shortcut BTN10",
-        "Shortcut BTN11",
-        "Shortcut BTN19",
-        "GPS Tagging",
-        "microSD Logs",
-        "Advanced Logs",
-        "GPS Diagnostics",
-        "Web Diagnostics",
-        "Serial Logging",
-        "Format microSD",
-        "Back to Menu",
-    };
-
     int start = cursor - 3;
     if (start < 0) start = 0;
-    if (start > SET_ITEM_COUNT - 7) start = SET_ITEM_COUNT - 7;
+    if (start > visible_count - 7) start = visible_count - 7;
     if (start < 0) start = 0;
 
     for (int i = 0; i < 7; i++) {
         int idx = start + i;
-        if (idx >= SET_ITEM_COUNT) break;
+        if (idx >= visible_count) break;
         int y = 42 + i * 30;
         bool sel = (idx == cursor);
+        int entry = settings_visible_entry_at(idx);
+        const char *label = NULL;
 
         display_draw_bordered_rect(6, y, LCD_H_RES - 12, 26,
                                    sel ? accent : border,
                                    sel ? rgb565(32, 26, 44) : card);
-        display_draw_text(12, y + 5, labels[idx], sel ? text_main : text_dim, sel ? rgb565(32, 26, 44) : card);
-
-        switch (idx) {
-        case SET_ITEM_AP_BROADCAST:
-            snprintf(val, sizeof(val), "%s", g_app.ap_broadcast_enabled ? "ON" : "OFF");
-            break;
-        case SET_ITEM_SLEEP_TIMEOUT:
-            snprintf(val, sizeof(val), "%s", g_app.display_sleep_timeout_sec == 0 ? "OFF" : "SECONDS");
-            break;
-        case SET_ITEM_SINGLE_AP_NAME:
-            snprintf(val, sizeof(val), "%s", g_app.single_ap_name_enabled ? "UNISPY" : "PER MODE");
-            break;
-        case SET_ITEM_MENU_LED:
-            snprintf(val, sizeof(val), "%s", menu_led_name(g_app.menu_led_color));
-            break;
-        case SET_ITEM_SOUND_FLOCK:
-            snprintf(val, sizeof(val), "%s", sound_profile_name(g_app.sound_profile_flock));
-            break;
-        case SET_ITEM_SOUND_FOX:
-            snprintf(val, sizeof(val), "%s", sound_profile_name(g_app.sound_profile_fox));
-            break;
-        case SET_ITEM_SOUND_SKY:
-            snprintf(val, sizeof(val), "%s", sound_profile_name(g_app.sound_profile_sky));
-            break;
-        case SET_ITEM_SHORTCUT_MODE:
-            snprintf(val, sizeof(val), "%s", shortcut_name(g_app.shortcut_mode_btn));
-            break;
-        case SET_ITEM_SHORTCUT_ACTION:
-            snprintf(val, sizeof(val), "%s", shortcut_name(g_app.shortcut_action_btn));
-            break;
-        case SET_ITEM_SHORTCUT_BACK:
-            snprintf(val, sizeof(val), "%s", shortcut_name(g_app.shortcut_back_btn));
-            break;
-        case SET_ITEM_GPS_TAGGING:
-            snprintf(val, sizeof(val), "%s", g_app.gps_tagging_enabled ? "ON" : "OFF");
-            break;
-        case SET_ITEM_SD_LOGS:
-            snprintf(val, sizeof(val), "%s", g_app.use_microsd_logs ? "PREFER SD" : "RAM ONLY");
-            break;
-        case SET_ITEM_ADV_LOGS:
-            snprintf(val, sizeof(val), "%s", g_app.advanced_logging_enabled ? "ON" : "OFF");
-            break;
-        case SET_ITEM_GPS_DIAG:
-            snprintf(val, sizeof(val), "%s", g_app.gps_diagnostics_enabled ? "ON" : "OFF");
-            break;
-        case SET_ITEM_WEB_DIAG:
-            snprintf(val, sizeof(val), "%s", g_app.web_diagnostics_enabled ? "ON" : "OFF");
-            break;
-        case SET_ITEM_SERIAL_LOG:
-            snprintf(val, sizeof(val), "%s", serial_log_name(g_app.serial_log_verbosity));
-            break;
-        case SET_ITEM_SD_FORMAT:
-            snprintf(val, sizeof(val), "%s", storage_ext_status_str(storage_ext_get_status()));
-            break;
-        case SET_ITEM_BACK:
-        default:
-            snprintf(val, sizeof(val), "%s", "> EXIT");
-            break;
+        if (root_menu) {
+            if (entry == SETTINGS_ROOT_EXIT_ENTRY) {
+                label = "Exit Settings";
+                snprintf(val, sizeof(val), "%s", "> MENU");
+            } else {
+                label = SETTINGS_CATEGORIES[entry].title;
+                snprintf(val, sizeof(val), "%s", SETTINGS_CATEGORIES[entry].summary);
+            }
+        } else {
+            if (entry == SETTINGS_SUBMENU_BACK_ENTRY) {
+                label = "Back to Settings";
+                snprintf(val, sizeof(val), "%s", "> SECTIONS");
+            } else {
+                label = settings_item_label(entry);
+                settings_item_value(entry, val, sizeof(val));
+            }
         }
+
+        display_draw_text(12, y + 5, label, sel ? text_main : text_dim, sel ? rgb565(32, 26, 44) : card);
 
         int value_x = LCD_H_RES - 10 - display_text_width(val);
         if (value_x < 92) {
@@ -489,13 +633,19 @@ static void render_settings_screen(int cursor)
                           sel ? rgb565(32, 26, 44) : card);
     }
 
-    display_draw_text_centered(272, "Triple-click: Exit settings", text_dim, bg);
+    display_draw_text_centered(272,
+                               root_menu ? "Triple-click: Exit settings" : "Triple-click: Back to sections",
+                               text_dim,
+                               bg);
 
-    if (g_app.display_sleep_timeout_sec > 0) {
+    if (!root_menu && s_settings_category == SETTINGS_CAT_DISPLAY && g_app.display_sleep_timeout_sec > 0) {
         snprintf(val, sizeof(val), "%us", (unsigned)g_app.display_sleep_timeout_sec);
         display_draw_text_centered(286, val, text_dim, bg);
+    } else if (!root_menu) {
+        snprintf(val, sizeof(val), "%d items", SETTINGS_CATEGORIES[s_settings_category].item_count);
+        display_draw_text_centered(286, val, text_dim, bg);
     } else {
-        display_draw_text_centered(286, "Sleep disabled", text_dim, bg);
+        display_draw_text_centered(286, "6 sections + exit", text_dim, bg);
     }
 }
 
@@ -588,10 +738,11 @@ static void settings_task(void *arg)
         bool logging_active = storage_ext_logging_active();
         bool logging_blocked = storage_ext_logging_blocked();
 
-        if (g_app.ui_cursor >= SET_ITEM_COUNT) g_app.ui_cursor = SET_ITEM_COUNT - 1;
+        settings_sync_item_count();
+        if (g_app.ui_cursor >= g_app.ui_item_count) g_app.ui_cursor = g_app.ui_item_count - 1;
         if (g_app.ui_cursor < 0) g_app.ui_cursor = 0;
 
-        bool wants_led_preview = g_app.led_enabled && (g_app.ui_cursor == SET_ITEM_MENU_LED);
+        bool wants_led_preview = g_app.led_enabled && (settings_current_leaf_item() == SET_ITEM_MENU_LED);
         if (wants_led_preview) {
             if (!led_preview_active || led_preview_color != g_app.menu_led_color) {
                 uint8_t r = 0, g = 0, b = 0;
@@ -689,8 +840,9 @@ static void start_mode(app_mode_t mode)
         break;
 
     case MODE_SETTINGS:
+        s_settings_category = -1;
         g_app.ui_cursor = 0;
-        g_app.ui_item_count = SET_ITEM_COUNT;
+        settings_sync_item_count();
         if (xTaskCreate(settings_task, "settings_ui", TASK_STACK_UI, NULL, 3, &s_settings_task) != pdPASS) {
             ESP_LOGE(TAG, "Failed to create settings task");
             s_settings_task = NULL;
@@ -777,11 +929,11 @@ static uint8_t *shortcut_ref_for_button(button_id_t btn)
     return NULL;
 }
 
-static void apply_settings_item_action(void)
+static void apply_settings_leaf_action(int item)
 {
     const char *log_msg = NULL;
 
-    switch (g_app.ui_cursor) {
+    switch (item) {
     case SET_ITEM_AP_BROADCAST:
         g_app.ap_broadcast_enabled = !g_app.ap_broadcast_enabled;
         restart_ap_for_mode(g_app.current_mode);
@@ -916,12 +1068,6 @@ static void apply_settings_item_action(void)
         break;
     }
 
-    case SET_ITEM_BACK:
-        g_app.requested_mode = MODE_SELECT;
-        g_app.mode_change_pending = true;
-        buzzer_tone(900, 60);
-        break;
-
     default:
         break;
     }
@@ -932,6 +1078,33 @@ static void apply_settings_item_action(void)
         storage_ext_append_log("settings", log_msg);
     }
     render_settings_screen(g_app.ui_cursor);
+}
+
+static void apply_settings_item_action(void)
+{
+    int entry = settings_visible_entry_at(g_app.ui_cursor);
+
+    if (settings_is_root_menu()) {
+        if (entry == SETTINGS_ROOT_EXIT_ENTRY) {
+            g_app.requested_mode = MODE_SELECT;
+            g_app.mode_change_pending = true;
+            buzzer_tone(900, 60);
+            return;
+        }
+        settings_open_category(entry);
+        buzzer_tone(1050, 40);
+        render_settings_screen(g_app.ui_cursor);
+        return;
+    }
+
+    if (entry == SETTINGS_SUBMENU_BACK_ENTRY) {
+        settings_close_category();
+        buzzer_tone(820, 40);
+        render_settings_screen(g_app.ui_cursor);
+        return;
+    }
+
+    apply_settings_leaf_action(entry);
 }
 
 static void on_button_event(button_id_t btn, button_event_t evt)
@@ -1024,7 +1197,9 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         break;
 
     case BTN_EVT_CLICK:
-        if (g_app.current_mode == MODE_SETTINGS && g_app.ui_cursor == SET_ITEM_BACK) {
+        if (g_app.current_mode == MODE_SETTINGS
+                && (settings_visible_entry_at(g_app.ui_cursor) == SETTINGS_ROOT_EXIT_ENTRY
+                    || settings_visible_entry_at(g_app.ui_cursor) == SETTINGS_SUBMENU_BACK_ENTRY)) {
             apply_settings_item_action();
             return;
         }
@@ -1053,9 +1228,15 @@ static void on_button_event(button_id_t btn, button_event_t evt)
 
     case BTN_EVT_TRIPLE_CLICK:
         if (g_app.current_mode == MODE_SETTINGS) {
-            g_app.requested_mode = MODE_SELECT;
-            g_app.mode_change_pending = true;
-            buzzer_tone(900, 60);
+            if (settings_is_root_menu()) {
+                g_app.requested_mode = MODE_SELECT;
+                g_app.mode_change_pending = true;
+                buzzer_tone(900, 60);
+            } else {
+                settings_close_category();
+                render_settings_screen(g_app.ui_cursor);
+                buzzer_tone(820, 40);
+            }
         } else if (g_app.current_mode == MODE_FOX_HUNTER && g_app.fox_registry_open) {
             g_app.fox_registry_open = false;
             g_app.ui_cursor = 0;

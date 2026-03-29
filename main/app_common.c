@@ -96,6 +96,9 @@ void app_state_init(void)
     g_app.fox_target_gps_samples = 0;
     g_app.sky_tracked_gps_samples = 0;
     g_app.fox_target_weight_sum = 0.0f;
+    g_app.shared_map_pin_count = 0;
+    g_app.local_map_open = false;
+    g_app.local_map_zoom_idx = 2;
     g_app.last_input_ms = uptime_ms();
     g_app.display_sleeping = false;
     g_app.device_mutex    = xSemaphoreCreateMutex();

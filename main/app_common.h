@@ -182,6 +182,8 @@ typedef struct {
 #define FOX_REG_NICK_LEN    24
 #define FOX_REG_NOTES_LEN   96
 #define FOX_REG_SECTION_LEN 12
+#define MAP_PIN_LABEL_LEN   24
+#define MAX_SHARED_MAP_PINS 48
 
 typedef struct {
     uint8_t  mac[6];
@@ -194,6 +196,22 @@ typedef struct {
 
 /* Alias: fox nearby list reuses ble_device_t storage */
 typedef ble_device_t fox_nearby_t;
+
+typedef enum {
+    MAP_PIN_KIND_FLOCK = 0,
+    MAP_PIN_KIND_FOX,
+    MAP_PIN_KIND_DRONE,
+} map_pin_kind_t;
+
+typedef struct {
+    uint8_t         mac[6];
+    char            label[MAP_PIN_LABEL_LEN];
+    double          lat;
+    double          lon;
+    float           radius_m;
+    int8_t          rssi;
+    map_pin_kind_t  kind;
+} map_pin_t;
 
 /* ── Global Application State ────────────────────────────── */
 
@@ -244,6 +262,12 @@ typedef struct {
     double          sky_tracked_lat, sky_tracked_lon;
     float           sky_tracked_radius_m;
     uint16_t        sky_tracked_gps_samples;
+
+    /* Shared map pins mirrored from the web UI for local LCD rendering */
+    map_pin_t       shared_map_pins[MAX_SHARED_MAP_PINS];
+    uint8_t         shared_map_pin_count;
+    bool            local_map_open;
+    uint8_t         local_map_zoom_idx;
 
     /* Hardware preferences (persisted via NVS) */
     uint8_t         lcd_brightness;   /* 0-255 */
