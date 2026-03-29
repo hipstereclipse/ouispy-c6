@@ -98,6 +98,12 @@ void nvs_store_save_prefs(void)
         nvs_set_u8(h, "sc_back", g_app.shortcut_back_btn);
         nvs_set_u8(h, "sd_logs", g_app.use_microsd_logs ? 1 : 0);
         nvs_set_u8(h, "adv_logs", g_app.advanced_logging_enabled ? 1 : 0);
+        nvs_set_u8(h, "log_gen", g_app.log_general_enabled ? 1 : 0);
+        nvs_set_u8(h, "log_flock", g_app.log_flock_enabled ? 1 : 0);
+        nvs_set_u8(h, "log_fox", g_app.log_fox_enabled ? 1 : 0);
+        nvs_set_u8(h, "log_sky", g_app.log_sky_enabled ? 1 : 0);
+        nvs_set_u8(h, "log_gps", g_app.log_gps_enabled ? 1 : 0);
+        nvs_set_u8(h, "log_fox_id", g_app.log_saved_fox_enabled ? 1 : 0);
         nvs_set_u8(h, "gps_diag", g_app.gps_diagnostics_enabled ? 1 : 0);
         nvs_set_u8(h, "web_diag", g_app.web_diagnostics_enabled ? 1 : 0);
         nvs_set_u8(h, "ser_log", g_app.serial_log_verbosity);
@@ -187,6 +193,12 @@ void nvs_store_load_prefs(void)
         if (nvs_get_u8(h, "sc_back", &tmp) == ESP_OK) g_app.shortcut_back_btn = tmp;
         if (nvs_get_u8(h, "sd_logs", &tmp) == ESP_OK) g_app.use_microsd_logs = (tmp != 0);
         if (nvs_get_u8(h, "adv_logs", &tmp) == ESP_OK) g_app.advanced_logging_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "log_gen", &tmp) == ESP_OK) g_app.log_general_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "log_flock", &tmp) == ESP_OK) g_app.log_flock_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "log_fox", &tmp) == ESP_OK) g_app.log_fox_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "log_sky", &tmp) == ESP_OK) g_app.log_sky_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "log_gps", &tmp) == ESP_OK) g_app.log_gps_enabled = (tmp != 0);
+        if (nvs_get_u8(h, "log_fox_id", &tmp) == ESP_OK) g_app.log_saved_fox_enabled = (tmp != 0);
         if (nvs_get_u8(h, "gps_diag", &tmp) == ESP_OK) g_app.gps_diagnostics_enabled = (tmp != 0);
         if (nvs_get_u8(h, "web_diag", &tmp) == ESP_OK) g_app.web_diagnostics_enabled = (tmp != 0);
         if (nvs_get_u8(h, "ser_log", &tmp) == ESP_OK) g_app.serial_log_verbosity = tmp;

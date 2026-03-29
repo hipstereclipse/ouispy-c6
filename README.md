@@ -93,31 +93,48 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - Flock You GPS ON/OFF safety toggle; GPS marking only when enabled and secure (HTTPS)
 - GPS toggle is synchronized to firmware state (`gpsTagging`) so web + device stay in sync
 - GPS status is now surfaced across the web interface and in the on-device Settings screen, not only in Flock You
-- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls
+- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls with per-source filters
 - microSD status is surfaced as `Available`, `Needs Format`, or `Not Found` in both the LCD UI and web UI
+- microSD usage now updates live as logs accumulate, including used/total card capacity in both the LCD and web UI
 - Unformatted but detected cards can be formatted directly from the on-device Settings menu
 - When microSD logging is enabled, identity-bearing log records (entries containing device MAC/unique IDs) are written to a protected log file and are not auto-pruned; if storage gets tight, the oldest non-critical event records are trimmed first
+- Fox Hunter now uses a compact searchable device console that merges saved devices, WiFi clients, Flock devices, Sky drones, and Fox BLE detections into one view with profile editing and pin actions
 - CSV data export for Flock You detections
 - Mobile-optimized responsive embedded web UI
 
-### Offline Flock Map Addon
+### Offline Map Addon
 
-The Flock You web page includes an optional local offline map overlay for pinned Flock camera locations.
+The shared pinned-device map can render offline slippy-map tiles for saved Flock, Fox, and Sky locations.
 
 - Requirements:
   - Open the device over `https://192.168.4.1`
   - Enable `GPS Tagging` in Settings or the Flock page toggle
   - Allow browser location access so GPS status becomes live
-  - Save camera pins from the Flock device list using GPS or manual coordinates
+  - Save device pins using GPS or manual coordinates from the Flock, Fox, or Sky views
 - Access:
-  - In the Flock You web UI, triple-click the GPS status tile to open the map panel
+  - In the Flock You or Sky Spy web UI, triple-click the GPS status tile to open the shared map panel
   - Double-click the map canvas to cycle zoom levels
 - Tiles:
-  - Click `Load Tiles` and choose a folder structured like standard slippy-map exports (`z/x/y.png`, `jpg`, `jpeg`, or `webp`), such as offline tiles prepared for Meshtastic-style field use
-  - If no offline tiles are loaded, the map still shows a gray grid with relative Flock pins
+  - Preferred device-backed path: copy a `map` folder onto the microSD card at `/sdcard/map` using standard slippy-map layout: `z/x/y.png`, `jpg`, `jpeg`, or `webp`
+  - In the web UI, `Load Device/Folder Tiles` first checks `/sdcard/map` served by the device itself
+  - Browsers that support directory selection can still load a local folder manually using the same `z/x/y.ext` layout
+  - If no offline tiles are loaded, the map still shows a gray grid with relative pinned devices
 - Notes:
-  - Tile loading uses your browser's local file access support; if the browser does not support directory selection, the grid fallback still works
-  - Pins come from camera locations you saved in the web UI, so populate those first for a meaningful map
+  - Browser directory selection is no longer required when `/sdcard/map` is present on the device
+  - The firmware now serves tiles directly through `/api/map/tile`, so the embedded map remains usable even in browsers that cannot open local folders
+  - Pins come from locations you saved in the web UI, so populate those first for a meaningful map
+
+### Fox Hunter Web Console
+
+Fox Hunter now uses a compact merged device console instead of separate source lists buried below the fold.
+
+- Saved Fox devices, WiFi clients, Flock devices, Sky drones, and Fox BLE detections are merged into one searchable directory
+- Filter chips let you narrow the list to priority, saved, live, nearby, following, WiFi, Flock, drone, BLE, or all devices
+- Selecting a device opens a profile panel with:
+  - saved notes and section overrides
+  - pinned GPS/manual coordinates
+  - current Fox fused GPS estimate when the selected device is the active Fox target
+  - one-click track, GPS mark, manual mark, save, and delete actions
 
 ---
 

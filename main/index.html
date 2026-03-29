@@ -166,6 +166,18 @@ a:hover{color:#a5b4fc}
 
 /* Settings panel */
 .settings{display:grid;gap:10px}
+.settings-shell{display:grid;gap:12px}
+.settings-nav{display:flex;gap:8px;flex-wrap:wrap}
+.settings-nav .btn{min-width:120px;justify-content:center}
+.settings-panel{display:grid;gap:12px}
+.settings-stack{display:grid;gap:10px}
+.manage-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.manage-row:last-child{border-bottom:none}
+.manage-main{flex:1;min-width:0}
+.manage-title{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.manage-sub{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.4}
+.manage-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.settings-note{font-size:11px;color:var(--dim);line-height:1.5}
 .setting-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
 .setting-row:last-child{border-bottom:none}
 .setting-row label{font-size:13px}
@@ -223,10 +235,34 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 .fox-chip.follow{border-color:rgba(247,194,77,.55);color:var(--amber)}
 .fox-chip.detected{border-color:rgba(155,176,209,.45);color:var(--dim)}
 .fox-contact-actions{display:flex;gap:4px;flex-shrink:0}
+.fox-contact.selected{border-color:rgba(251,146,60,.55);background:rgba(251,146,60,.12)}
+.fox-console{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.95fr);gap:12px;align-items:start}
+.fox-console-main,.fox-console-side{display:grid;gap:10px}
+.fox-toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px}
+.fox-filter-row{display:flex;gap:6px;flex-wrap:wrap}
+.fox-search{min-width:220px;flex:1;background:var(--card2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:9px 12px;font-size:12px}
+.fox-search:focus{outline:none;border-color:var(--fox);box-shadow:0 0 0 3px rgba(251,146,60,.14)}
+.fox-summary-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.fox-mini{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.fox-mini .val{font-size:20px;font-weight:800;line-height:1;color:var(--fox)}
+.fox-mini .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px;margin-top:4px}
+.fox-compact-list{display:flex;flex-direction:column;gap:8px;max-height:64vh;overflow-y:auto;padding-right:2px}
+.fox-detail-card{position:sticky;top:74px}
+.fox-detail-grid{display:grid;gap:8px}
+.fox-detail-grid .setting-row{padding:8px 0}
+.fox-detail-actions{display:flex;gap:6px;flex-wrap:wrap}
+.fox-detail-note{font-size:11px;color:var(--dim);line-height:1.5}
+.fox-empty-inline{padding:22px 10px;text-align:center;color:var(--dim)}
+.fox-profile-map{font-size:11px;color:var(--dim);line-height:1.5;margin-top:8px}
 
 .fox-smart-grid{display:grid;grid-template-columns:1fr;gap:10px}
 @media(min-width:900px){
   .fox-smart-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:900px){
+  .fox-console{grid-template-columns:1fr}
+  .fox-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .fox-detail-card{position:static}
 }
 
 /* Footer */
@@ -237,6 +273,18 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
   color:var(--text);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;
   box-shadow:0 4px 24px rgba(0,0,0,.4);border:1px solid var(--accent);z-index:200;opacity:0;transition:opacity .3s}
 .toast.show{opacity:1}
+
+/* Confirm dialog */
+.dialog-overlay{position:fixed;inset:0;background:rgba(9,9,11,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:18px;z-index:260}
+.dialog-overlay.show{display:flex}
+.dialog{width:min(460px,100%);background:var(--card);border:1px solid var(--border);border-left:3px solid var(--rose);border-radius:14px;padding:18px;box-shadow:0 18px 60px rgba(0,0,0,.45)}
+.dialog h3{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--rose);margin-bottom:8px}
+.dialog p{font-size:13px;line-height:1.6;color:var(--text)}
+.dialog .sub{font-size:11px;color:var(--dim);margin-top:6px}
+.dialog-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}
+.hold-btn{position:relative;overflow:hidden}
+.hold-btn .fill{position:absolute;inset:0 auto 0 0;width:0;background:rgba(248,113,113,.18);pointer-events:none;transition:width .08s linear}
+.hold-btn .label{position:relative;z-index:1}
 
 /* No data state */
 .empty{text-align:center;padding:30px 20px;color:var(--dim)}
@@ -323,6 +371,22 @@ input[type=range]{width:100%;accent-color:var(--mode-accent)}
 <div class="ftr">OUI-Spy C6 &mdash; Open Source RF Intelligence &mdash; <a href="https://github.com/colonelpanichacks/ouispy-c6">GitHub</a></div>
 
 <div class="toast" id="toast"></div>
+<div class="dialog-overlay" id="confirmOverlay" onclick="handleConfirmOverlayClick(event)">
+  <div class="dialog">
+    <h3 id="confirmTitle">Confirm Delete</h3>
+    <p id="confirmMessage">Are you sure you want to delete this?</p>
+    <div class="sub">Click once to cancel, or hold the confirm button for 3 seconds.</div>
+    <div class="dialog-actions">
+      <button class="btn" onclick="hideHoldConfirm()">Cancel</button>
+      <button class="btn danger hold-btn" id="confirmHoldBtn"
+        onmousedown="beginHoldConfirm()" onmouseup="cancelHoldConfirmPress()" onmouseleave="cancelHoldConfirmPress()"
+        ontouchstart="beginHoldConfirm(event)" ontouchend="cancelHoldConfirmPress()" ontouchcancel="cancelHoldConfirmPress()">
+        <span class="fill" id="confirmHoldFill"></span>
+        <span class="label" id="confirmHoldLabel">Hold 3s to confirm</span>
+      </button>
+    </div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -360,11 +424,19 @@ let logsData = null;
 let logsRefreshCounter = 0;
 let logsRefreshInFlight = false;
 let logFilter = 'all';
+let foxViewFilter = 'priority';
+let foxSearchQuery = '';
+let foxSelectedMac = '';
 let skyRadarAnimId = 0;
 let skyRadarAngle = 0;
 const FLOCK_MAP_ZOOMS = [12, 14, 16];
 const CAM_LOC_STORE_KEY = 'ouispy_cam_locs_v1';
 const GPS_TOGGLE_STORE_KEY = 'ouispy_gps_toggle_v1';
+let settingsSection = 'preferences';
+let confirmHoldStartedMs = 0;
+let confirmHoldTimer = null;
+let confirmHoldInterval = null;
+let confirmAction = null;
 let cameraLocations = loadCameraLocations();
 let gpsToggleEnabled = loadGpsToggleEnabled();
 
@@ -711,6 +783,11 @@ function formatLocAge(ts) {
   return hr + 'h ' + (min % 60) + 'm ago';
 }
 
+function normalizePinKind(kind, mode) {
+  if (kind === 'fox' || kind === 'drone' || kind === 'flock') return kind;
+  return mode === 'drone' ? 'drone' : 'flock';
+}
+
 function clampNum(v, lo, hi) {
   const n = Number(v);
   if (!Number.isFinite(n)) return lo;
@@ -742,6 +819,56 @@ function mapHrefForLocation(loc) {
   return 'https://maps.apple.com/?ll=' + encodeURIComponent(loc.lat + ',' + loc.lon);
 }
 
+function preserveScrollState(host) {
+  if (!host) return null;
+  const list = host.querySelector('.log-list');
+  if (!list) return null;
+  const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+  return {
+    scrollTop: list.scrollTop,
+    maxScrollTop,
+    stickToBottom: maxScrollTop > 0 && (maxScrollTop - list.scrollTop) <= 24
+  };
+}
+
+function restoreScrollState(host, snapshot) {
+  if (!host || !snapshot) return;
+  const list = host.querySelector('.log-list');
+  if (!list) return;
+  const nextMaxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+  if (snapshot.stickToBottom) {
+    list.scrollTop = nextMaxScrollTop;
+    return;
+  }
+  if (snapshot.maxScrollTop <= 0) {
+    list.scrollTop = snapshot.scrollTop;
+    return;
+  }
+  const ratio = snapshot.scrollTop / snapshot.maxScrollTop;
+  list.scrollTop = Math.round(ratio * nextMaxScrollTop);
+}
+
+function renderLogEntries(host, entries, emptyMessage) {
+  if (!host) return;
+  const scrollState = preserveScrollState(host);
+  if (!entries.length) {
+    host.innerHTML = `<div class="empty"><div class="icon">&#128450;</div>${emptyMessage}</div>`;
+    return;
+  }
+  host.innerHTML = `<div class="log-list">${entries.map(entry => `
+    <div class="log-entry">
+      <div class="log-entry-top">
+        <div class="log-entry-meta">
+          <span class="log-source ${htmlEsc(entry.source)}">${htmlEsc(entry.source)}</span>
+          <span class="log-kind">${htmlEsc(entry.kind)}</span>
+        </div>
+        <span class="log-time">${logBootStamp(entry.ts)} · ${logAgeLabel(entry.ts)}</span>
+      </div>
+      <div class="log-msg">${htmlEsc(entry.message)}</div>
+    </div>`).join('')}</div>`;
+  restoreScrollState(host, scrollState);
+}
+
 function renderGpsStatus() {
   const caps = gpsCaps();
   const el = $('#gpsStatus');
@@ -769,13 +896,14 @@ function renderGpsStatus() {
   el.innerHTML = '<span class="gps-chip">GPS ready</span> Phone is connected and allowed to transmit GPS to the device.';
 }
 
-function saveCameraLocation(mac, lat, lon, source, rssi, mode) {
+function saveCameraLocation(mac, lat, lon, source, rssi, mode, kind) {
   const key = locKey(mac);
   const prev = cameraLocations[key] || null;
   const sampleLat = Number(lat);
   const sampleLon = Number(lon);
   const now = Date.now();
   const m = (mode === 'drone') ? 'drone' : 'flock';
+  const pinKind = normalizePinKind(kind || (prev && prev.kind), m);
   const rss = Number.isFinite(Number(rssi)) ? Number(rssi) : -85;
 
   if (!prev || !Number.isFinite(prev.lat) || !Number.isFinite(prev.lon)) {
@@ -784,6 +912,8 @@ function saveCameraLocation(mac, lat, lon, source, rssi, mode) {
       lon: sampleLon,
       source: source || 'gps',
       mode: m,
+      kind: pinKind,
+      label: prev && prev.label ? String(prev.label) : '',
       ts: now,
       samples: 1,
       weight: rssiWeight(rss),
@@ -821,6 +951,8 @@ function saveCameraLocation(mac, lat, lon, source, rssi, mode) {
     lon: nextLon,
     source: source || prev.source || 'gps',
     mode: m,
+    kind: pinKind,
+    label: prev.label || '',
     ts: now,
     samples: Number(prev.samples || 1) + 1,
     weight: nextWeight,
@@ -829,7 +961,7 @@ function saveCameraLocation(mac, lat, lon, source, rssi, mode) {
   saveCameraLocations();
 }
 
-function promptManualLocation(mac) {
+function promptManualLocation(mac, options) {
   const current = getStoredLocation(mac);
   const lat = prompt('Latitude (example 37.774900):', current ? String(current.lat) : '');
   if (lat === null) return false;
@@ -840,7 +972,10 @@ function promptManualLocation(mac) {
     toast('Invalid coordinates');
     return false;
   }
-  saveCameraLocation(mac, latN, lonN, 'manual');
+  const mode = options && options.mode === 'drone' ? 'drone' : 'flock';
+  const rssi = options && Number.isFinite(Number(options.rssi)) ? Number(options.rssi) : -85;
+  const kind = options && options.kind ? options.kind : null;
+  saveCameraLocation(mac, latN, lonN, 'manual', rssi, mode, kind);
   return true;
 }
 
@@ -862,38 +997,134 @@ function getCurrentPosition() {
 }
 
 async function markCameraLocation(mac) {
+  return markDeviceLocation(mac, { mode: 'flock', rerender: 'flock' });
+}
+
+async function markDeviceLocation(mac, options) {
   if (!gpsEffectiveEnabled()) {
     toast('GPS is off or unavailable');
-    return;
+    return false;
   }
   const caps = gpsCaps();
   if (!caps.supported || !caps.secure) {
     toast('GPS unavailable in current context');
-    return;
+    return false;
   }
+  const mode = options && options.mode === 'drone' ? 'drone' : 'flock';
+  const rssi = options && Number.isFinite(Number(options.rssi)) ? Number(options.rssi) : -85;
+  const kind = options && options.kind ? options.kind : null;
+  const rerender = options && options.rerender;
   try {
     const pos = await getCurrentPosition();
-    saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps');
+    saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, mode, kind);
     toast('GPS location saved');
-    if (Number(state.mode) === 1) renderDevList();
+    if (rerender === 'fox' || Number(state.mode) === 2) renderFoxInner();
+    else if (rerender === 'sky' || Number(state.mode) === 3) renderDroneCards();
+    else if (Number(state.mode) === 1) renderDevList();
+    return true;
   } catch (e) {
-    if (promptManualLocation(mac)) {
+    if (promptManualLocation(mac, { mode, kind, rssi })) {
       toast('GPS blocked; saved manual location');
-      if (Number(state.mode) === 1) renderDevList();
+      if (rerender === 'fox' || Number(state.mode) === 2) renderFoxInner();
+      else if (rerender === 'sky' || Number(state.mode) === 3) renderDroneCards();
+      else if (Number(state.mode) === 1) renderDevList();
+      return true;
     } else {
       toast('GPS blocked/unavailable; use manual entry');
+      return false;
     }
   }
+}
+
+function setCameraLocationLabel(mac, label) {
+  const key = locKey(mac);
+  if (!cameraLocations[key]) return false;
+  cameraLocations[key].label = String(label || '').trim();
+  saveCameraLocations();
+  return true;
 }
 
 function clearCameraLocation(mac) {
   delete cameraLocations[locKey(mac)];
   saveCameraLocations();
-  if (Number(state.mode) === 1) renderDevList();
+  if (Number(state.mode) === 2) renderFoxInner();
+  else if (Number(state.mode) === 3) renderDroneCards();
+  else if (Number(state.mode) === 1) renderDevList();
+}
+
+function hideHoldConfirm() {
+  if (confirmHoldTimer) clearTimeout(confirmHoldTimer);
+  if (confirmHoldInterval) clearInterval(confirmHoldInterval);
+  confirmHoldTimer = null;
+  confirmHoldInterval = null;
+  confirmAction = null;
+  confirmHoldStartedMs = 0;
+  const overlay = $('#confirmOverlay');
+  const fill = $('#confirmHoldFill');
+  const label = $('#confirmHoldLabel');
+  if (overlay) overlay.classList.remove('show');
+  if (fill) fill.style.width = '0%';
+  if (label) label.textContent = 'Hold 3s to confirm';
+}
+
+function handleConfirmOverlayClick(event) {
+  if (event.target && event.target.id === 'confirmOverlay') hideHoldConfirm();
+}
+
+function updateHoldConfirmProgress() {
+  const fill = $('#confirmHoldFill');
+  const label = $('#confirmHoldLabel');
+  const elapsed = Math.max(0, Date.now() - confirmHoldStartedMs);
+  const pct = Math.max(0, Math.min(100, (elapsed / 3000) * 100));
+  if (fill) fill.style.width = pct + '%';
+  if (label) label.textContent = pct >= 100 ? 'Confirmed' : `Hold ${Math.max(0, Math.ceil((3000 - elapsed) / 1000))}s to confirm`;
+}
+
+function beginHoldConfirm(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  if (!confirmAction || confirmHoldTimer) return;
+  confirmHoldStartedMs = Date.now();
+  updateHoldConfirmProgress();
+  confirmHoldInterval = setInterval(updateHoldConfirmProgress, 80);
+  confirmHoldTimer = setTimeout(async () => {
+    const action = confirmAction;
+    hideHoldConfirm();
+    if (typeof action === 'function') await action();
+  }, 3000);
+}
+
+function cancelHoldConfirmPress() {
+  if (!confirmHoldTimer) return;
+  clearTimeout(confirmHoldTimer);
+  clearInterval(confirmHoldInterval);
+  confirmHoldTimer = null;
+  confirmHoldInterval = null;
+  const fill = $('#confirmHoldFill');
+  const label = $('#confirmHoldLabel');
+  if (fill) fill.style.width = '0%';
+  if (label) label.textContent = 'Hold 3s to confirm';
+}
+
+function showHoldConfirm(message, action, title) {
+  confirmAction = action;
+  const overlay = $('#confirmOverlay');
+  const titleEl = $('#confirmTitle');
+  const msgEl = $('#confirmMessage');
+  if (titleEl) titleEl.textContent = title || 'Confirm Delete';
+  if (msgEl) msgEl.textContent = message || 'Are you sure you want to delete this?';
+  if (overlay) overlay.classList.add('show');
+}
+
+function requestClearCameraLocation(mac, afterDelete) {
+  showHoldConfirm('Are you sure you want to delete this?', () => {
+    clearCameraLocation(mac);
+    if (typeof afterDelete === 'function') afterDelete();
+    toast('Pinned device deleted');
+  }, 'Delete Pinned Device');
 }
 
 function gpsMapEligible() {
-  return !!state.gpsTagActive && !!gpsClientReady && gpsEffectiveEnabled();
+  return Object.keys(cameraLocations || {}).length > 0 || !!lastBrowserPosition || !!flockMapTileDir || gpsEffectiveEnabled();
 }
 
 function handleFlockMapTap() {
@@ -907,48 +1138,53 @@ function handleFlockMapTap() {
   }
 }
 
+function mapDeviceRecordForMac(mac) {
+  const key = String(mac || '').toUpperCase();
+  const device = (devices || []).find(d => String(d.mac || '').toUpperCase() === key);
+  const drone = (drones || []).find(d => String(d.mac || '').toUpperCase() === key);
+  const registry = (foxRegistry || []).find(r => String(r.mac || '').toUpperCase() === key);
+  return { device, drone, registry };
+}
+
+function pinDisplayName(mac, loc) {
+  if (loc && loc.label) return String(loc.label);
+  const match = mapDeviceRecordForMac(mac);
+  if (match.drone) return match.drone.id || 'Drone';
+  if (match.device) return match.device.name || (match.device.raven ? 'Raven Sensor' : 'Flock device');
+  if (match.registry) return regDisplayName(match.registry);
+  if (state.fox && String(state.fox.target || '').toUpperCase() === String(mac || '').toUpperCase()) return 'Fox target';
+  return String(mac || 'Pinned device');
+}
+
+function pinKindForEntry(mac, loc) {
+  if (loc && loc.kind) return normalizePinKind(loc.kind, loc.mode);
+  const match = mapDeviceRecordForMac(mac);
+  if (match.drone || (match.registry && normRegSection(match.registry.section) === 'drone')) return 'drone';
+  if (match.registry && ['wifi', 'ble', 'known'].includes(normRegSection(match.registry.section))) return 'fox';
+  if (state.fox && String(state.fox.target || '').toUpperCase() === String(mac || '').toUpperCase()) return 'fox';
+  return 'flock';
+}
+
 function flockMapPins() {
-  const flockPins = devices
-    .filter(d => d.flock)
-    .map(d => {
-      const loc = getStoredLocation(d.mac);
-      if (!loc) return null;
-      return {
-        mac: d.mac,
-        name: d.name || 'Flock device',
-        lat: Number(loc.lat),
-        lon: Number(loc.lon),
-        kind: 'flock',
-        radiusM: clampNum(loc.radiusM || assumedRadiusFromRssi(d.rssi, 'flock'), 6, 110),
-        source: loc.source || 'manual',
-        rssi: Number(d.rssi || -100),
-        age: formatLocAge(loc.ts)
-      };
-    })
-    .filter(Boolean);
-
-  const dronePins = drones
-    .map(d => {
-      const stored = getStoredLocation(d.mac);
-      const fromRid = d && d.hasLoc && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon));
-      if (!stored && !fromRid) return null;
-      const lat = stored ? Number(stored.lat) : Number(d.lat);
-      const lon = stored ? Number(stored.lon) : Number(d.lon);
-      return {
-        mac: d.mac,
-        name: d.id || 'Drone',
-        lat,
-        lon,
-        kind: 'drone',
-        radiusM: clampNum((stored && stored.radiusM) ? stored.radiusM : (assumedRadiusFromRssi(d.rssi, 'drone') + 35), 40, 500),
-        source: stored ? (stored.source || 'gps') : 'rid',
-        rssi: Number(d.rssi || -100),
-        age: stored ? formatLocAge(stored.ts) : 'live'
-      };
-    })
-    .filter(Boolean);
-
-  return flockPins.concat(dronePins);
+  return Object.keys(cameraLocations || {}).map(mac => {
+    const loc = getStoredLocation(mac);
+    if (!loc) return null;
+    const match = mapDeviceRecordForMac(mac);
+    const kind = pinKindForEntry(mac, loc);
+    const mode = loc.mode === 'drone' ? 'drone' : 'flock';
+    const defaultRssi = match.drone ? Number(match.drone.rssi || -100) : match.device ? Number(match.device.rssi || -100) : -85;
+    return {
+      mac,
+      name: pinDisplayName(mac, loc),
+      lat: Number(loc.lat),
+      lon: Number(loc.lon),
+      kind,
+      radiusM: clampNum(loc.radiusM || assumedRadiusFromRssi(defaultRssi, mode), mode === 'drone' ? 40 : 6, mode === 'drone' ? 500 : 110),
+      source: loc.source || 'manual',
+      rssi: defaultRssi,
+      age: formatLocAge(loc.ts)
+    };
+  }).filter(pin => pin && Number.isFinite(pin.lat) && Number.isFinite(pin.lon));
 }
 
 function flockMapZoom() {
@@ -997,6 +1233,16 @@ async function loadLocalTileBitmap(z, x, y) {
   return null;
 }
 
+async function loadDeviceTileBitmap(z, x, y) {
+  try {
+    const resp = await fetch(`/api/map/tile?z=${encodeURIComponent(z)}&x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, { cache: 'force-cache' });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    return await createImageBitmap(blob);
+  } catch (e) {}
+  return null;
+}
+
 function drawFlockMapGrid(ctx, width, height) {
   ctx.fillStyle = '#15181c';
   ctx.fillRect(0, 0, width, height);
@@ -1034,7 +1280,10 @@ async function drawFlockMapTiles(ctx, canvas, center, zoom, token) {
     for (let tileX = startTileX; tileX <= endTileX; tileX++) {
       if (token !== flockMapDrawToken) return drewAny;
       const wrappedX = wrapTileX(tileX, zoom);
-      const bitmap = await loadLocalTileBitmap(zoom, wrappedX, tileY);
+      let bitmap = await loadLocalTileBitmap(zoom, wrappedX, tileY);
+      if (!bitmap) {
+        bitmap = await loadDeviceTileBitmap(zoom, wrappedX, tileY);
+      }
       if (!bitmap) continue;
       const dx = Math.round((tileX * 256) - startX);
       const dy = Math.round((tileY * 256) - startY);
@@ -1061,15 +1310,17 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
     if (px < -24 || px > canvas.width + 24 || py < -24 || py > canvas.height + 24) return;
 
     const radiusPx = Math.max(3, Math.min(48, Number(pin.radiusM || 0) / Math.max(0.01, metersPerPixel)));
-    ctx.fillStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.12)' : 'rgba(248,113,113,0.12)';
-    ctx.strokeStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.45)' : 'rgba(248,113,113,0.45)';
+    const fillColor = pin.kind === 'drone' ? 'rgba(56,189,248,0.12)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.12)' : 'rgba(248,113,113,0.12)');
+    const strokeColor = pin.kind === 'drone' ? 'rgba(56,189,248,0.45)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.45)' : 'rgba(248,113,113,0.45)');
+    ctx.fillStyle = fillColor;
+    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(px, py, radiusPx, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.92)' : 'rgba(248,113,113,0.92)';
+    ctx.fillStyle = pin.kind === 'drone' ? 'rgba(56,189,248,0.92)' : (pin.kind === 'fox' ? 'rgba(251,146,60,0.92)' : 'rgba(248,113,113,0.92)');
     ctx.beginPath();
     ctx.arc(px, py, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -1121,15 +1372,15 @@ async function drawFlockMap() {
   ctx.fillRect(8, canvas.height - 24, canvas.width - 16, 16);
   ctx.fillStyle = '#d4d4d8';
   ctx.font = '11px Segoe UI, Aptos, sans-serif';
-  ctx.fillText(`Zoom ${zoom} · ${pins.length} pinned cameras${drewTiles ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
+  ctx.fillText(`Zoom ${zoom} · ${pins.length} pinned devices${drewTiles ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
 
   if (!pins.length) {
     ctx.fillStyle = 'rgba(9,9,11,0.68)';
     ctx.fillRect(40, 46, canvas.width - 80, 42);
     ctx.fillStyle = '#e4e4e7';
-    ctx.fillText('No pinned Flock devices yet.', 54, 58);
+    ctx.fillText('No pinned devices yet.', 54, 58);
     ctx.fillStyle = '#a1a1aa';
-    ctx.fillText('Save camera GPS/manual pins to populate the map.', 54, 72);
+    ctx.fillText('Save GPS or manual pins across the applets to populate the map.', 54, 72);
   }
 }
 
@@ -1145,12 +1396,16 @@ function dismissFlockMapAlert() {
 }
 
 async function loadFlockMapTiles() {
-  if (!gpsMapEligible()) {
-    toast('Enable GPS and connect a live GPS client first');
-    return;
-  }
   if (!window.showDirectoryPicker) {
-    toast('This browser cannot open local tile folders');
+    const status = await api('/api/map/status');
+    if (status && status.available) {
+      flockMapAlertDismissed = false;
+      renderFlockMapPanel();
+      await drawFlockMap();
+      toast('Using /sdcard/map tiles from the device');
+    } else {
+      toast('This browser cannot open local tile folders, and /sdcard/map is not available on the device');
+    }
     return;
   }
   try {
@@ -1177,29 +1432,29 @@ function renderFlockMapPanel() {
   if (tilesBtn) tilesBtn.disabled = !eligible;
   if (summary) {
     summary.textContent = eligible
-      ? 'Triple-click the GPS tile or use Open Map to view pinned Flock devices. Double-click the map to cycle zoom.'
-      : 'Enable GPS tagging and allow a connected client before opening the Flock map.';
+      ? 'Triple-click the GPS tile or use Open Map to view pinned devices from Flock, Fox, and Sky. Tiles load from /sdcard/map when available, or from a browser-selected folder. Double-click the map to cycle zoom.'
+      : 'Open the pinned-device map to review saved locations from Flock, Fox, and Sky.';
   }
 
   if (!eligible) {
     flockMapVisible = false;
-    el.innerHTML = '<div class="empty" style="padding:14px 0"><div class="icon" style="font-size:24px">&#128506;</div>Map view is locked until GPS tagging is enabled and a client is sharing location.</div>';
+    el.innerHTML = '<div class="empty" style="padding:14px 0"><div class="icon" style="font-size:24px">&#128506;</div>No pinned locations yet. Save a GPS or manual pin from any applet to populate the shared map.</div>';
     return;
   }
 
   if (!flockMapVisible) {
-    el.innerHTML = `<div class="empty" style="padding:14px 0"><div class="icon" style="font-size:24px">&#128506;</div>Triple-click the GPS tile to open the map, or use Open Map above.<br><small style="color:var(--dim)">Pinned cameras render on a gray grid even if offline tiles are not loaded.</small></div>`;
+    el.innerHTML = `<div class="empty" style="padding:14px 0"><div class="icon" style="font-size:24px">&#128506;</div>Triple-click the GPS tile to open the map, or use Open Map above.<br><small style="color:var(--dim)">Pinned devices render on a gray grid even if offline tiles are not loaded.</small></div>`;
     return;
   }
 
   const showAlert = !flockMapTileDir && !flockMapAlertDismissed;
   el.innerHTML = `
     ${showAlert ? `<div style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(248,113,113,.45);background:rgba(127,29,29,.18);border-radius:10px;color:#fecaca;font-size:12px">
-      No offline tiles loaded yet. The map is using a gray grid fallback. <a href="https://github.com/colonelpanichacks/ouispy-c6#offline-flock-map-addon" target="_blank">README instructions</a>
+      No map tiles are currently loading from a browser folder or /sdcard/map. The map is using a gray grid fallback. <a href="https://github.com/colonelpanichacks/ouispy-c6#offline-flock-map-addon" target="_blank">README instructions</a>
       <button class="btn sm" style="margin-left:8px;border-color:var(--rose);color:var(--rose)" onclick="dismissFlockMapAlert()">Clear</button>
     </div>` : ''}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-      <button class="btn sm" onclick="loadFlockMapTiles()">${flockMapTileDir ? 'Reload Tiles' : 'Load Tiles'}</button>
+      <button class="btn sm" onclick="loadFlockMapTiles()">${flockMapTileDir ? 'Reload Tiles' : 'Load Device/Folder Tiles'}</button>
       <button class="btn sm" onclick="cycleFlockMapZoom()">Zoom ${flockMapZoom()}</button>
     </div>
     <canvas id="flockMapCanvas" width="320" height="220" ondblclick="cycleFlockMapZoom()" style="width:100%;max-width:100%;border-radius:12px;border:1px solid var(--border);background:#15181c"></canvas>`;
@@ -1209,7 +1464,7 @@ function renderFlockMapPanel() {
 
 function toggleFlockMap(forceOpen) {
   if (!gpsMapEligible()) {
-    toast('Enable GPS tagging and allow location before opening the map');
+    toast('No pinned devices available yet');
     return;
   }
   flockMapVisible = typeof forceOpen === 'boolean' ? forceOpen : !flockMapVisible;
@@ -1349,10 +1604,28 @@ function loggingStatusText() {
   return state.loggingStatus || (state.loggingActive ? 'Active' : (state.loggingBlocked ? 'Waiting for microSD' : 'Off'));
 }
 
+function formatStorageAmount(kb, includeTenths) {
+  const value = Number(kb || 0);
+  if (!Number.isFinite(value) || value <= 0) return '0 KB';
+  if (value >= 1024) {
+    const mb = value / 1024;
+    return includeTenths ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
+  }
+  return `${Math.round(value)} KB`;
+}
+
+function formatStorageUsageCompact(usedKb, totalKb) {
+  const total = Number(totalKb || 0);
+  const used = Number(usedKb || 0);
+  if (!Number.isFinite(total) || total <= 0) return 'No card capacity data yet';
+  return `${formatStorageAmount(used, true)} used of ${formatStorageAmount(total, false)}`;
+}
+
 function loggingSummaryText() {
   const mode = state.loggingStatus || 'RAM only';
   const diag = state.advancedLoggingEnabled ? 'Advanced diagnostics on.' : 'Advanced diagnostics off.';
-  return mode + '. ' + diag;
+  const storage = state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) + '.' : '';
+  return mode + '. ' + storage + ' ' + diag;
 }
 
 function updateHeaderLoggingStatus() {
@@ -1448,6 +1721,7 @@ function updateUI() {
   updateTabs();
 
   const m = Number(state.mode);
+  if (m !== 3) stopSkyRadarAnimation();
   const main = $('#main');
   const domView = main ? Number(main.dataset.view || -1) : -1;
   const forceViewRender = (m !== currentView) || (domView !== m);
@@ -1585,21 +1859,10 @@ function renderMainMenuLogs() {
 
   const entries = Array.isArray(logsData[logFilter]) ? logsData[logFilter] : [];
   if (!entries.length) {
-    host.innerHTML = '<div class="empty"><div class="icon">🗂️</div>No log entries available for this filter.</div>';
+    host.innerHTML = '<div class="empty"><div class="icon">&#128450;</div>No log entries available for this filter.</div>';
     return;
   }
-
-  host.innerHTML = `<div class="log-list">${entries.map(entry => `
-    <div class="log-entry">
-      <div class="log-entry-top">
-        <div class="log-entry-meta">
-          <span class="log-source ${htmlEsc(entry.source)}">${htmlEsc(entry.source)}</span>
-          <span class="log-kind">${htmlEsc(entry.kind)}</span>
-        </div>
-        <span class="log-time">${logBootStamp(entry.ts)} · ${logAgeLabel(entry.ts)}</span>
-      </div>
-      <div class="log-msg">${htmlEsc(entry.message)}</div>
-    </div>`).join('')}</div>`;
+  renderLogEntries(host, entries, 'No log entries available for this filter.');
 }
 
 function updateMainMenuLive() {
@@ -1614,7 +1877,7 @@ function updateMainMenuLive() {
 let flockRefresh = 0;
 function renderFlock() {
   const c = $('#main');
-  const mapReady = !!state.gpsTagActive;
+  const mapReady = gpsMapEligible();
   c.innerHTML = `
     <div class="card">
       <h2>Surveillance Hardware Scanner</h2>
@@ -1622,7 +1885,7 @@ function renderFlock() {
         <div class="stat highlight"><div class="val" id="fDevCount">${state.deviceCount||0}</div><div class="lbl">Detected</div></div>
         <div class="stat"><div class="val" id="fFlockCount" style="color:var(--flock)">--</div><div class="lbl">Flock</div></div>
         <div class="stat"><div class="val" id="fRavenCount" style="color:var(--fox)">--</div><div class="lbl">Raven</div></div>
-        <div class="stat gps off" id="fGpsBlock" onclick="handleFlockMapTap()" title="Triple-click to open the Flock pin map when GPS is live"><div class="val" id="fGpsState">OFF</div><div class="lbl" id="fGpsLabel">GPS</div></div>
+        <div class="stat gps off" id="fGpsBlock" onclick="handleFlockMapTap()" title="Triple-click to open the shared pinned-device map"><div class="val" id="fGpsState">OFF</div><div class="lbl" id="fGpsLabel">GPS</div></div>
       </div>
     </div>
     <div class="card">
@@ -1638,9 +1901,9 @@ function renderFlock() {
       <div id="devList" class="dev-list"></div>
     </div>
     <div class="card">
-      <h2>Flock Pin Map</h2>
+      <h2>Pinned Device Map</h2>
       <div class="gps-toolbar">
-        <div class="gps-status" id="flockMapSummary">${mapReady ? 'Triple-click the GPS tile or use Open Map to view pinned Flock devices. Double-click the map to cycle zoom.' : 'Enable GPS tagging and allow a connected client before opening the Flock map.'}</div>
+        <div class="gps-status" id="flockMapSummary">${mapReady ? 'Triple-click the GPS tile or use Open Map to view pinned devices from Flock, Fox, and Sky. Double-click the map to cycle zoom.' : 'Open the shared map to review pinned devices from Flock, Fox, and Sky.'}</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn sm" id="flockMapToggleBtn" onclick="toggleFlockMap()" ${mapReady ? '' : 'disabled'}>${flockMapVisible ? 'Hide Map' : 'Open Map'}</button>
           <button class="btn sm" id="flockMapTilesBtn" onclick="loadFlockMapTiles()" ${mapReady ? '' : 'disabled'}>Load Tiles</button>
@@ -1673,7 +1936,7 @@ function renderDevList() {
     const gpsButtons = d.flock
       ? `<button class="btn sm" ${gpsDisabled} ${gpsTitle} onclick="event.stopPropagation();markCameraLocation('${htmlEsc(d.mac)}')">📍 GPS</button>
         <button class="btn sm" onclick="event.stopPropagation();if(promptManualLocation('${htmlEsc(d.mac)}')){toast('Manual location saved');renderDevList();}">Manual</button>
-         ${loc ? `<button class="btn sm" onclick="event.stopPropagation();clearCameraLocation('${htmlEsc(d.mac)}')">✕</button>` : ''}`
+         ${loc ? `<button class="btn sm" onclick="event.stopPropagation();requestClearCameraLocation('${htmlEsc(d.mac)}', renderDevList)">✕</button>` : ''}`
       : '';
     html += `<div class="dev-item" onclick="trackDevice(${i})">
       <div class="dev-icon ${ic}">${sym}</div>
@@ -1721,7 +1984,7 @@ async function trackDevice(i) {
         lon: pos.coords.longitude,
         rssi: Number(device.rssi || -85)
       });
-      saveCameraLocation(device.mac, pos.coords.latitude, pos.coords.longitude, 'gps', Number(device.rssi || -85), 'flock');
+      saveCameraLocation(device.mac, pos.coords.latitude, pos.coords.longitude, 'gps', Number(device.rssi || -85), 'flock', 'flock');
     } catch (e) {
       // GPS capture failed, proceed without it
     }
@@ -1744,7 +2007,7 @@ async function trackDrone(mac) {
         lon: pos.coords.longitude,
         rssi: rssi
       });
-      saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, 'drone');
+      saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, 'drone', 'drone');
     } catch (e) {
       // GPS capture failed, proceed without it
       api('/api/sky/track', {mac: mac, rssi: rssi});
@@ -1762,6 +2025,284 @@ let foxRegistry = [], foxNearby = [];
 let foxLiveCounter = 0;
 async function fetchFoxRegistry() { foxRegistry = await api('/api/fox/registry') || []; }
 async function fetchFoxNearby()   { foxNearby   = await api('/api/fox/nearby')   || []; }
+
+function setFoxSelected(mac) {
+  foxSelectedMac = String(mac || '').toUpperCase();
+  renderFoxInner();
+}
+
+function setFoxViewFilter(filter) {
+  foxViewFilter = filter;
+  renderFoxInner();
+}
+
+function setFoxSearchQuery(value) {
+  foxSearchQuery = String(value || '');
+  renderFoxInner();
+}
+
+function foxRegistryEntryForMac(mac) {
+  const target = String(mac || '').toUpperCase();
+  return (foxRegistry || []).find(entry => String(entry.mac || '').toUpperCase() === target) || null;
+}
+
+function foxEncounterLabel(device) {
+  const age = foxSeenAgeSec(device);
+  const seen = foxSeenDurationSec(device);
+  const rssi = Number(device.rssi || -100);
+  const best = Number(device.bestRssi || rssi);
+  const hits = Number(device.hits || 0);
+  if (age <= 8 && rssi >= -80) return 'nearby';
+  if (age <= 12 && seen >= 20 && hits >= 4 && (rssi >= -82 || best >= -78)) return 'following';
+  return 'detected';
+}
+
+function foxItemSection(item) {
+  if (!item) return 'auto';
+  if (item.registry && item.registry.section) return normRegSection(item.registry.section);
+  if (item.hasDrone) return 'drone';
+  if (item.hasFlock) return 'flock';
+  if (item.hasWifi) return 'wifi';
+  return 'ble';
+}
+
+function foxItemTrackMode(item) {
+  return foxItemSection(item) === 'drone' ? 'drone' : 'flock';
+}
+
+function foxItemTrackKind(item) {
+  const section = foxItemSection(item);
+  if (section === 'drone') return 'drone';
+  if (section === 'flock') return 'flock';
+  return 'fox';
+}
+
+function foxDisplayName(item) {
+  if (!item) return 'Device';
+  if (item.registry) return regDisplayName(item.registry);
+  return item.name || item.mac || 'Device';
+}
+
+function foxBuildConsoleItems() {
+  const items = new Map();
+  const ensure = mac => {
+    const key = String(mac || '').toUpperCase();
+    if (!items.has(key)) {
+      items.set(key, {
+        mac: key,
+        name: key,
+        sourceType: 'ble',
+        sourceLabel: 'BLE',
+        rssi: -128,
+        bestRssi: -128,
+        hits: 0,
+        ageSec: Number.MAX_SAFE_INTEGER,
+        seenSec: 0,
+        saved: false,
+        online: false,
+        pinned: !!getStoredLocation(key),
+        hasWifi: false,
+        hasFlock: false,
+        hasDrone: false,
+        hasFoxBle: false,
+        encounter: 'detected',
+        registryIndex: -1,
+        registry: null,
+        currentTarget: false
+      });
+    }
+    return items.get(key);
+  };
+
+  (foxRegistry || []).forEach((entry, index) => {
+    const item = ensure(entry.mac);
+    item.saved = true;
+    item.registryIndex = index;
+    item.registry = entry;
+    item.name = foxDisplayName({ registry: entry, mac: entry.mac });
+    item.sourceType = 'saved';
+    item.sourceLabel = 'Saved profile';
+    item.online = !!entry.online || item.online;
+    if (Number.isFinite(Number(entry.lastSeenAgeSec)) && Number(entry.lastSeenAgeSec) >= 0) item.ageSec = Math.min(item.ageSec, Number(entry.lastSeenAgeSec));
+    if (Number.isFinite(Number(entry.liveRssi)) && Number(entry.liveRssi) > -127) item.rssi = Number(entry.liveRssi);
+    if (Number(entry.liveHits || 0) > item.hits) item.hits = Number(entry.liveHits || 0);
+  });
+
+  (foxNearby || []).forEach(device => {
+    const item = ensure(device.mac);
+    item.hasFoxBle = true;
+    item.online = true;
+    item.sourceType = item.saved ? item.sourceType : 'ble';
+    item.sourceLabel = 'Fox BLE';
+    item.name = device.name || item.name;
+    item.rssi = Number(device.rssi || item.rssi);
+    item.bestRssi = Math.max(Number(device.bestRssi || device.rssi || -128), item.bestRssi);
+    item.hits = Math.max(Number(device.hits || 0), item.hits);
+    item.ageSec = Math.min(item.ageSec, foxSeenAgeSec(device));
+    item.seenSec = Math.max(item.seenSec, foxSeenDurationSec(device));
+    item.encounter = foxEncounterLabel(device);
+  });
+
+  (state.wifiClientMacs || []).forEach(mac => {
+    const item = ensure(mac);
+    item.hasWifi = true;
+    item.online = true;
+    item.sourceType = item.saved ? item.sourceType : 'wifi';
+    item.sourceLabel = 'WiFi client';
+    item.name = item.name === item.mac ? 'WiFi Client' : item.name;
+    item.ageSec = 0;
+    item.bestRssi = Math.max(item.bestRssi, -85);
+    item.rssi = item.rssi > -127 ? item.rssi : -85;
+  });
+
+  devices.filter(device => device.flock).forEach(device => {
+    const item = ensure(device.mac);
+    item.hasFlock = true;
+    item.online = true;
+    item.sourceType = item.saved ? item.sourceType : 'flock';
+    item.sourceLabel = device.raven ? 'Raven sensor' : 'Flock device';
+    item.name = device.name || item.name;
+    item.rssi = Number(device.rssi || item.rssi);
+    item.bestRssi = Math.max(Number(device.bestRssi || device.rssi || -128), item.bestRssi);
+    item.hits = Math.max(Number(device.hits || 0), item.hits);
+    item.ageSec = Math.min(item.ageSec, Math.max(0, (state.uptime || 0) - Number(device.lastSeen || state.uptime || 0)));
+  });
+
+  (drones || []).forEach(drone => {
+    const item = ensure(drone.mac);
+    item.hasDrone = true;
+    item.online = true;
+    item.sourceType = item.saved ? item.sourceType : 'drone';
+    item.sourceLabel = drone.proto ? `${drone.proto} drone` : 'Drone';
+    item.name = drone.id || item.name;
+    item.rssi = Number(drone.rssi || item.rssi);
+    item.bestRssi = Math.max(item.bestRssi, Number(drone.rssi || -128));
+    item.ageSec = Math.min(item.ageSec, Math.max(0, (state.uptime || 0) - Number(drone.lastSeen || state.uptime || 0)));
+  });
+
+  const foxState = state.fox || {};
+  return Array.from(items.values()).map(item => {
+    const pinned = getStoredLocation(item.mac);
+    const currentTarget = String(foxState.target || '').toUpperCase() === item.mac;
+    return Object.assign(item, {
+      pinned: !!pinned,
+      pinnedLocation: pinned,
+      currentTarget,
+      gpsLat: currentTarget ? Number(foxState.estLat || 0) : 0,
+      gpsLon: currentTarget ? Number(foxState.estLon || 0) : 0,
+      gpsRadiusM: currentTarget ? Number(foxState.estRadiusM || 0) : 0,
+      gpsSamples: currentTarget ? Number(foxState.gpsSamples || 0) : 0,
+      ageSec: Number.isFinite(item.ageSec) && item.ageSec < Number.MAX_SAFE_INTEGER ? item.ageSec : -1
+    });
+  });
+}
+
+function foxFilterCounts(items) {
+  return {
+    priority: items.filter(item => item.currentTarget || item.saved || item.pinned || item.encounter === 'nearby' || item.encounter === 'following').length,
+    saved: items.filter(item => item.saved).length,
+    live: items.filter(item => item.online || item.hasWifi || item.hasFlock || item.hasDrone || item.hasFoxBle).length,
+    nearby: items.filter(item => item.encounter === 'nearby').length,
+    following: items.filter(item => item.encounter === 'following').length,
+    pinned: items.filter(item => item.pinned).length
+  };
+}
+
+function foxItemMatchesFilter(item) {
+  switch (foxViewFilter) {
+    case 'saved': return item.saved;
+    case 'live': return item.online || item.hasWifi || item.hasFlock || item.hasDrone || item.hasFoxBle;
+    case 'nearby': return item.encounter === 'nearby';
+    case 'following': return item.encounter === 'following';
+    case 'wifi': return item.hasWifi;
+    case 'flock': return item.hasFlock;
+    case 'drone': return item.hasDrone;
+    case 'ble': return item.hasFoxBle;
+    case 'all': return true;
+    case 'priority':
+    default:
+      return item.currentTarget || item.saved || item.pinned || item.encounter === 'nearby' || item.encounter === 'following';
+  }
+}
+
+function foxItemMatchesSearch(item) {
+  const needle = foxSearchQuery.trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [
+    item.mac,
+    item.name,
+    item.sourceLabel,
+    item.registry && item.registry.label,
+    item.registry && item.registry.nickname,
+    item.registry && item.registry.notes,
+    item.registry && item.registry.originalName
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(needle);
+}
+
+function foxFilteredConsoleItems(allItems) {
+  return allItems
+    .filter(item => foxItemMatchesFilter(item) && foxItemMatchesSearch(item))
+    .sort((a, b) => {
+      if (a.currentTarget !== b.currentTarget) return a.currentTarget ? -1 : 1;
+      if (a.saved !== b.saved) return a.saved ? -1 : 1;
+      const aAge = Number.isFinite(Number(a.ageSec)) ? Number(a.ageSec) : Number.MAX_SAFE_INTEGER;
+      const bAge = Number.isFinite(Number(b.ageSec)) ? Number(b.ageSec) : Number.MAX_SAFE_INTEGER;
+      if (aAge !== bAge) return aAge - bAge;
+      if (a.rssi !== b.rssi) return b.rssi - a.rssi;
+      return foxDisplayName(a).localeCompare(foxDisplayName(b));
+    });
+}
+
+function foxResolveSelectedItem(filteredItems, allItems) {
+  const current = filteredItems.find(item => item.mac === foxSelectedMac)
+    || allItems.find(item => item.mac === foxSelectedMac)
+    || filteredItems[0]
+    || allItems[0]
+    || null;
+  foxSelectedMac = current ? current.mac : '';
+  return current;
+}
+
+function currentSelectedFoxItem() {
+  return foxResolveSelectedItem(foxFilteredConsoleItems(foxBuildConsoleItems()), foxBuildConsoleItems());
+}
+
+async function saveSelectedFoxRegistryMeta() {
+  const item = currentSelectedFoxItem();
+  if (!item || !item.saved) return;
+  const body = {
+    index: item.registryIndex,
+    nickname: ($('#foxProfileNick') || {}).value || '',
+    notes: ($('#foxProfileNotes') || {}).value || '',
+    section: normRegSection((($('#foxProfileSection') || {}).value || foxItemSection(item)))
+  };
+  const result = await api('/api/fox/registry/update', body);
+  if (result && result.ok) {
+    toast('Saved device profile updated');
+    await fetchFoxRegistry();
+    renderFoxInner();
+  } else {
+    toast('Failed to save device profile');
+  }
+}
+
+function saveSelectedFoxSource() {
+  const item = currentSelectedFoxItem();
+  if (!item || item.saved) return;
+  saveRegistryFromSource(item.mac, encodeURIComponent(foxDisplayName(item)), encodeURIComponent(foxDisplayName(item)), foxItemSection(item), 1);
+}
+
+function deleteSelectedFoxRegistry() {
+  const item = currentSelectedFoxItem();
+  if (!item || !item.saved) return;
+  showHoldConfirm('Are you sure you want to delete this?', async () => {
+    await removeFromRegistry(item.registryIndex);
+    foxSelectedMac = '';
+    await fetchFoxRegistry();
+    renderFoxInner();
+  }, 'Delete Saved Device');
+}
 
 function htmlEsc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1848,7 +2389,8 @@ async function saveRegistryFromSource(mac, label, originalName, section, encoded
   if(r && r.ok) {
     toast('Saved to registry');
     await fetchFoxRegistry();
-    const el = $('#foxRegList'); if(el) el.innerHTML = renderFoxRegList();
+    foxSelectedMac = String(mac || '').toUpperCase();
+    renderFoxInner();
   } else {
     toast(`Registry full (${foxRegistryCapacity()}) or error`);
   }
@@ -1905,6 +2447,13 @@ function renderFoxContactRow(d, opts) {
   const seenSec = foxSeenDurationSec(d);
   const hits = Number(d.hits || 0);
   const best = Number(d.bestRssi || d.rssi || -100);
+  const loc = getStoredLocation(d.mac);
+  const locHtml = loc
+    ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">map</a></div>`
+    : '';
+  const gpsOn = gpsEffectiveEnabled();
+  const gpsDisabled = gpsOn ? '' : 'disabled';
+  const gpsTitle = gpsOn ? '' : 'title="GPS is off or unavailable in this context"';
 
   return `
     <div class="fox-contact">
@@ -1920,12 +2469,50 @@ function renderFoxContactRow(d, opts) {
           <span class="fox-chip">seen ${seenSec}s</span>
           <span class="fox-chip">${ageSec}s ago</span>
         </div>
+        ${locHtml}
       </div>
       <div class="fox-contact-actions">
         <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-          onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
+          onclick="lockFox('${htmlEsc(d.mac)}', { rssi: ${Number(d.rssi || -85)}, mode: 'flock', kind: 'fox' })">&#127919;</button>
+        <button class="btn sm" ${gpsDisabled} ${gpsTitle}
+          onclick="markDeviceLocation('${htmlEsc(d.mac)}', { mode: 'flock', kind: 'fox', rssi: ${Number(d.rssi || -85)}, rerender: 'fox' })">&#128205;</button>
+        <button class="btn sm"
+          onclick="if(promptManualLocation('${htmlEsc(d.mac)}', { mode: 'flock', kind: 'fox', rssi: ${Number(d.rssi || -85)} })){toast('Manual location saved');renderFoxInner();}">Manual</button>
+        ${loc ? `<button class="btn sm" onclick="requestClearCameraLocation('${htmlEsc(d.mac)}', renderFoxInner)">&#10005;</button>` : ''}
         <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
           onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'BLE Advertiser')}','${encodeURIComponent(d.name||'BLE Advertiser')}','ble',1)">+ Save</button>
+      </div>
+    </div>`;
+}
+
+function renderFoxWifiRow(mac, ssid) {
+  const loc = getStoredLocation(mac);
+  const gpsOn = gpsEffectiveEnabled();
+  const gpsDisabled = gpsOn ? '' : 'disabled';
+  const gpsTitle = gpsOn ? '' : 'title="GPS is off or unavailable in this context"';
+
+  return `
+    <div class="fox-contact">
+      <div class="fox-contact-avatar">&#128246;</div>
+      <div class="fox-contact-main">
+        <div class="fox-contact-name">${htmlEsc(mac)}</div>
+        <div class="fox-contact-sub">${htmlEsc(ssid)} AP client</div>
+        <div class="fox-contact-meta">
+          <span class="fox-chip near">CONNECTED</span>
+          <span class="fox-chip">802.11 Wi-Fi</span>
+          <span class="fox-chip">source wifi</span>
+        </div>
+        ${loc ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">map</a></div>` : ''}
+      </div>
+      <div class="fox-contact-actions">
+        <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
+          onclick="lockFox('${htmlEsc(mac)}', { rssi: -85, mode: 'flock', kind: 'fox' })">&#127919; Track</button>
+        <button class="btn sm" ${gpsDisabled} ${gpsTitle}
+          onclick="markDeviceLocation('${htmlEsc(mac)}', { mode: 'flock', rssi: -85, rerender: 'fox' })">&#128205;</button>
+        <button class="btn sm" onclick="if(promptManualLocation('${htmlEsc(mac)}', { mode: 'flock', kind: 'fox', rssi: -85 })){toast('Manual location saved');renderFoxInner();}">Manual</button>
+        ${loc ? `<button class="btn sm" onclick="requestClearCameraLocation('${htmlEsc(mac)}', renderFoxInner)">&#10005;</button>` : ''}
+        <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
+          onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
       </div>
     </div>`;
 }
@@ -1972,9 +2559,10 @@ function renderFox() {
 }
 function renderFoxInner() {
   const f = state.fox || {};
-  const wifiMacs  = state.wifiClientMacs || [];
-  const flockDevs = devices.filter(d => d.flock);
-  const foxAp = apInfoForMode(2);
+  const allItems = foxBuildConsoleItems();
+  const filteredItems = foxFilteredConsoleItems(allItems);
+  const selected = foxResolveSelectedItem(filteredItems, allItems);
+  const counts = foxFilterCounts(allItems);
   const c = $('#main');
   const lastSeenLabel = f.found ? 'just now' : ((f.lastSeenSec||0) > 0 ? (f.lastSeenSec + 's ago') : 'unknown');
   const proxLabel = f.proximity || 'very far';
@@ -2009,80 +2597,98 @@ function renderFoxInner() {
       </div></div>`;
   }
 
-  // ── WiFi Clients ──
-  const wifiHtml = wifiMacs.length
-    ? wifiMacs.map(mac => `
-        <div class="fox-contact">
-          <div class="fox-contact-avatar">&#128246;</div>
-          <div class="fox-contact-main">
-            <div class="fox-contact-name">${htmlEsc(mac)}</div>
-            <div class="fox-contact-sub">${htmlEsc(foxAp.ssid)} AP client</div>
-            <div class="fox-contact-meta">
-              <span class="fox-chip near">CONNECTED</span>
-              <span class="fox-chip">802.11 Wi-Fi</span>
-              <span class="fox-chip">source wifi</span>
+  const consoleRows = filteredItems.length
+    ? filteredItems.map(item => {
+        const selectedCls = selected && selected.mac === item.mac ? ' selected' : '';
+        const loc = item.pinnedLocation;
+        const metaChips = [
+          item.currentTarget ? '<span class="fox-chip near">TARGET</span>' : '',
+          item.saved ? '<span class="fox-chip">SAVED</span>' : '',
+          item.pinned ? '<span class="fox-chip">PINNED</span>' : '',
+          item.encounter === 'nearby' ? '<span class="fox-chip near">LIKELY NEARBY</span>' : '',
+          item.encounter === 'following' ? '<span class="fox-chip follow">LIKELY FOLLOWING</span>' : '',
+          item.sourceLabel ? `<span class="fox-chip">${htmlEsc(item.sourceLabel)}</span>` : '',
+          Number.isFinite(Number(item.rssi)) && Number(item.rssi) > -127 ? `<span class="fox-chip">${Number(item.rssi)} dBm</span>` : '',
+          Number.isFinite(Number(item.ageSec)) && Number(item.ageSec) >= 0 ? `<span class="fox-chip">${shortAgeLabel(item.ageSec)}</span>` : ''
+        ].filter(Boolean).join('');
+        return `
+          <div class="fox-contact${selectedCls}" onclick="setFoxSelected('${htmlEsc(item.mac)}')">
+            <div class="fox-contact-avatar">${item.hasDrone ? '&#128641;' : (item.hasFlock ? '&#128247;' : (item.hasWifi ? '&#128246;' : '&#128225;'))}</div>
+            <div class="fox-contact-main">
+              <div class="fox-contact-name">${htmlEsc(foxDisplayName(item))}</div>
+              <div class="fox-contact-sub">${htmlEsc(item.mac)}</div>
+              <div class="fox-contact-meta">${metaChips}</div>
+              ${loc ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)}</div>` : ''}
             </div>
-          </div>
-          <div class="fox-contact-actions">
-            <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-              onclick="lockFox('${htmlEsc(mac)}')">&#127919; Track</button>
-            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-              onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
-          </div>
-        </div>`).join('')
-    : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No clients connected to ${htmlEsc(foxAp.ssid)}</div>`;
+            <div class="fox-contact-actions">
+              <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="event.stopPropagation();lockFox('${htmlEsc(item.mac)}', { rssi: ${Number.isFinite(Number(item.rssi)) && Number(item.rssi) > -127 ? Number(item.rssi) : -85}, mode: '${foxItemTrackMode(item)}', kind: '${foxItemTrackKind(item)}' })">Track</button>
+            </div>
+          </div>`;
+      }).join('')
+    : '<div class="fox-empty-inline">No devices match this filter yet.</div>';
 
-  // ── Flock Cameras ──
-  const flockHtml = flockDevs.length
-    ? flockDevs.map(d => `
-        <div class="fox-contact">
-          <div class="fox-contact-avatar">${d.raven?'&#128266;':'&#128247;'}</div>
+  const selectedProfile = (() => {
+    if (!selected) {
+      return `<div class="card fox-detail-card"><h2>Device Profile</h2><div class="fox-empty-inline">Select a device to inspect its profile, pin state, and logging context.</div></div>`;
+    }
+    const loc = selected.pinnedLocation;
+    const gpsReady = gpsEffectiveEnabled();
+    const liveRssi = Number.isFinite(Number(selected.rssi)) && Number(selected.rssi) > -127 ? Number(selected.rssi) : -85;
+    const estimate = selected.currentTarget && Number(selected.gpsSamples || 0) > 0
+      ? `<div class="fox-profile-map">Fox fused GPS estimate: ${formatCoord(selected.gpsLat)}, ${formatCoord(selected.gpsLon)} &middot; radius ~${Math.round(selected.gpsRadiusM || 0)} m &middot; ${selected.gpsSamples} samples</div>`
+      : '';
+    const pinInfo = loc
+      ? `<div class="fox-profile-map">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">open map</a></div>`
+      : `<div class="fox-profile-map">${gpsReady ? 'Browser GPS is ready. Use Mark GPS to pin this device profile immediately.' : 'No pin saved for this device yet.'}</div>`;
+    const registryFields = selected.saved ? `
+      <div class="fox-detail-grid">
+        <div>
+          <dt style="margin-bottom:4px;color:var(--dim);font-size:12px">Nickname</dt>
+          <input class="input-sm" id="foxProfileNick" maxlength="23" value="${htmlEsc((selected.registry && selected.registry.nickname) || '')}" placeholder="Friendly nickname">
+        </div>
+        <div>
+          <dt style="margin-bottom:4px;color:var(--dim);font-size:12px">Section</dt>
+          <select class="sel-sm" id="foxProfileSection">${regSectionOptions(selected.registry && selected.registry.section)}</select>
+        </div>
+        <div>
+          <dt style="margin-bottom:4px;color:var(--dim);font-size:12px">Notes</dt>
+          <textarea class="txt-sm" id="foxProfileNotes" maxlength="95" placeholder="Operator notes, behavior, location clues...">${htmlEsc((selected.registry && selected.registry.notes) || '')}</textarea>
+        </div>
+      </div>`
+      : `<div class="fox-detail-note">This device is not in the saved Fox registry yet. Save it here to keep notes, section labels, and long-term tracking context.</div>`;
+    return `
+      <div class="card fox-detail-card">
+        <h2>Device Profile</h2>
+        <div class="fox-contact" style="padding:0;border:none;background:transparent">
+          <div class="fox-contact-avatar">${selected.hasDrone ? '&#128641;' : (selected.hasFlock ? '&#128247;' : (selected.hasWifi ? '&#128246;' : '&#128225;'))}</div>
           <div class="fox-contact-main">
-            <div class="fox-contact-name">${htmlEsc(d.name||'Flock Device')}</div>
-            <div class="fox-contact-sub">${htmlEsc(d.mac)}</div>
+            <div class="fox-contact-name">${htmlEsc(foxDisplayName(selected))}</div>
+            <div class="fox-contact-sub">${htmlEsc(selected.mac)}</div>
             <div class="fox-contact-meta">
-              <span class="fox-chip">${d.raven?'Raven Sensor':'Flock Camera'}</span>
-              <span class="fox-chip">${d.rssi} dBm</span>
-              <span class="fox-chip">best ${d.bestRssi} dBm</span>
-              <span class="fox-chip">hits ${d.hits}</span>
-              <span class="fox-chip">${agoStr(d.lastSeen)}</span>
+              <span class="fox-chip">${htmlEsc(sectionPretty(foxItemSection(selected)))}</span>
+              ${selected.saved ? '<span class="fox-chip near">Saved profile</span>' : '<span class="fox-chip detected">Session device</span>'}
+              ${selected.currentTarget ? '<span class="fox-chip near">Current target</span>' : ''}
+              ${Number.isFinite(Number(selected.ageSec)) && Number(selected.ageSec) >= 0 ? `<span class="fox-chip">Seen ${htmlEsc(shortAgeLabel(selected.ageSec))}</span>` : ''}
+              ${Number.isFinite(Number(selected.bestRssi)) && Number(selected.bestRssi) > -127 ? `<span class="fox-chip">Best ${Number(selected.bestRssi)} dBm</span>` : ''}
+              ${selected.hits ? `<span class="fox-chip">Hits ${selected.hits}</span>` : ''}
             </div>
+            ${pinInfo}
+            ${estimate}
           </div>
-          <div class="fox-contact-actions">
-            <button class="btn sm" style="border-color:var(--flock);color:var(--flock)"
-              onclick="lockFox('${htmlEsc(d.mac)}')">&#127919;</button>
-            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-              onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.name||'Flock Device')}','${encodeURIComponent(d.name||'Flock Device')}','flock',1)">+ Save</button>
-          </div>
-        </div>`).join('')
-    : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No Flock devices found &mdash; run Flock You mode to populate</div>`;
-
-  // ── Sky Spy Drones ──
-  const uaNames=['Unknown','Airplane','Helicopter','Gyroplane','HTOL','Ornithopter','Glider','Kite',
-    'Free Balloon','Captive Balloon','Airship','Rocket','Tethered','Ground Obstacle','Other'];
-  const dronesHtml = drones.length
-    ? drones.map(d => `
-        <div class="fox-contact">
-          <div class="fox-contact-avatar">&#128641;</div>
-          <div class="fox-contact-main">
-            <div class="fox-contact-name">${htmlEsc(d.id||'Drone')}</div>
-            <div class="fox-contact-sub">${htmlEsc(d.mac)}</div>
-            <div class="fox-contact-meta">
-              <span class="fox-chip">${htmlEsc(d.proto||'unknown')}</span>
-              <span class="fox-chip">${d.rssi} dBm</span>
-              ${d.uaType?`<span class="fox-chip">${uaNames[d.uaType]||('Type '+d.uaType)}</span>`:''}
-              ${d.hasLoc?`<span class="fox-chip">RID loc</span>`:''}
-              ${d.hasPilot?`<span class="fox-chip">pilot loc</span>`:''}
-            </div>
-          </div>
-          <div class="fox-contact-actions">
-            <button class="btn sm" style="border-color:var(--skyblue);color:var(--skyblue)"
-              onclick="lockFox('${htmlEsc(d.mac)}')">&#127919; Track</button>
-            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-              onclick="saveRegistryFromSource('${htmlEsc(d.mac)}','${encodeURIComponent(d.id||'Drone')}','${encodeURIComponent(d.id||'Drone')}','drone',1)">+ Save</button>
-          </div>
-        </div>`).join('')
-    : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128641;</div>No drones in registry &mdash; run Sky Spy mode to detect</div>`;
+        </div>
+        <div class="fox-detail-actions" style="margin-top:12px">
+          <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="lockFox('${htmlEsc(selected.mac)}', { rssi: ${liveRssi}, mode: '${foxItemTrackMode(selected)}', kind: '${foxItemTrackKind(selected)}' })">Track</button>
+          <button class="btn sm" ${gpsReady ? '' : 'disabled title="GPS is off or unavailable in this context"'} onclick="markDeviceLocation('${htmlEsc(selected.mac)}', { mode: '${foxItemTrackMode(selected)}', kind: '${foxItemTrackKind(selected)}', rssi: ${liveRssi}, rerender: 'fox' })">Mark GPS</button>
+          <button class="btn sm" onclick="if(promptManualLocation('${htmlEsc(selected.mac)}', { mode: '${foxItemTrackMode(selected)}', kind: '${foxItemTrackKind(selected)}', rssi: ${liveRssi} })){toast('Manual location saved');renderFoxInner();}">Manual</button>
+          ${loc ? `<button class="btn sm" onclick="requestClearCameraLocation('${htmlEsc(selected.mac)}', renderFoxInner)">Clear Pin</button>` : ''}
+          ${selected.saved
+            ? `<button class="btn sm" style="border-color:var(--accent);color:var(--accent)" onclick="saveSelectedFoxRegistryMeta()">Save Details</button>
+               <button class="btn sm danger" onclick="deleteSelectedFoxRegistry()">Delete Saved</button>`
+            : `<button class="btn sm" style="border-color:var(--accent);color:var(--accent)" onclick="saveSelectedFoxSource()">Save to Registry</button>`}
+        </div>
+        <div style="margin-top:12px">${registryFields}</div>
+      </div>`;
+  })();
 
   c.innerHTML = `
     <div class="content-grid">
@@ -2121,63 +2727,47 @@ function renderFoxInner() {
       </div>
     </div>
 
-    <div class="card full-row" style="border-left:3px solid var(--fox)">
-      <div class="src-hdr" style="color:var(--fox)">
-        &#128247; WiFi Clients <span class="src-count">${wifiMacs.length} connected to ${htmlEsc(foxAp.ssid)}</span>
-      </div>
-      <p style="font-size:11px;color:var(--dim);margin-bottom:10px">
-        Devices currently associated with the ${htmlEsc(foxAp.ssid)} access point. MACs are tracked on connect/disconnect.
-      </p>
-      <div class="fox-section-list" id="foxWifiSection">${wifiHtml}</div>
-    </div>
-
-    <div class="card" style="border-left:3px solid var(--flock)">
-      <div class="src-hdr" style="color:var(--flock)">
-        &#128247; Flock Cameras &amp; Sensors <span id="foxFlockCount" class="src-count">${flockDevs.length} detected</span>
-      </div>
-      <p style="font-size:11px;color:var(--dim);margin-bottom:10px">
-        ALPR cameras and Raven audio sensors identified via BLE OUI prefix, name, manufacturer ID, or service UUID fingerprinting.
-      </p>
-      <div class="fox-section-list" id="foxFlockSection">${flockHtml}</div>
-    </div>
-
-    <div class="card" style="border-left:3px solid var(--skyblue)">
-      <div class="src-hdr" style="color:var(--skyblue)">
-        &#128641; Sky Spy Drones <span id="foxDroneCount" class="src-count">${drones.length} in registry</span>
-      </div>
-      <p style="font-size:11px;color:var(--dim);margin-bottom:10px">
-        Drones broadcasting ASTM F3411 Remote ID or DJI DroneID captured during Sky Spy sessions.
-      </p>
-      <div class="fox-section-list" id="foxDroneSection">${dronesHtml}</div>
-    </div>
-
-    <div class="card full-row" style="border-left:3px solid var(--accent)">
-      <div class="src-hdr" style="color:var(--accent)">
-        &#128225; BLE Contact Intelligence <span class="src-count">${foxNearby.length} visible</span>
-      </div>
-      <div class="discovering-line">Discovering...</div>
-      <p style="font-size:11px;color:var(--dim);margin-bottom:10px">
-        Grouped by likely nearby, likely following, and detected for faster triage.
-      </p>
-      ${renderFoxBleSmartSections()}
-      <button class="btn sm" style="margin-top:8px;border-color:var(--accent);color:var(--accent)"
-        onclick="Promise.all([fetchDevices(),fetchDrones(),fetchFoxNearby()]).then(()=>renderFoxInner())">
-        &#8635; Refresh Sources</button>
-    </div>
-
     <div class="card full-row">
-      <h2>Target Registry (${foxRegistry.length}/${foxRegistryCapacity()})</h2>
-      <div style="font-size:11px;color:var(--dim);margin-bottom:10px">microSD raises the saved-target ceiling automatically when available. Saved entries now sort like a contact list with live last-seen context.</div>
-      ${renderFoxRegSortBar()}
-      <div id="foxRegList">${renderFoxRegList()}</div>
+      <h2>Fox Device Console</h2>
+      <div class="fox-summary-strip" style="margin-bottom:12px">
+        <div class="fox-mini"><div class="val">${counts.priority}</div><div class="lbl">Priority</div></div>
+        <div class="fox-mini"><div class="val">${counts.saved}</div><div class="lbl">Saved</div></div>
+        <div class="fox-mini"><div class="val">${counts.live}</div><div class="lbl">Live Sources</div></div>
+        <div class="fox-mini"><div class="val">${counts.pinned}</div><div class="lbl">Pinned</div></div>
+      </div>
+      <div class="fox-toolbar">
+        <div class="fox-filter-row">
+          ${[['priority','Priority'],['saved','Saved'],['live','Live'],['nearby','Nearby'],['following','Following'],['wifi','WiFi'],['flock','Flock'],['drone','Drone'],['ble','BLE'],['all','All']].map(([key,label]) => `<button class="btn sm ${foxViewFilter===key?'primary':''}" onclick="setFoxViewFilter('${key}')">${label}</button>`).join('')}
+        </div>
+        <input class="fox-search" type="search" value="${htmlEsc(foxSearchQuery)}" placeholder="Search MAC, nickname, notes, source..." oninput="setFoxSearchQuery(this.value)">
+      </div>
+      <div class="fox-detail-note" style="margin-bottom:10px">Saved devices, live detections, WiFi clients, Flock gear, and Sky drones are merged into one directory. Select a row to inspect its profile and GPS data without scrolling to a separate registry block.</div>
+      <div class="fox-console">
+        <div class="fox-console-main">
+          <div class="fox-compact-list" id="foxConsoleList">${consoleRows}</div>
+        </div>
+        <div class="fox-console-side">${selectedProfile}</div>
+      </div>
+      <button class="btn sm" style="margin-top:12px;border-color:var(--accent);color:var(--accent)" onclick="Promise.all([fetchFoxRegistry(),fetchDevices(),fetchDrones(),fetchFoxNearby()]).then(()=>renderFoxInner())">&#8635; Refresh Sources</button>
     </div>
     </div>`;
 
   renderFoxBars(f.rssi || -100);
 }
 
-function lockFox(mac) {
+async function lockFox(mac, options) {
   api('/api/fox/target', {mac});
+  const rssi = options && Number.isFinite(Number(options.rssi)) ? Number(options.rssi) : -85;
+  const mode = options && options.mode === 'drone' ? 'drone' : 'flock';
+  const kind = options && options.kind ? options.kind : 'fox';
+  if (gpsToggleEnabled && gpsSecureAvailable()) {
+    try {
+      const pos = await getCurrentPosition();
+      await api('/api/target/gps', { type: 'fox', mac, lat: pos.coords.latitude, lon: pos.coords.longitude, rssi });
+      saveCameraLocation(mac, pos.coords.latitude, pos.coords.longitude, 'gps', rssi, mode, kind);
+      if (Number(state.mode) === 2) renderFoxInner();
+    } catch (e) {}
+  }
   toast('Locked on ' + mac);
 }
 
@@ -2233,40 +2823,9 @@ function updateFoxLive() {
   const bar = $('#foxBar'); if(bar) { bar.style.width = rssiPct(f.rssi) + '%'; bar.style.background = rssiColor(f.rssi); }
   const pct = $('#foxPct'); if(pct) pct.textContent = Math.round(rssiPct(f.rssi)) + '%';
   renderFoxBars(f.rssi || -100);
-  // Update WiFi client count live (comes from state)
-  const wm = state.wifiClientMacs || [];
-  const ws = $('#foxWifiSection');
-  const foxAp = apInfoForMode(2);
-  if(ws && wm.length !== (ws.querySelectorAll('.fox-contact').length || 0)) {
-    ws.innerHTML = wm.length
-      ? wm.map(mac => `<div class="fox-contact">
-          <div class="fox-contact-avatar">&#128246;</div>
-          <div class="fox-contact-main">
-            <div class="fox-contact-name">${htmlEsc(mac)}</div>
-            <div class="fox-contact-sub">${htmlEsc(foxAp.ssid)} AP client</div>
-            <div class="fox-contact-meta">
-              <span class="fox-chip near">CONNECTED</span>
-              <span class="fox-chip">802.11 Wi-Fi</span>
-              <span class="fox-chip">source wifi</span>
-            </div>
-          </div>
-          <div class="fox-contact-actions">
-            <button class="btn sm" style="border-color:var(--fox);color:var(--fox)"
-              onclick="lockFox('${htmlEsc(mac)}')">&#127919; Track</button>
-            <button class="btn sm" style="border-color:var(--accent);color:var(--accent)"
-              onclick="saveRegistryFromSource('${htmlEsc(mac)}','WiFi Client','WiFi Client','wifi')">+ Save</button>
-          </div>
-        </div>`).join('')
-        : `<div class="empty" style="padding:10px 0"><div class="icon" style="font-size:24px">&#128247;</div>No clients connected to ${htmlEsc(foxAp.ssid)}</div>`;
-  }
-  // Refresh nearby BLE + flock/drone counts periodically
   if (++foxLiveCounter % 20 === 0) {
-    Promise.all([fetchFoxNearby(), fetchFoxRegistry()]).then(() => {
-      const bc = $('#foxBleCount'); if(bc) bc.textContent = foxNearby.length + ' visible';
-      const smart = $('#foxBleSmartSections');
-      if (smart) smart.outerHTML = renderFoxBleSmartSections();
-      const regList = $('#foxRegList');
-      if (regList) regList.innerHTML = renderFoxRegList();
+    Promise.all([fetchFoxRegistry(), fetchDevices(), fetchDrones(), fetchFoxNearby()]).then(() => {
+      if (Number(state.mode) === 2) renderFoxInner();
     });
   }
 }
@@ -2323,8 +2882,8 @@ async function toggleFoxLed() {
 
 function setFoxTarget() {
   const mac = ($('#macInput') || {}).value;
-  if(mac && mac.length >= 17) { api('/api/fox/target', {mac}); toast('Target set: ' + mac); }
-  else toast('Enter a valid MAC address');
+  if(!(mac && mac.length >= 17)) { toast('Enter a valid MAC address'); return; }
+  lockFox(mac, { rssi: -85, mode: 'flock', kind: 'fox' });
 }
 
 function renderFoxRegList() {
@@ -2335,6 +2894,10 @@ function renderFoxRegList() {
     const liveText = shortAgeLabel(r.lastSeenAgeSec);
     const liveRssi = Number(r.liveRssi);
     const liveRssiChip = Number.isFinite(liveRssi) && liveRssi > -127 ? `<span class="fox-chip">${liveRssi} dBm</span>` : '';
+    const loc = getStoredLocation(r.mac);
+    const locHtml = loc
+      ? `<div class="dev-loc">Pinned (${loc.source === 'manual' ? 'manual' : 'gps'}): ${formatCoord(loc.lat)}, ${formatCoord(loc.lon)} &middot; ${formatLocAge(loc.ts)} &middot; <a href="${mapHrefForLocation(loc)}" target="_blank">map</a></div>`
+      : '';
     return `
     <div class="fox-contact" style="margin-bottom:10px">
       <div class="fox-contact-avatar">&#127919;</div>
@@ -2348,6 +2911,7 @@ function renderFoxRegList() {
           ${liveRssiChip}
           ${r.liveHits ? `<span class="fox-chip">hits ${r.liveHits}</span>` : ''}
         </div>
+        ${locHtml}
         <div class="drone-fields" style="grid-template-columns:1fr 1fr;margin-top:8px">
           <div>
             <dt style="margin-bottom:4px">Nickname Override</dt>
@@ -2364,7 +2928,10 @@ function renderFoxRegList() {
         </div>
       </div>
       <div class="fox-contact-actions" style="flex-direction:column">
-        <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="lockFox('${htmlEsc(r.mac)}')">Track</button>
+        <button class="btn sm" style="border-color:var(--fox);color:var(--fox)" onclick="lockFox('${htmlEsc(r.mac)}', { rssi: ${Number.isFinite(liveRssi) && liveRssi > -127 ? liveRssi : -85}, mode: '${normRegSection(r.section)==='drone' ? 'drone' : 'flock'}', kind: '${normRegSection(r.section)==='drone' ? 'drone' : 'fox'}' })">Track</button>
+        <button class="btn sm" ${gpsEffectiveEnabled() ? '' : 'disabled'} ${gpsEffectiveEnabled() ? '' : 'title="GPS is off or unavailable in this context"'} onclick="markDeviceLocation('${htmlEsc(r.mac)}', { mode: '${normRegSection(r.section)==='drone' ? 'drone' : 'flock'}', rssi: ${Number.isFinite(liveRssi) && liveRssi > -127 ? liveRssi : -85}, rerender: 'fox' })">&#128205;</button>
+        <button class="btn sm" onclick="if(promptManualLocation('${htmlEsc(r.mac)}', { mode: '${normRegSection(r.section)==='drone' ? 'drone' : 'flock'}', kind: '${normRegSection(r.section)==='drone' ? 'drone' : 'fox'}', rssi: ${Number.isFinite(liveRssi) && liveRssi > -127 ? liveRssi : -85} })){toast('Manual location saved');renderFoxInner();}">Manual</button>
+        ${loc ? `<button class="btn sm" onclick="requestClearCameraLocation('${htmlEsc(r.mac)}', renderFoxInner)">&#10005;</button>` : ''}
         <button class="btn sm" style="border-color:var(--accent);color:var(--accent)" onclick="saveRegistryMeta(${idx})">Save</button>
         <button class="btn sm" style="border-color:var(--rose);color:var(--rose)" onclick="removeFromRegistry(${idx})">Delete</button>
       </div>
@@ -2386,7 +2953,7 @@ async function saveRegistryMeta(idx) {
   if(r && r.ok) {
     toast('Registry details saved');
     await fetchFoxRegistry();
-    const el = $('#foxRegList'); if(el) el.innerHTML = renderFoxRegList();
+    renderFoxInner();
   } else {
     toast('Failed to save details');
   }
@@ -2397,7 +2964,7 @@ async function addMacToRegistry() {
   const label = ($('#regLabelInput') || {}).value || '';
   if(!mac || mac.length < 17) { toast('Enter a valid MAC'); return; }
   const r = await api('/api/fox/registry', {mac, label, originalName: label || mac, section: 'known'});
-  if(r && r.ok) { toast('Saved to registry'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); }); }
+  if(r && r.ok) { toast('Saved to registry'); foxSelectedMac = String(mac || '').toUpperCase(); fetchFoxRegistry().then(() => renderFoxInner()); }
   else toast(`Registry full (${foxRegistryCapacity()}) or error`);
 }
 
@@ -2406,7 +2973,7 @@ async function saveTargetToRegistry() {
   if(!f.hasTarget) return;
   const label = prompt('Label for '+f.target+':', '') || '';
   const r = await api('/api/fox/registry', {mac: f.target, label, originalName: label || f.target, section: 'known'});
-  if(r && r.ok) { toast('Saved to registry'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); }); }
+  if(r && r.ok) { toast('Saved to registry'); foxSelectedMac = String(f.target || '').toUpperCase(); fetchFoxRegistry().then(() => renderFoxInner()); }
   else toast(`Registry full (${foxRegistryCapacity()}) or already saved`);
 }
 
@@ -2417,7 +2984,8 @@ async function removeFromRegistry(idx) {
     if (removed && state.fox && state.fox.hasTarget && removed.mac === state.fox.target) {
       await clearFoxTarget();
     }
-    toast('Removed'); fetchFoxRegistry().then(() => { const el=$('#foxRegList'); if(el) el.innerHTML=renderFoxRegList(); });
+    toast('Removed');
+    fetchFoxRegistry().then(() => renderFoxInner());
   } catch(e) { toast('Error removing'); }
 }
 
@@ -2432,7 +3000,7 @@ function renderSky() {
         <div class="stat highlight"><div class="val" id="sDroneCount" style="color:var(--skyblue)">${state.droneCount||0}</div><div class="lbl">Drones</div></div>
         <div class="stat"><div class="val" id="sWifiCount" style="color:var(--cyan)">--</div><div class="lbl">WiFi RID</div></div>
         <div class="stat"><div class="val" id="sBleCount" style="color:var(--skyblue)">--</div><div class="lbl">BLE RID</div></div>
-        <div class="stat gps off" id="sGpsBlock"><div class="val" id="sGpsState">OFF</div><div class="lbl" id="sGpsLabel">GPS</div></div>
+        <div class="stat gps off" id="sGpsBlock" onclick="handleFlockMapTap()" title="Triple-click to open the shared pinned-device map"><div class="val" id="sGpsState">OFF</div><div class="lbl" id="sGpsLabel">GPS</div></div>
       </div>
       <div class="gps-toolbar" style="margin-top:10px">
         <div class="gps-status" id="sGpsStatus"></div>
@@ -2448,6 +3016,17 @@ function renderSky() {
       ` : ''}
     </div>
     <div id="droneList"></div>
+    <div class="card">
+      <h2>Pinned Device Map</h2>
+      <div class="gps-toolbar">
+        <div class="gps-status" id="flockMapSummary">Open the shared map to review pinned devices from Flock, Fox, and Sky.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" id="flockMapToggleBtn" onclick="toggleFlockMap()">${flockMapVisible ? 'Hide Map' : 'Open Map'}</button>
+          <button class="btn sm" id="flockMapTilesBtn" onclick="loadFlockMapTiles()">Load Tiles</button>
+        </div>
+      </div>
+      <div id="flockMapPanel"></div>
+    </div>
     ${state.droneCount > 0 ? '<div class="card"><button class="btn sm" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="fetchDrones().then(()=>renderDroneCards())">Refresh Details</button></div>' : ''}
   `;
   renderSkyGpsWidgets();
@@ -2456,6 +3035,7 @@ function renderSky() {
   } else {
     stopSkyRadarAnimation();
   }
+  renderFlockMapPanel();
   renderDroneCards();
 }
 
@@ -2533,6 +3113,14 @@ function startSkyRadarAnimation() {
 
   skyRadarAnimId = requestAnimationFrame(draw);
 }
+
+function skyNeedsStructuralRender() {
+  const hasDrones = Number(state.droneCount || 0) > 0;
+  const hasRadarCanvas = !!$('#skyRadarCanvas');
+  const hasRefreshButton = !!$('#main .card button[onclick="fetchDrones().then(()=>renderDroneCards())"]');
+  return hasDrones ? hasRadarCanvas || !hasRefreshButton : (!hasRadarCanvas || hasRefreshButton);
+}
+
 function renderDroneCards() {
   const el = $('#droneList'); if(!el) return;
   let wifi=0, ble=0;
@@ -2562,169 +3150,351 @@ function renderDroneCards() {
   const bc = $('#sBleCount'); if(bc) bc.textContent = ble;
 }
 function updateSkyLive() {
+  if (skyNeedsStructuralRender()) {
+    if(state.droneCount > 0 && !drones.length) {
+      fetchDrones().then(() => renderSky());
+      return;
+    }
+    renderSky();
+    return;
+  }
+
   const el = $('#sDroneCount'); if(el) el.textContent = state.droneCount || 0;
   renderSkyGpsWidgets();
+  renderFlockMapPanel();
   if ((state.droneCount || 0) > 0) stopSkyRadarAnimation();
-  if(state.droneCount > 0 && !drones.length) fetchDrones().then(() => renderSky());
+  else startSkyRadarAnimation();
+  if(state.droneCount > 0 && !drones.length) fetchDrones().then(() => renderDroneCards());
 }
 
 // ── Settings View ──
-function renderSettings() {
-  const c = $('#main');
+function renderSettingsNav() {
+  const tabs = [
+    ['preferences', 'Preferences'],
+    ['logging', 'Logs'],
+    ['pins', 'Pinned Devices'],
+    ['system', 'System']
+  ];
+  return tabs.map(([key, label]) => `<button class="btn ${settingsSection===key?'primary':''}" onclick="setSettingsSection('${key}')">${label}</button>`).join('');
+}
+
+function pinInputId(mac) {
+  return 'pinLabel_' + String(mac || '').replace(/[^A-Za-z0-9]/g, '');
+}
+
+function renderPinnedDeviceRows() {
+  const pins = flockMapPins().sort((a, b) => pinDisplayName(a.mac, getStoredLocation(a.mac)).localeCompare(pinDisplayName(b.mac, getStoredLocation(b.mac))));
+  if (!pins.length) {
+    return '<div class="empty"><div class="icon">&#128205;</div>No pinned devices yet</div>';
+  }
+
+  return pins.map(pin => {
+    const loc = getStoredLocation(pin.mac) || {};
+    const inputId = pinInputId(pin.mac);
+    return `<div class="manage-row">
+      <div class="manage-main">
+        <div class="manage-title">${htmlEsc(pinDisplayName(pin.mac, loc))}</div>
+        <div class="manage-sub">${htmlEsc(pin.mac)} &middot; ${htmlEsc(pin.kind)} &middot; ${formatCoord(pin.lat)}, ${formatCoord(pin.lon)} &middot; ${htmlEsc(pin.age)}</div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input class="input-sm" id="${inputId}" maxlength="32" value="${htmlEsc(loc.label || '')}" placeholder="Pinned device label" style="max-width:240px">
+          <a class="btn sm" href="${mapHrefForLocation(pin)}" target="_blank">Open Map</a>
+        </div>
+      </div>
+      <div class="manage-actions">
+        <button class="btn sm" onclick="savePinnedDeviceLabel('${htmlEsc(pin.mac)}')">Save Label</button>
+        <button class="btn sm danger" onclick="requestClearCameraLocation('${htmlEsc(pin.mac)}', renderSettingsSectionContent)">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function savePinnedDeviceLabel(mac) {
+  const input = $('#' + pinInputId(mac));
+  if (!input) return;
+  setCameraLocationLabel(mac, input.value);
+  if (flockMapVisible) drawFlockMap();
+  renderSettingsSectionContent();
+  toast('Pinned device label saved');
+}
+
+async function runLogManageAction(action) {
+  const ok = await apiPostOk('/api/logs/manage', { action });
+  if (!ok) {
+    toast('Log action failed');
+    return;
+  }
+  await fetchLogs();
+  renderSettingsSectionContent();
+  toast(action === 'clear' ? 'Recent logs cleared' : (action === 'delete' ? 'Stored logs deleted' : 'Logs scrambled and deleted'));
+}
+
+function confirmLogAction(action) {
+  const config = {
+    clear: ['Clear the recent log data now?', 'Clear Logs'],
+    delete: ['Delete all stored log files now?', 'Delete Logs'],
+    scramble: ['Scramble and delete all stored log data now?', 'Scramble Logs']
+  };
+  const next = config[action] || ['Are you sure you want to delete this?', 'Confirm Delete'];
+  showHoldConfirm(next[0], () => runLogManageAction(action), next[1]);
+}
+
+function renderSettingsSectionContent() {
+  const host = $('#settingsPanel');
+  if (!host) return;
+
   const modeNames = ['Select','Flock You','Fox Hunter','Sky Spy','Settings'];
   const soundNames = ['Standard','Chirp','Sonar','Retro','Alarm'];
   const shortcutNames = ['None','Next Mode','Mode Select','Settings','Toggle Sound','Toggle LED','Fox LED Mode'];
-  c.innerHTML = `
-    <div class="card">
-      <h2>Settings</h2>
-      <div class="settings">
-        <div class="setting-row">
-          <label>Display Brightness</label>
-          <input type="range" min="10" max="255" value="${state.brightness||200}" oninput="updateSetting('brightness',this.value)" style="width:140px">
+
+  if (settingsSection === 'logging') {
+    host.innerHTML = `
+      <div class="settings-stack">
+        <div class="card">
+          <h2>Logging Controls</h2>
+          <div class="settings">
+            <div class="setting-row">
+              <label>Use microSD for logs</label>
+              <label class="toggle"><input type="checkbox" ${state.useMicrosdLogs?'checked':''} onchange="updateSetting('useMicrosdLogs',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>General system events</label>
+              <label class="toggle"><input type="checkbox" ${state.logGeneralEnabled!==false?'checked':''} onchange="updateSetting('logGeneralEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Flock You events</label>
+              <label class="toggle"><input type="checkbox" ${state.logFlockEnabled!==false?'checked':''} onchange="updateSetting('logFlockEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Fox Hunter events</label>
+              <label class="toggle"><input type="checkbox" ${state.logFoxEnabled!==false?'checked':''} onchange="updateSetting('logFoxEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Sky Spy events</label>
+              <label class="toggle"><input type="checkbox" ${state.logSkyEnabled!==false?'checked':''} onchange="updateSetting('logSkyEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>GPS traces and fused positions</label>
+              <label class="toggle"><input type="checkbox" ${state.logGpsEnabled!==false?'checked':''} onchange="updateSetting('logGpsEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Saved Fox device identity data</label>
+              <label class="toggle"><input type="checkbox" ${state.logSavedFoxEnabled!==false?'checked':''} onchange="updateSetting('logSavedFoxEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Advanced diagnostics</label>
+              <label class="toggle"><input type="checkbox" ${state.advancedLoggingEnabled?'checked':''} onchange="updateSetting('advancedLoggingEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>GPS diagnostics</label>
+              <label class="toggle"><input type="checkbox" ${state.gpsDiagnosticsEnabled?'checked':''} onchange="updateSetting('gpsDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Web diagnostics</label>
+              <label class="toggle"><input type="checkbox" ${state.webDiagnosticsEnabled?'checked':''} onchange="updateSetting('webDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <label>Serial log verbosity</label>
+              <select class="sel-sm" style="width:140px" onchange="updateSetting('serialLogVerbosity',parseInt(this.value))">
+                ${['Error','Warn','Info','Debug','Verbose'].map((n,i) => `<option value="${i}" ${Number(state.serialLogVerbosity||2)===i?'selected':''}>${n}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="settings-note" style="margin-top:10px">Current storage: ${state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'No mounted microSD card'}.</div>
         </div>
-        <div class="setting-row">
-          <label>Sound Effects</label>
-          <label class="toggle"><input type="checkbox" ${state.sound?'checked':''} onchange="updateSetting('sound',this.checked)"><span class="slider"></span></label>
+        <div class="card">
+          <h2>Log Destruction</h2>
+          <div class="settings-note">Clear removes recent entries from the live viewer. Delete removes stored log files. Scramble overwrites stored log bytes with random data before deletion on mounted storage.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn sm" onclick="confirmLogAction('clear')">Clear Recent</button>
+            <button class="btn sm danger" onclick="confirmLogAction('delete')">Delete Stored</button>
+            <button class="btn sm danger" onclick="confirmLogAction('scramble')">Scramble + Delete</button>
+          </div>
         </div>
-        <div class="setting-row">
-          <label>RGB LED</label>
-          <label class="toggle"><input type="checkbox" ${state.led?'checked':''} onchange="updateSetting('led',this.checked)"><span class="slider"></span></label>
+        <div class="card">
+          <h2>Logs</h2>
+          <div class="log-toolbar">
+            <div class="gps-status" id="settingsLogSummary">${state.loggingActive ? 'microSD logging is active and recent entries are visible below.' : (state.loggingBlocked ? 'Logging is enabled but waiting for a mounted microSD card.' : 'Logging is currently off.')}</div>
+            <div class="log-filter-row">
+              <button class="btn sm" id="logFilterAll" onclick="setLogFilter('all')">All</button>
+              <button class="btn sm" id="logFilterEvents" onclick="setLogFilter('events')">Events</button>
+              <button class="btn sm" id="logFilterIdentity" onclick="setLogFilter('identity')">Identity</button>
+              <button class="btn sm" id="logFilterDiagnostics" onclick="setLogFilter('diagnostics')">Diagnostics</button>
+              <button class="btn sm" onclick="refreshLogs(true)">Refresh</button>
+            </div>
+          </div>
+          <div id="settingsLogs"></div>
         </div>
-        <div class="setting-row">
-          <label>Broadcast AP SSID</label>
-          <label class="toggle"><input type="checkbox" ${state.apBroadcast?'checked':''} onchange="updateSetting('apBroadcast',this.checked)"><span class="slider"></span></label>
+      </div>`;
+    renderSettingsLogs();
+    if (!logsData) refreshLogs(false);
+    return;
+  }
+
+  if (settingsSection === 'pins') {
+    host.innerHTML = `
+      <div class="settings-stack">
+        <div class="card">
+          <h2>Pinned Devices</h2>
+          <div class="settings-note">Review pins saved from Flock cameras, Fox targets, and Sky drones. Labels are stored in this browser with the pin metadata.</div>
+          <div style="margin-top:12px">${renderPinnedDeviceRows()}</div>
         </div>
-        <div class="setting-row">
-          <label>Single AP Name (UniSpy-C6)</label>
-          <label class="toggle"><input type="checkbox" ${state.singleApName?'checked':''} onchange="updateSetting('singleApName',this.checked)"><span class="slider"></span></label>
+        <div class="card">
+          <h2>Pinned Device Map</h2>
+          <div class="gps-toolbar">
+            <div class="gps-status" id="flockMapSummary">Open the shared map to review pinned devices from Flock, Fox, and Sky.</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn sm" id="flockMapToggleBtn" onclick="toggleFlockMap()">${flockMapVisible ? 'Hide Map' : 'Open Map'}</button>
+              <button class="btn sm" id="flockMapTilesBtn" onclick="loadFlockMapTiles()">Load Tiles</button>
+            </div>
+          </div>
+          <div id="flockMapPanel"></div>
         </div>
-        <div class="setting-row">
-          <label>Display Sleep Timeout</label>
-          <select class="sel-sm" style="width:140px" onchange="updateSetting('displaySleepSec',parseInt(this.value))">
-            ${[0,15,30,60,120,300].map(v => `<option value="${v}" ${Number(state.displaySleepSec||0)===v?'selected':''}>${v===0?'Off':v+' sec'}</option>`).join('')}
-          </select>
+      </div>`;
+    renderFlockMapPanel();
+    return;
+  }
+
+  if (settingsSection === 'system') {
+    host.innerHTML = `
+      <div class="settings-stack">
+        <div class="card">
+          <h2>System Info</h2>
+          <div style="font-size:12px;line-height:1.8" id="settingsSystemInfo">
+            <div>Free Heap: <strong id="settingsHeap">${Math.round((state.heap||0)/1024)} kB</strong></div>
+            <div>Uptime: <strong id="settingsUptime">${fmtTime(state.uptime||0)}</strong></div>
+            <div>WiFi Clients: <strong id="settingsClients">${state.clients||0}</strong></div>
+            <div>Mode: <strong id="settingsMode">${modeNames[state.mode||0] || 'Unknown'}</strong></div>
+            <div>Flock Devices: <strong id="settingsDevices">${state.deviceCount||0}</strong></div>
+            <div>Drones Tracked: <strong id="settingsDrones">${state.droneCount||0}</strong></div>
+            <div>Log Capacity: <strong id="settingsLogCapacity">${state.logCapacityKb||768} kB</strong></div>
+            <div>Logging Status: <strong id="settingsLoggingStatus">${loggingStatusText()}</strong></div>
+            <div>Advanced Logging: <strong id="settingsAdvLogging">${state.advancedLoggingEnabled ? 'Enabled' : 'Disabled'}</strong></div>
+            <div>Serial Verbosity: <strong id="settingsSerialLogging">${['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)]}</strong></div>
+            <div>microSD Status: <strong id="settingsMicrosd">${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
+            <div>microSD Usage: <strong id="settingsMicrosdUsage">${state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'Unavailable'}</strong></div>
+            <div>GPS Status: <strong id="settingsGpsStatus">${state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled')}</strong></div>
+          </div>
         </div>
-        <div class="setting-row">
-          <label>Main Menu LED Glow</label>
-          <select class="sel-sm" style="width:140px" onchange="updateSetting('menuLedColor',parseInt(this.value))">
-            ${['Gold','Mint','Sky','Amber','Magenta','Ruby','Lime','Ice','White','Deep Purple'].map((n,i) => `<option value="${i}" ${Number(state.menuLedColor||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
+        <div class="card">
+          <h2>Quick Actions</h2>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <button class="btn" style="border-color:var(--flock);color:var(--flock)" onclick="setMode(1)">Start Flock You</button>
+            <button class="btn" style="border-color:var(--fox);color:var(--fox)" onclick="setMode(2)">Start Fox Hunter</button>
+            <button class="btn" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="setMode(3)">Start Sky Spy</button>
+          </div>
         </div>
-        <div class="setting-row">
-          <label>Flock Notification Sound</label>
-          <select class="sel-sm" style="width:140px" onchange="updateSetting('soundProfileFlock',parseInt(this.value))">
-            ${soundNames.map((n,i) => `<option value="${i}" ${Number(state.soundProfileFlock||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
+        <div class="card">
+          <h2>About</h2>
+          <p style="font-size:12px;color:var(--dim);line-height:1.6">
+            OUI-Spy C6 is open-source RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47.
+            It detects Flock Safety ALPR cameras, ShotSpotter Raven sensors, and drones broadcasting
+            ASTM F3411 Remote ID or DJI DroneID. Built with ESP-IDF in pure C.<br><br>
+            Connect external push buttons and a piezo speaker for standalone operation without a phone.
+            See the HARDWARE.md file for wiring instructions.
+          </p>
         </div>
-        <div class="setting-row">
-          <label>Fox Notification Sound</label>
-          <select class="sel-sm" style="width:140px" onchange="updateSetting('soundProfileFox',parseInt(this.value))">
-            ${soundNames.map((n,i) => `<option value="${i}" ${Number(state.soundProfileFox||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>Sky Notification Sound</label>
-          <select class="sel-sm" style="width:140px" onchange="updateSetting('soundProfileSky',parseInt(this.value))">
-            ${soundNames.map((n,i) => `<option value="${i}" ${Number(state.soundProfileSky||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>Shortcut GPIO10</label>
-          <select class="sel-sm" style="width:150px" onchange="updateSetting('shortcutModeBtn',parseInt(this.value))">
-            ${shortcutNames.map((n,i) => `<option value="${i}" ${Number(state.shortcutModeBtn||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>Shortcut GPIO11</label>
-          <select class="sel-sm" style="width:150px" onchange="updateSetting('shortcutActionBtn',parseInt(this.value))">
-            ${shortcutNames.map((n,i) => `<option value="${i}" ${Number(state.shortcutActionBtn||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>Shortcut GPIO19</label>
-          <select class="sel-sm" style="width:150px" onchange="updateSetting('shortcutBackBtn',parseInt(this.value))">
-            ${shortcutNames.map((n,i) => `<option value="${i}" ${Number(state.shortcutBackBtn||0)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>GPS Tagging</label>
-          <label class="toggle"><input type="checkbox" ${state.gpsTagging?'checked':''} onchange="updateSetting('gpsTagging',this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <label>Use microSD for logs</label>
-          <label class="toggle"><input type="checkbox" ${state.useMicrosdLogs?'checked':''} onchange="updateSetting('useMicrosdLogs',this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <label>Advanced diagnostics</label>
-          <label class="toggle"><input type="checkbox" ${state.advancedLoggingEnabled?'checked':''} onchange="updateSetting('advancedLoggingEnabled',this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <label>GPS diagnostics</label>
-          <label class="toggle"><input type="checkbox" ${state.gpsDiagnosticsEnabled?'checked':''} onchange="updateSetting('gpsDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <label>Web diagnostics</label>
-          <label class="toggle"><input type="checkbox" ${state.webDiagnosticsEnabled?'checked':''} onchange="updateSetting('webDiagnosticsEnabled',this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <label>Serial log verbosity</label>
-          <select class="sel-sm" style="width:140px" onchange="updateSetting('serialLogVerbosity',parseInt(this.value))">
-            ${['Error','Warn','Info','Debug','Verbose'].map((n,i) => `<option value="${i}" ${Number(state.serialLogVerbosity||2)===i?'selected':''}>${n}</option>`).join('')}
-          </select>
+      </div>`;
+    return;
+  }
+
+  host.innerHTML = `
+    <div class="settings-stack">
+      <div class="card">
+        <h2>Preferences</h2>
+        <div class="settings">
+          <div class="setting-row">
+            <label>Display Brightness</label>
+            <input type="range" min="10" max="255" value="${state.brightness||200}" oninput="updateSetting('brightness',this.value)" style="width:140px">
+          </div>
+          <div class="setting-row">
+            <label>Sound Effects</label>
+            <label class="toggle"><input type="checkbox" ${state.sound?'checked':''} onchange="updateSetting('sound',this.checked)"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <label>RGB LED</label>
+            <label class="toggle"><input type="checkbox" ${state.led?'checked':''} onchange="updateSetting('led',this.checked)"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <label>Broadcast AP SSID</label>
+            <label class="toggle"><input type="checkbox" ${state.apBroadcast?'checked':''} onchange="updateSetting('apBroadcast',this.checked)"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <label>Single AP Name (UniSpy-C6)</label>
+            <label class="toggle"><input type="checkbox" ${state.singleApName?'checked':''} onchange="updateSetting('singleApName',this.checked)"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <label>Display Sleep Timeout</label>
+            <select class="sel-sm" style="width:140px" onchange="updateSetting('displaySleepSec',parseInt(this.value))">
+              ${[0,15,30,60,120,300].map(v => `<option value="${v}" ${Number(state.displaySleepSec||0)===v?'selected':''}>${v===0?'Off':v+' sec'}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Main Menu LED Glow</label>
+            <select class="sel-sm" style="width:140px" onchange="updateSetting('menuLedColor',parseInt(this.value))">
+              ${['Gold','Mint','Sky','Amber','Magenta','Ruby','Lime','Ice','White','Deep Purple'].map((n,i) => `<option value="${i}" ${Number(state.menuLedColor||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Flock Notification Sound</label>
+            <select class="sel-sm" style="width:140px" onchange="updateSetting('soundProfileFlock',parseInt(this.value))">
+              ${soundNames.map((n,i) => `<option value="${i}" ${Number(state.soundProfileFlock||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Fox Notification Sound</label>
+            <select class="sel-sm" style="width:140px" onchange="updateSetting('soundProfileFox',parseInt(this.value))">
+              ${soundNames.map((n,i) => `<option value="${i}" ${Number(state.soundProfileFox||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Sky Notification Sound</label>
+            <select class="sel-sm" style="width:140px" onchange="updateSetting('soundProfileSky',parseInt(this.value))">
+              ${soundNames.map((n,i) => `<option value="${i}" ${Number(state.soundProfileSky||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Shortcut GPIO10</label>
+            <select class="sel-sm" style="width:150px" onchange="updateSetting('shortcutModeBtn',parseInt(this.value))">
+              ${shortcutNames.map((n,i) => `<option value="${i}" ${Number(state.shortcutModeBtn||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Shortcut GPIO11</label>
+            <select class="sel-sm" style="width:150px" onchange="updateSetting('shortcutActionBtn',parseInt(this.value))">
+              ${shortcutNames.map((n,i) => `<option value="${i}" ${Number(state.shortcutActionBtn||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Shortcut GPIO19</label>
+            <select class="sel-sm" style="width:150px" onchange="updateSetting('shortcutBackBtn',parseInt(this.value))">
+              ${shortcutNames.map((n,i) => `<option value="${i}" ${Number(state.shortcutBackBtn||0)===i?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>GPS Tagging</label>
+            <label class="toggle"><input type="checkbox" ${state.gpsTagging?'checked':''} onchange="updateSetting('gpsTagging',this.checked)"><span class="slider"></span></label>
+          </div>
         </div>
       </div>
-    </div>
-    <div class="card">
-      <h2>System Info</h2>
-      <div style="font-size:12px;line-height:1.8" id="settingsSystemInfo">
-        <div>Free Heap: <strong id="settingsHeap">${Math.round((state.heap||0)/1024)} kB</strong></div>
-        <div>Uptime: <strong id="settingsUptime">${fmtTime(state.uptime||0)}</strong></div>
-        <div>WiFi Clients: <strong id="settingsClients">${state.clients||0}</strong></div>
-        <div>Mode: <strong id="settingsMode">${modeNames[state.mode||0] || 'Unknown'}</strong></div>
-        <div>Flock Devices: <strong id="settingsDevices">${state.deviceCount||0}</strong></div>
-        <div>Drones Tracked: <strong id="settingsDrones">${state.droneCount||0}</strong></div>
-        <div>Log Capacity: <strong id="settingsLogCapacity">${state.logCapacityKb||768} kB</strong></div>
-        <div>Logging Status: <strong id="settingsLoggingStatus">${loggingStatusText()}</strong></div>
-        <div>Advanced Logging: <strong id="settingsAdvLogging">${state.advancedLoggingEnabled ? 'Enabled' : 'Disabled'}</strong></div>
-        <div>Serial Verbosity: <strong id="settingsSerialLogging">${['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)]}</strong></div>
-        <div>microSD Status: <strong id="settingsMicrosd">${state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found')}</strong></div>
-        <div>GPS Status: <strong id="settingsGpsStatus">${state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled')}</strong></div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Logs</h2>
-      <div class="log-toolbar">
-        <div class="gps-status" id="settingsLogSummary">${state.loggingActive ? 'microSD logging is active and recent entries are visible below.' : (state.loggingBlocked ? 'Logging is enabled but waiting for a mounted microSD card.' : 'Logging is currently off.')}</div>
-        <div class="log-filter-row">
-          <button class="btn sm" id="logFilterAll" onclick="setLogFilter('all')">All</button>
-          <button class="btn sm" id="logFilterEvents" onclick="setLogFilter('events')">Events</button>
-          <button class="btn sm" id="logFilterIdentity" onclick="setLogFilter('identity')">Identity</button>
-          <button class="btn sm" id="logFilterDiagnostics" onclick="setLogFilter('diagnostics')">Diagnostics</button>
-          <button class="btn sm" onclick="refreshLogs(true)">Refresh</button>
-        </div>
-      </div>
-      <div id="settingsLogs"></div>
-    </div>
-    <div class="card">
-      <h2>Quick Actions</h2>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
-        <button class="btn" style="border-color:var(--flock);color:var(--flock)" onclick="setMode(1)">Start Flock You</button>
-        <button class="btn" style="border-color:var(--fox);color:var(--fox)" onclick="setMode(2)">Start Fox Hunter</button>
-        <button class="btn" style="border-color:var(--skyblue);color:var(--skyblue)" onclick="setMode(3)">Start Sky Spy</button>
-      </div>
-    </div>
-    <div class="card">
-      <h2>About</h2>
-      <p style="font-size:12px;color:var(--dim);line-height:1.6">
-        OUI-Spy C6 is open-source RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47.
-        It detects Flock Safety ALPR cameras, ShotSpotter Raven sensors, and drones broadcasting
-        ASTM F3411 Remote ID or DJI DroneID. Built with ESP-IDF in pure C.<br><br>
-        Connect external push buttons and a piezo speaker for standalone operation without a phone.
-        See the HARDWARE.md file for wiring instructions.
-      </p>
     </div>`;
-  renderSettingsLogs();
-  refreshLogs(false);
+}
+
+function setSettingsSection(section) {
+  settingsSection = section;
+  renderSettings();
+}
+
+function renderSettings() {
+  const c = $('#main');
+  c.innerHTML = `
+    <div class="settings-shell">
+      <div class="card">
+        <h2>Settings</h2>
+        <div class="settings-nav">${renderSettingsNav()}</div>
+      </div>
+      <div id="settingsPanel" class="settings-panel"></div>
+    </div>`;
+  renderSettingsSectionContent();
 }
 function updateSetting(key, val) {
   const body = {};
@@ -2744,6 +3514,12 @@ function updateSetting(key, val) {
   else if(key==='gpsTagging') body.gpsTagging = !!val;
   else if(key==='useMicrosdLogs') body.useMicrosdLogs = !!val;
   else if(key==='advancedLoggingEnabled') body.advancedLoggingEnabled = !!val;
+  else if(key==='logGeneralEnabled') body.logGeneralEnabled = !!val;
+  else if(key==='logFlockEnabled') body.logFlockEnabled = !!val;
+  else if(key==='logFoxEnabled') body.logFoxEnabled = !!val;
+  else if(key==='logSkyEnabled') body.logSkyEnabled = !!val;
+  else if(key==='logGpsEnabled') body.logGpsEnabled = !!val;
+  else if(key==='logSavedFoxEnabled') body.logSavedFoxEnabled = !!val;
   else if(key==='gpsDiagnosticsEnabled') body.gpsDiagnosticsEnabled = !!val;
   else if(key==='webDiagnosticsEnabled') body.webDiagnosticsEnabled = !!val;
   else if(key==='serialLogVerbosity') body.serialLogVerbosity = parseInt(val);
@@ -2795,21 +3571,10 @@ function renderSettingsLogs() {
 
   const entries = Array.isArray(logsData[logFilter]) ? logsData[logFilter] : [];
   if (!entries.length) {
-    host.innerHTML = '<div class="empty"><div class="icon">🗂️</div>No log entries available for this filter.</div>';
+    host.innerHTML = '<div class="empty"><div class="icon">&#128450;</div>No log entries available for this filter.</div>';
     return;
   }
-
-  host.innerHTML = `<div class="log-list">${entries.map(entry => `
-    <div class="log-entry">
-      <div class="log-entry-top">
-        <div class="log-entry-meta">
-          <span class="log-source ${htmlEsc(entry.source)}">${htmlEsc(entry.source)}</span>
-          <span class="log-kind">${htmlEsc(entry.kind)}</span>
-        </div>
-        <span class="log-time">${logBootStamp(entry.ts)} · ${logAgeLabel(entry.ts)}</span>
-      </div>
-      <div class="log-msg">${htmlEsc(entry.message)}</div>
-    </div>`).join('')}</div>`;
+  renderLogEntries(host, entries, 'No log entries available for this filter.');
 }
 
 function updateSettingsLive() {
@@ -2825,11 +3590,20 @@ function updateSettingsLive() {
   const advLog = $('#settingsAdvLogging'); if (advLog) advLog.textContent = state.advancedLoggingEnabled ? 'Enabled' : 'Disabled';
   const serialLog = $('#settingsSerialLogging'); if (serialLog) serialLog.textContent = ['Error','Warn','Info','Debug','Verbose'][Number(state.serialLogVerbosity||2)] || 'Info';
   const sd = $('#settingsMicrosd'); if (sd) sd.textContent = state.microsdStatus || (state.microsdAvailable ? 'Available' : 'Not Found');
+  const sdUsage = $('#settingsMicrosdUsage'); if (sdUsage) sdUsage.textContent = state.microsdAvailable ? formatStorageUsageCompact(state.microsdUsedKb, state.microsdTotalKb) : 'Unavailable';
   const gps = $('#settingsGpsStatus');
   if (gps) gps.textContent = state.gpsTagActive ? 'Live' : (state.gpsTagging ? 'Waiting for client' : 'Disabled');
-  renderSettingsLogs();
-  if ((++logsRefreshCounter % 4) === 0) {
-    refreshLogs(false);
+
+  if (settingsSection === 'logging') {
+    renderSettingsLogs();
+    if ((++logsRefreshCounter % 4) === 0) {
+      refreshLogs(false);
+    }
+  }
+
+  if (settingsSection === 'pins') {
+    renderFlockMapPanel();
+    if (flockMapVisible) drawFlockMap();
   }
 }
 

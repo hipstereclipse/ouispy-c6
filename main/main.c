@@ -338,11 +338,14 @@ static void render_mode_select_screen(int cursor)
                                                                                    : rgb565(249, 115, 22));
     char microsd_text[40];
     if (microsd_status == STORAGE_STATUS_AVAILABLE) {
-        uint32_t free_kb = storage_ext_free_kb();
-        if (free_kb >= 1024) {
-            snprintf(microsd_text, sizeof(microsd_text), "microSD: %lu MB free", (unsigned long)((free_kb + 512U) / 1024U));
-        } else if (free_kb > 0) {
-            snprintf(microsd_text, sizeof(microsd_text), "microSD: %lu KB free", (unsigned long)free_kb);
+        uint32_t used_kb = storage_ext_used_kb();
+        uint32_t total_kb = storage_ext_total_kb();
+        if (total_kb >= 1024U) {
+            unsigned long used_tenths = (unsigned long)((used_kb * 10U + 512U) / 1024U);
+            unsigned long total_mb = (unsigned long)((total_kb + 512U) / 1024U);
+            snprintf(microsd_text, sizeof(microsd_text), "microSD: %lu.%lu/%luMB", used_tenths / 10UL, used_tenths % 10UL, total_mb);
+        } else if (total_kb > 0) {
+            snprintf(microsd_text, sizeof(microsd_text), "microSD: %lu/%lu KB", (unsigned long)used_kb, (unsigned long)total_kb);
         } else {
             snprintf(microsd_text, sizeof(microsd_text), "microSD: Mounted");
         }
@@ -525,7 +528,7 @@ static void mode_select_task(void *arg)
     int last_cursor = -1;
     int last_gps_active = -1;
     int last_sd_status = -1;
-    int last_sd_free_bucket = -1;
+    int last_sd_used_bucket = -1;
     int last_logging_active = -1;
     int last_logging_blocked = -1;
     uint8_t r, g, b;
@@ -537,9 +540,9 @@ static void mode_select_task(void *arg)
         storage_status_t sd_status = storage_ext_get_status();
         bool logging_active = storage_ext_logging_active();
         bool logging_blocked = storage_ext_logging_blocked();
-        int sd_free_bucket = 0;
+        int sd_used_bucket = 0;
         if (sd_status == STORAGE_STATUS_AVAILABLE) {
-            sd_free_bucket = (int)(storage_ext_free_kb() / 1024U);
+            sd_used_bucket = (int)(storage_ext_used_kb() / 64U);
         }
 
         if (g_app.ui_cursor >= 4) g_app.ui_cursor = 3;
@@ -548,14 +551,14 @@ static void mode_select_task(void *arg)
         if (g_app.ui_cursor != last_cursor
                 || last_gps_active != (int)gps_tag_active
                 || last_sd_status != (int)sd_status
-                || last_sd_free_bucket != sd_free_bucket
+                || last_sd_used_bucket != sd_used_bucket
                 || last_logging_active != (int)logging_active
                 || last_logging_blocked != (int)logging_blocked) {
             render_mode_select_screen(g_app.ui_cursor);
             last_cursor = g_app.ui_cursor;
             last_gps_active = (int)gps_tag_active;
             last_sd_status = (int)sd_status;
-            last_sd_free_bucket = sd_free_bucket;
+            last_sd_used_bucket = sd_used_bucket;
             last_logging_active = (int)logging_active;
             last_logging_blocked = (int)logging_blocked;
         }

@@ -8,6 +8,7 @@
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
@@ -38,6 +39,80 @@ static const char *DIAGNOSTIC_LOG_PATH = "/sdcard/ouispy_logs/diagnostics.log";
 static void ensure_log_dir(void);
 static void refresh_card_runtime_status(void);
 static void prune_noncritical_logs_if_needed(void);
+
+static void clear_log_ring(void)
+{
+    memset(s_log_ring, 0, sizeof(s_log_ring));
+    s_log_ring_head = 0;
+    s_log_ring_count = 0;
+}
+
+static esp_err_t truncate_log_file(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) return ESP_FAIL;
+    fclose(f);
+    return ESP_OK;
+}
+
+static esp_err_t delete_log_file(const char *path)
+{
+    struct stat st = {0};
+    if (stat(path, &st) != 0) return ESP_OK;
+    return remove(path) == 0 ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t scramble_log_file(const char *path)
+{
+    struct stat st = {0};
+    if (stat(path, &st) != 0 || st.st_size <= 0) {
+        return delete_log_file(path);
+    }
+
+    FILE *f = fopen(path, "r+b");
+    if (!f) return ESP_FAIL;
+
+    uint8_t buf[256];
+    size_t remaining = (size_t)st.st_size;
+    while (remaining > 0) {
+        size_t chunk = remaining > sizeof(buf) ? sizeof(buf) : remaining;
+        for (size_t i = 0; i < chunk; i += sizeof(uint32_t)) {
+            uint32_t rnd = esp_random();
+            size_t copy = (chunk - i) < sizeof(uint32_t) ? (chunk - i) : sizeof(uint32_t);
+            memcpy(&buf[i], &rnd, copy);
+        }
+        if (fwrite(buf, 1, chunk, f) != chunk) {
+            fclose(f);
+            return ESP_FAIL;
+        }
+        remaining -= chunk;
+    }
+
+    fflush(f);
+    fclose(f);
+    return delete_log_file(path);
+}
+
+static esp_err_t apply_to_log_files(esp_err_t (*op)(const char *path))
+{
+    if (!op) return ESP_ERR_INVALID_ARG;
+
+    refresh_card_runtime_status();
+    if (!s_sd_ready) {
+        clear_log_ring();
+        return ESP_OK;
+    }
+
+    ensure_log_dir();
+    esp_err_t result = ESP_OK;
+    const char *paths[] = {EVENT_LOG_PATH, IDENTITY_LOG_PATH, DIAGNOSTIC_LOG_PATH};
+    for (size_t i = 0; i < (sizeof(paths) / sizeof(paths[0])); i++) {
+        esp_err_t err = op(paths[i]);
+        if (err != ESP_OK) result = err;
+    }
+    clear_log_ring();
+    return result;
+}
 
 static bool log_message_contains_device_identity(const char *message)
 {
@@ -70,6 +145,74 @@ static storage_log_bucket_t log_bucket_for_entry(const char *kind, const char *m
         return STORAGE_LOG_BUCKET_IDENTITY;
     }
     return STORAGE_LOG_BUCKET_EVENTS;
+}
+
+static bool log_kind_matches(const char *kind, const char *name)
+{
+    return kind && name && strcmp(kind, name) == 0;
+}
+
+static bool log_kind_has_prefix(const char *kind, const char *prefix)
+{
+    return kind && prefix && strncmp(kind, prefix, strlen(prefix)) == 0;
+}
+
+static bool log_matches_gps_detail(const char *kind, const char *message)
+{
+    if (log_kind_matches(kind, "gps") || log_kind_has_prefix(kind, "gps_")) return true;
+    if (!message) return false;
+    return strstr(message, "gps_") != NULL
+        || (strstr(message, "lat=") != NULL && strstr(message, "lon=") != NULL);
+}
+
+static bool log_matches_fox_source(const char *kind)
+{
+    return log_kind_matches(kind, "fox") || log_kind_has_prefix(kind, "fox_");
+}
+
+static bool log_matches_flock_source(const char *kind)
+{
+    return log_kind_matches(kind, "flock") || log_kind_has_prefix(kind, "flock_");
+}
+
+static bool log_matches_sky_source(const char *kind)
+{
+    return log_kind_matches(kind, "sky") || log_kind_has_prefix(kind, "sky_");
+}
+
+static bool storage_ext_log_allowed(storage_log_bucket_t bucket, const char *kind, const char *message)
+{
+    bool matched_applet = false;
+
+    if (log_matches_gps_detail(kind, message) && !g_app.log_gps_enabled) {
+        return false;
+    }
+
+    if (log_matches_fox_source(kind)) {
+        matched_applet = true;
+        if (!g_app.log_fox_enabled) return false;
+    }
+    if (log_matches_flock_source(kind)) {
+        matched_applet = true;
+        if (!g_app.log_flock_enabled) return false;
+    }
+    if (log_matches_sky_source(kind)) {
+        matched_applet = true;
+        if (!g_app.log_sky_enabled) return false;
+    }
+
+    if (bucket == STORAGE_LOG_BUCKET_IDENTITY) {
+        bool fox_identity = log_matches_fox_source(kind) || log_message_contains_device_identity(message);
+        if (fox_identity && !g_app.log_saved_fox_enabled) {
+            return false;
+        }
+    }
+
+    if (!matched_applet && !g_app.log_general_enabled) {
+        return false;
+    }
+
+    return true;
 }
 
 static void log_ring_append(storage_log_bucket_t bucket, uint32_t ts, const char *kind, const char *message)
@@ -296,6 +439,32 @@ uint32_t storage_ext_log_capacity_kb(void)
     return 768;
 }
 
+uint32_t storage_ext_total_kb(void)
+{
+    refresh_card_runtime_status();
+    if (!s_sd_ready) {
+        return 0;
+    }
+
+    uint64_t total_bytes = 0;
+    uint64_t free_bytes = 0;
+    if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
+        return 0;
+    }
+
+    return (uint32_t)(total_bytes / 1024ULL);
+}
+
+uint32_t storage_ext_used_kb(void)
+{
+    uint32_t total_kb = storage_ext_total_kb();
+    uint32_t free_kb = storage_ext_free_kb();
+    if (total_kb <= free_kb) {
+        return 0;
+    }
+    return total_kb - free_kb;
+}
+
 uint32_t storage_ext_free_kb(void)
 {
     refresh_card_runtime_status();
@@ -325,6 +494,7 @@ bool storage_ext_logging_blocked(void)
 static esp_err_t storage_ext_append_bucketed(storage_log_bucket_t bucket, const char *kind, const char *message)
 {
     if (!kind || !message) return ESP_ERR_INVALID_ARG;
+    if (!storage_ext_log_allowed(bucket, kind, message)) return ESP_OK;
     uint32_t now_sec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     log_ring_append(bucket, now_sec, kind, message);
 
@@ -465,5 +635,20 @@ esp_err_t storage_ext_format(void)
 
     ESP_LOGE(TAG, "microSD format failed: %s", esp_err_to_name(err));
     return err;
+}
+
+esp_err_t storage_ext_clear_logs(void)
+{
+    return apply_to_log_files(truncate_log_file);
+}
+
+esp_err_t storage_ext_delete_logs(void)
+{
+    return apply_to_log_files(delete_log_file);
+}
+
+esp_err_t storage_ext_scramble_logs(void)
+{
+    return apply_to_log_files(scramble_log_file);
 }
 

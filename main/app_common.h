@@ -261,6 +261,12 @@ typedef struct {
     uint8_t         shortcut_back_btn;
     bool            use_microsd_logs;
     bool            advanced_logging_enabled;
+    bool            log_general_enabled;
+    bool            log_flock_enabled;
+    bool            log_fox_enabled;
+    bool            log_sky_enabled;
+    bool            log_gps_enabled;
+    bool            log_saved_fox_enabled;
     bool            gps_diagnostics_enabled;
     bool            web_diagnostics_enabled;
     uint8_t         serial_log_verbosity;

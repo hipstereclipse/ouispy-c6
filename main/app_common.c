@@ -78,6 +78,12 @@ void app_state_init(void)
     g_app.shortcut_back_btn = SHORTCUT_MODE_SELECT;
     g_app.use_microsd_logs = false;
     g_app.advanced_logging_enabled = false;
+    g_app.log_general_enabled = true;
+    g_app.log_flock_enabled = true;
+    g_app.log_fox_enabled = true;
+    g_app.log_sky_enabled = true;
+    g_app.log_gps_enabled = true;
+    g_app.log_saved_fox_enabled = true;
     g_app.gps_diagnostics_enabled = false;
     g_app.web_diagnostics_enabled = false;
     g_app.serial_log_verbosity = SERIAL_LOG_INFO;
