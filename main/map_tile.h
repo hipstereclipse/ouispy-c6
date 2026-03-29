@@ -31,6 +31,11 @@ typedef struct {
     map_tile_debug_family_t png;
 } map_tile_debug_info_t;
 
+/* Return LCD-oriented browsable zoom levels.
+ * PNG-backed zooms are listed first so zoom cycling prefers levels that can
+ * actually draw imagery on-device, then non-PNG-only levels are appended. */
+size_t map_tile_browsable_zooms(int *out_zooms, size_t max_zooms);
+
 /* Convert lat/lon to global pixel coordinates at the given zoom level.
  * The world is 2^zoom * 256 pixels wide in Web Mercator. */
 void map_tile_latlon_to_pixel(double lat, double lon, int zoom,
@@ -64,6 +69,15 @@ bool map_tile_available_zoom_json(char *buf, size_t buf_sz, bool png_only);
 
 /* Return a representative tile center from downloaded tiles. */
 bool map_tile_get_fallback_center(bool png_only, int *out_zoom, double *out_lat, double *out_lon);
+
+/* Resolve the requested zoom to the best-covered level for the current map
+ * center and viewport, preferring levels whose tile bounds overlap the view. */
+int map_tile_resolve_view_zoom(int requested_zoom,
+                               double center_lat,
+                               double center_lon,
+                               int viewport_w,
+                               int viewport_h,
+                               bool png_only);
 
 /* Snapshot the cached tile-scan state for diagnostics and web debugging. */
 void map_tile_get_debug_info(map_tile_debug_info_t *out_info);

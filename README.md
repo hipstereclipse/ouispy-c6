@@ -132,6 +132,11 @@ The shared pinned-device map can render offline slippy-map tiles for saved Flock
   - The firmware also tolerates a nested `/sdcard/sdcard/map` layout so flasher-exported folders copied one level too deep still work
   - The browser map can render `png`, `jpg`, `jpeg`, or `webp` tiles
   - The on-device LCD renderer can center and browse any indexed tile cache, but image tile drawing on the LCD still requires PNG tiles under `/sdcard/map`; `jpg`/`jpeg`/`webp` tile sets fall back to the grid view instead of blocking the map entirely
+  - On-device zoom cycling now prioritizes PNG-backed zoom levels first, then non-PNG levels, so image-backed zoom steps are preferred when available
+  - The on-device renderer now resolves each requested zoom to the best tile-covered level for the current center and viewport, reducing empty zoom steps on sparse caches
+  - Local map fallback centering is deterministic and biased toward representative tile regions that overlap across more zoom levels for more stable picture continuity
+  - Tile cache publication is now atomic: the UI only consumes a completed scan result, which prevents transient `no tiles` states while SD scanning is still in progress
+  - The LCD map viewport is always prefilled with the fallback grid before tile overlay, preventing black or stale gaps when only part of the tile span can be decoded
   - Pins come from locations you saved in the web UI, so populate those first for a meaningful map
 
 ### Fox Hunter Web Console

@@ -1224,7 +1224,7 @@ static void on_button_event(button_id_t btn, button_event_t evt)
         if ((g_app.current_mode == MODE_FLOCK_YOU || g_app.current_mode == MODE_SKY_SPY)
             && g_app.local_map_open) {
             int zooms[20];
-            size_t zoom_count = map_tile_available_zooms(zooms, sizeof(zooms) / sizeof(zooms[0]), false);
+            size_t zoom_count = map_tile_browsable_zooms(zooms, sizeof(zooms) / sizeof(zooms[0]));
             size_t zoom_options = (zoom_count > 0) ? zoom_count : 5;
             g_app.local_map_zoom_idx = (g_app.local_map_zoom_idx + 1) % zoom_options;
             g_app.ui_refresh_token++;

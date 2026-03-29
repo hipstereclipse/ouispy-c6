@@ -413,7 +413,7 @@ void display_draw_text_scaled(int x, int y, const char *text, uint16_t fg, uint1
 static int map_tile_zoom_for_idx(uint8_t idx)
 {
     int zooms[20];
-    size_t zoom_count = map_tile_available_zooms(zooms, sizeof(zooms) / sizeof(zooms[0]), false);
+    size_t zoom_count = map_tile_browsable_zooms(zooms, sizeof(zooms) / sizeof(zooms[0]));
 
     if (zoom_count > 0) {
         return zooms[idx % zoom_count];
@@ -736,6 +736,7 @@ void display_draw_shared_map_view(app_mode_t mode)
     const int map_y = 34;
     const int map_w = LCD_H_RES;
     const int map_h = 210;
+    int footer_zoom = map_tile_zoom_for_idx(g_app.local_map_zoom_idx);
 
     /* Clear only the regions outside the tile area to avoid the visible
      * full-screen flash that causes map flicker on periodic redraws. */
@@ -755,6 +756,7 @@ void display_draw_shared_map_view(app_mode_t mode)
         int any_zoom = cache_ok ? map_tile_max_zoom() : -1;
         int best_zoom = cache_ok ? map_tile_max_png_zoom() : -1;
         int requested_zoom = map_tile_zoom_for_idx(g_app.local_map_zoom_idx);
+        bool prefer_png_center = (best_zoom >= 0);
         if (diag) ESP_LOGI(TAG, "map_view zoom_for_idx=%d cache=%d", requested_zoom, cache_ok);
         if (pin_count > 0) {
             for (int i = 0; i < pin_count; i++) {
@@ -767,7 +769,7 @@ void display_draw_shared_map_view(app_mode_t mode)
             /* Only attempt fallback when tile cache is pre-warmed — never
              * trigger the slow SD directory scan from this render path. */
             int fallback_zoom = -1;
-            if (map_tile_get_fallback_center(false, &fallback_zoom, &center_lat, &center_lon)) {
+            if (map_tile_get_fallback_center(prefer_png_center, &fallback_zoom, &center_lat, &center_lon)) {
                 fallback_view = true;
             }
         }
@@ -800,9 +802,19 @@ void display_draw_shared_map_view(app_mode_t mode)
         int zoom = requested_zoom;
         bool tiles_available = (best_zoom >= 0);
 
-        /* Clamp zoom to what's on disk, and cap at 16 to bound tile count */
+        /* Resolve to the best-covered renderable zoom for this center, then cap
+         * at 16 to bound tile count and decode cost. */
+        if (tiles_available) {
+            zoom = map_tile_resolve_view_zoom(requested_zoom,
+                                              center_lat,
+                                              center_lon,
+                                              map_w,
+                                              map_h,
+                                              true);
+        }
         if (tiles_available && zoom > best_zoom) zoom = best_zoom;
         if (zoom > 16) zoom = 16;
+        footer_zoom = zoom;
 
         /* Skip tile rendering when free heap is below ~60 KB (PNG decode
          * temporarily allocates ~50 KB per tile). */
@@ -822,6 +834,14 @@ void display_draw_shared_map_view(app_mode_t mode)
          * Global pixel coords for the top-left corner: */
         double origin_px = cpx - (map_w / 2.0);
         double origin_py = cpy - (map_h / 2.0);
+
+        /* Always seed the viewport with a deterministic fallback background so
+         * sparse tile sets do not leave stale or black gaps between draws. */
+        display_draw_rect(map_x, map_y, map_w, map_h, panel);
+        for (int x = map_x + 18; x < map_x + map_w; x += 18)
+            display_draw_rect(x, map_y, 1, map_h, grid);
+        for (int y = map_y + 18; y < map_y + map_h; y += 18)
+            display_draw_rect(map_x, y, map_w, 1, grid);
 
         /* ── Draw tile background ── */
         bool has_tiles = false;
@@ -889,15 +909,6 @@ void display_draw_shared_map_view(app_mode_t mode)
                               tile_x1,
                               tile_y1);
 
-        if (!has_tiles) {
-            /* Fallback: draw grid when no tiles are available */
-            display_draw_rect(map_x, map_y, map_w, map_h, panel);
-            for (int x = map_x + 18; x < map_x + map_w; x += 18)
-                display_draw_rect(x, map_y, 1, map_h, grid);
-            for (int y = map_y + 18; y < map_y + map_h; y += 18)
-                display_draw_rect(map_x, y, map_w, 1, grid);
-        }
-
         /* ── Center crosshair ── */
         int cx = map_x + map_w / 2;
         int cy = map_y + map_h / 2;
@@ -949,7 +960,7 @@ void display_draw_shared_map_view(app_mode_t mode)
         int list_y = map_y + map_h + 14;
         if (fallback_view) {
             display_draw_text(4, list_y, "Browsing available map tiles", text_main, bg);
-            display_draw_text(4, list_y + 11, "Random area from SD card", text_dim, bg);
+            display_draw_text(4, list_y + 11, "Stable area with best zoom overlap", text_dim, bg);
         } else {
             for (int i = 0; i < pin_count && i < 3; i++) {
                 char line[40];
@@ -968,11 +979,10 @@ draw_footer:
     display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
     display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border);
     char foot[32];
-    int cur_zoom = map_tile_zoom_for_idx(g_app.local_map_zoom_idx);
     if (mode == MODE_FLOCK_YOU)
-        snprintf(foot, sizeof(foot), "3x:back 2x:Z%d hold:sel", cur_zoom);
+        snprintf(foot, sizeof(foot), "3x:back 2x:Z%d hold:sel", footer_zoom);
     else
-        snprintf(foot, sizeof(foot), "3x:back 2x:Z%d", cur_zoom);
+        snprintf(foot, sizeof(foot), "3x:back 2x:Z%d", footer_zoom);
     display_draw_text_centered(DISPLAY_FOOTER_TEXT_Y, foot, text_dim, footer);
     display_unlock();
     if (diag) ESP_LOGI(TAG, "map_view DONE heap=%lu stack=%u",

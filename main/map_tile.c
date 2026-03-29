@@ -23,7 +23,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
-#include "esp_random.h"
 #include "miniz.h"          /* ROM tinfl */
 
 #include <dirent.h>
@@ -36,15 +35,30 @@
 
 static const char *TAG = "map_tile";
 #define MAX_IDAT_BYTES (48 * 1024)   /* refuse tiles with > 48 KB compressed */
+#define TILE_ZOOM_CACHE_MAX_LEVELS 20
+
+typedef struct {
+    int zoom;
+    int representative_tile_x;
+    int representative_tile_y;
+    int min_tile_x;
+    int max_tile_x;
+    int min_tile_y;
+    int max_tile_y;
+} tile_zoom_level_info_t;
 
 typedef struct {
     bool valid;
     int any_zoom;
     int png_zoom;
-    int any_zooms[20];
+    int any_zooms[TILE_ZOOM_CACHE_MAX_LEVELS];
     size_t any_zoom_count;
-    int png_zooms[20];
+    int png_zooms[TILE_ZOOM_CACHE_MAX_LEVELS];
     size_t png_zoom_count;
+    tile_zoom_level_info_t any_levels[TILE_ZOOM_CACHE_MAX_LEVELS];
+    size_t any_level_count;
+    tile_zoom_level_info_t png_levels[TILE_ZOOM_CACHE_MAX_LEVELS];
+    size_t png_level_count;
     int any_tile_x;
     int any_tile_y;
     int any_min_tile_x;
@@ -69,6 +83,10 @@ static tile_zoom_cache_t s_tile_zoom_cache = {
     .any_zoom_count = 0,
     .png_zooms = {0},
     .png_zoom_count = 0,
+    .any_levels = {{0}},
+    .any_level_count = 0,
+    .png_levels = {{0}},
+    .png_level_count = 0,
     .any_tile_x = 0,
     .any_tile_y = 0,
     .any_min_tile_x = 0,
@@ -84,6 +102,192 @@ static tile_zoom_cache_t s_tile_zoom_cache = {
     .scanned_at_us = 0,
     .root = {0},
 };
+static bool s_tile_zoom_cache_scanning = false;
+
+static void reset_tile_zoom_cache(tile_zoom_cache_t *cache, int64_t scanned_at_us)
+{
+    if (!cache) return;
+
+    memset(cache, 0, sizeof(*cache));
+    cache->valid = false;
+    cache->any_zoom = -1;
+    cache->png_zoom = -1;
+    cache->scanned_at_us = scanned_at_us;
+}
+
+static const tile_zoom_level_info_t *tile_zoom_levels(bool png_only, size_t *out_count)
+{
+    if (out_count) {
+        *out_count = png_only ? s_tile_zoom_cache.png_level_count : s_tile_zoom_cache.any_level_count;
+    }
+    return png_only ? s_tile_zoom_cache.png_levels : s_tile_zoom_cache.any_levels;
+}
+
+static const tile_zoom_level_info_t *find_level_info(bool png_only, int zoom)
+{
+    size_t level_count = 0;
+    const tile_zoom_level_info_t *levels = tile_zoom_levels(png_only, &level_count);
+
+    for (size_t i = 0; i < level_count; i++) {
+        if (levels[i].zoom == zoom) return &levels[i];
+    }
+    return NULL;
+}
+
+static bool append_zoom_level(tile_zoom_level_info_t *levels,
+                              size_t *level_count,
+                              int zoom,
+                              int representative_tile_x,
+                              int representative_tile_y,
+                              int min_tile_x,
+                              int max_tile_x,
+                              int min_tile_y,
+                              int max_tile_y)
+{
+    if (!levels || !level_count || *level_count >= TILE_ZOOM_CACHE_MAX_LEVELS) return false;
+
+    tile_zoom_level_info_t *level = &levels[*level_count];
+    level->zoom = zoom;
+    level->representative_tile_x = representative_tile_x;
+    level->representative_tile_y = representative_tile_y;
+    level->min_tile_x = min_tile_x;
+    level->max_tile_x = max_tile_x;
+    level->min_tile_y = min_tile_y;
+    level->max_tile_y = max_tile_y;
+    (*level_count)++;
+    return true;
+}
+
+static void level_normalized_bounds(const tile_zoom_level_info_t *level,
+                                    double *out_min_x,
+                                    double *out_max_x,
+                                    double *out_min_y,
+                                    double *out_max_y)
+{
+    if (!level) return;
+
+    double denom = (double)(1U << level->zoom);
+    if (out_min_x) *out_min_x = (double)level->min_tile_x / denom;
+    if (out_max_x) *out_max_x = (double)(level->max_tile_x + 1) / denom;
+    if (out_min_y) *out_min_y = (double)level->min_tile_y / denom;
+    if (out_max_y) *out_max_y = (double)(level->max_tile_y + 1) / denom;
+}
+
+static bool normalized_point_in_level(const tile_zoom_level_info_t *level,
+                                      double normalized_x,
+                                      double normalized_y)
+{
+    double min_x = 0.0;
+    double max_x = 0.0;
+    double min_y = 0.0;
+    double max_y = 0.0;
+
+    if (!level) return false;
+
+    level_normalized_bounds(level, &min_x, &max_x, &min_y, &max_y);
+    return normalized_x >= min_x && normalized_x < max_x
+        && normalized_y >= min_y && normalized_y < max_y;
+}
+
+static bool choose_preferred_focus_point(bool png_only,
+                                         double *out_normalized_x,
+                                         double *out_normalized_y,
+                                         int *out_zoom)
+{
+    size_t level_count = 0;
+    const tile_zoom_level_info_t *levels = tile_zoom_levels(png_only, &level_count);
+    bool found = false;
+    double best_x = 0.0;
+    double best_y = 0.0;
+    int best_support = -1;
+    int best_zoom = -1;
+
+    if (!levels || level_count == 0) return false;
+
+    for (size_t i = 0; i < level_count; i++) {
+        int support = 0;
+        double candidate_x = 0.0;
+        double candidate_y = 0.0;
+        double denom = (double)(1U << levels[i].zoom);
+
+        candidate_x = ((double)levels[i].representative_tile_x + 0.5) / denom;
+        candidate_y = ((double)levels[i].representative_tile_y + 0.5) / denom;
+
+        for (size_t j = 0; j < level_count; j++) {
+            if (normalized_point_in_level(&levels[j], candidate_x, candidate_y)) {
+                support++;
+            }
+        }
+
+        if (!found || support > best_support
+            || (support == best_support && levels[i].zoom > best_zoom)) {
+            found = true;
+            best_support = support;
+            best_zoom = levels[i].zoom;
+            best_x = candidate_x;
+            best_y = candidate_y;
+        }
+    }
+
+    if (!found) return false;
+
+    if (out_normalized_x) *out_normalized_x = best_x;
+    if (out_normalized_y) *out_normalized_y = best_y;
+    if (out_zoom) *out_zoom = best_zoom;
+    return true;
+}
+
+static int level_view_coverage_score(const tile_zoom_level_info_t *level,
+                                     double center_lat,
+                                     double center_lon,
+                                     int viewport_w,
+                                     int viewport_h,
+                                     bool *out_center_covered)
+{
+    double cpx = 0.0;
+    double cpy = 0.0;
+    double origin_px = 0.0;
+    double origin_py = 0.0;
+    int tile_x0 = 0;
+    int tile_x1 = 0;
+    int tile_y0 = 0;
+    int tile_y1 = 0;
+    int center_tx = 0;
+    int center_ty = 0;
+    int overlap_x0 = 0;
+    int overlap_x1 = 0;
+    int overlap_y0 = 0;
+    int overlap_y1 = 0;
+    bool center_covered = false;
+
+    if (!level || viewport_w <= 0 || viewport_h <= 0) return -1;
+
+    map_tile_latlon_to_pixel(center_lat, center_lon, level->zoom, &cpx, &cpy);
+    origin_px = cpx - (viewport_w / 2.0);
+    origin_py = cpy - (viewport_h / 2.0);
+    tile_x0 = (int)floor(origin_px / MAP_TILE_SIZE);
+    tile_y0 = (int)floor(origin_py / MAP_TILE_SIZE);
+    tile_x1 = (int)floor((origin_px + viewport_w - 1) / MAP_TILE_SIZE);
+    tile_y1 = (int)floor((origin_py + viewport_h - 1) / MAP_TILE_SIZE);
+    center_tx = (int)floor(cpx / MAP_TILE_SIZE);
+    center_ty = (int)floor(cpy / MAP_TILE_SIZE);
+
+    center_covered = center_tx >= level->min_tile_x && center_tx <= level->max_tile_x
+                  && center_ty >= level->min_tile_y && center_ty <= level->max_tile_y;
+    if (out_center_covered) *out_center_covered = center_covered;
+
+    overlap_x0 = tile_x0 > level->min_tile_x ? tile_x0 : level->min_tile_x;
+    overlap_x1 = tile_x1 < level->max_tile_x ? tile_x1 : level->max_tile_x;
+    overlap_y0 = tile_y0 > level->min_tile_y ? tile_y0 : level->min_tile_y;
+    overlap_y1 = tile_y1 < level->max_tile_y ? tile_y1 : level->max_tile_y;
+
+    if (overlap_x1 < overlap_x0 || overlap_y1 < overlap_y0) {
+        return center_covered ? 1 : 0;
+    }
+
+    return (overlap_x1 - overlap_x0 + 1) * (overlap_y1 - overlap_y0 + 1)
+         + (center_covered ? 8 : 0);
+}
 
 static void fill_debug_family(map_tile_debug_family_t *out_family,
                               int zoom,
@@ -298,111 +502,129 @@ static void refresh_tile_zoom_cache(void)
     ESP_LOGD(TAG, "refresh_cache root=%s", map_root ? map_root : "(none)");
 
     if (!map_root) {
+        reset_tile_zoom_cache(&s_tile_zoom_cache, now_us);
         s_tile_zoom_cache.valid = true;
-        s_tile_zoom_cache.any_zoom = -1;
-        s_tile_zoom_cache.png_zoom = -1;
-        s_tile_zoom_cache.any_zoom_count = 0;
-        s_tile_zoom_cache.png_zoom_count = 0;
-        s_tile_zoom_cache.any_tile_x = 0;
-        s_tile_zoom_cache.any_tile_y = 0;
-        s_tile_zoom_cache.any_min_tile_x = 0;
-        s_tile_zoom_cache.any_max_tile_x = 0;
-        s_tile_zoom_cache.any_min_tile_y = 0;
-        s_tile_zoom_cache.any_max_tile_y = 0;
-        s_tile_zoom_cache.png_tile_x = 0;
-        s_tile_zoom_cache.png_tile_y = 0;
-        s_tile_zoom_cache.png_min_tile_x = 0;
-        s_tile_zoom_cache.png_max_tile_x = 0;
-        s_tile_zoom_cache.png_min_tile_y = 0;
-        s_tile_zoom_cache.png_max_tile_y = 0;
-        s_tile_zoom_cache.scanned_at_us = now_us;
         s_tile_zoom_cache.root[0] = '\0';
+        s_tile_zoom_cache_scanning = false;
         return;
     }
 
     if (s_tile_zoom_cache.valid) {
         return;
     }
+    if (s_tile_zoom_cache_scanning) {
+        return;
+    }
 
     static const char *const any_exts[] = {"png", "jpg", "jpeg", "webp"};
     static const char *const png_exts[] = {"png"};
+    tile_zoom_cache_t new_cache;
 
-    s_tile_zoom_cache.valid = true;
-    s_tile_zoom_cache.any_zoom = -1;
-    s_tile_zoom_cache.png_zoom = -1;
-    s_tile_zoom_cache.any_zoom_count = 0;
-    s_tile_zoom_cache.png_zoom_count = 0;
-    s_tile_zoom_cache.any_tile_x = 0;
-    s_tile_zoom_cache.any_tile_y = 0;
-    s_tile_zoom_cache.any_min_tile_x = 0;
-    s_tile_zoom_cache.any_max_tile_x = 0;
-    s_tile_zoom_cache.any_min_tile_y = 0;
-    s_tile_zoom_cache.any_max_tile_y = 0;
-    s_tile_zoom_cache.png_tile_x = 0;
-    s_tile_zoom_cache.png_tile_y = 0;
-    s_tile_zoom_cache.png_min_tile_x = 0;
-    s_tile_zoom_cache.png_max_tile_x = 0;
-    s_tile_zoom_cache.png_min_tile_y = 0;
-    s_tile_zoom_cache.png_max_tile_y = 0;
-    s_tile_zoom_cache.scanned_at_us = 0;   /* updated after scan completes */
-    snprintf(s_tile_zoom_cache.root, sizeof(s_tile_zoom_cache.root), "%s", map_root);
+    s_tile_zoom_cache_scanning = true;
+    reset_tile_zoom_cache(&new_cache, 0);   /* updated after scan completes */
+    snprintf(new_cache.root, sizeof(new_cache.root), "%s", map_root);
 
     for (int z = 19; z >= 0; z--) {
         char zoom_path[48];
         struct stat st = {0};
+        int any_tile_x = 0;
+        int any_tile_y = 0;
+        int png_tile_x = 0;
+        int png_tile_y = 0;
+        int any_min_tile_x = 0;
+        int any_max_tile_x = 0;
+        int any_min_tile_y = 0;
+        int any_max_tile_y = 0;
+        int png_min_tile_x = 0;
+        int png_max_tile_x = 0;
+        int png_min_tile_y = 0;
+        int png_max_tile_y = 0;
 
         snprintf(zoom_path, sizeof(zoom_path), "%s/%d", map_root, z);
         if (stat(zoom_path, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
 
         bool any_found = find_matching_tile_in_zoom(zoom_path, any_exts,
                                                     sizeof(any_exts) / sizeof(any_exts[0]),
-                                                    NULL, NULL);
+                                                    &any_tile_x, &any_tile_y);
         bool png_found = find_matching_tile_in_zoom(zoom_path, png_exts,
                                                     sizeof(png_exts) / sizeof(png_exts[0]),
-                                                    NULL, NULL);
+                                                    &png_tile_x, &png_tile_y);
 
-        if (any_found && s_tile_zoom_cache.any_zoom_count < (sizeof(s_tile_zoom_cache.any_zooms) / sizeof(s_tile_zoom_cache.any_zooms[0]))) {
-            s_tile_zoom_cache.any_zooms[s_tile_zoom_cache.any_zoom_count++] = z;
+        if (any_found
+            && scan_tile_bounds_in_zoom(zoom_path, any_exts, sizeof(any_exts) / sizeof(any_exts[0]),
+                                        &any_min_tile_x, &any_max_tile_x,
+                                        &any_min_tile_y, &any_max_tile_y)) {
+            if (new_cache.any_zoom_count < (sizeof(new_cache.any_zooms) / sizeof(new_cache.any_zooms[0]))) {
+                new_cache.any_zooms[new_cache.any_zoom_count++] = z;
+            }
+            append_zoom_level(new_cache.any_levels,
+                              &new_cache.any_level_count,
+                              z,
+                              any_tile_x,
+                              any_tile_y,
+                              any_min_tile_x,
+                              any_max_tile_x,
+                              any_min_tile_y,
+                              any_max_tile_y);
+            if (new_cache.any_zoom < 0) {
+                new_cache.any_zoom = z;
+                new_cache.any_tile_x = any_tile_x;
+                new_cache.any_tile_y = any_tile_y;
+                new_cache.any_min_tile_x = any_min_tile_x;
+                new_cache.any_max_tile_x = any_max_tile_x;
+                new_cache.any_min_tile_y = any_min_tile_y;
+                new_cache.any_max_tile_y = any_max_tile_y;
+            }
         }
 
-        if (png_found && s_tile_zoom_cache.png_zoom_count < (sizeof(s_tile_zoom_cache.png_zooms) / sizeof(s_tile_zoom_cache.png_zooms[0]))) {
-            s_tile_zoom_cache.png_zooms[s_tile_zoom_cache.png_zoom_count++] = z;
+        if (png_found
+            && scan_tile_bounds_in_zoom(zoom_path, png_exts, sizeof(png_exts) / sizeof(png_exts[0]),
+                                        &png_min_tile_x, &png_max_tile_x,
+                                        &png_min_tile_y, &png_max_tile_y)) {
+            if (new_cache.png_zoom_count < (sizeof(new_cache.png_zooms) / sizeof(new_cache.png_zooms[0]))) {
+                new_cache.png_zooms[new_cache.png_zoom_count++] = z;
+            }
+            append_zoom_level(new_cache.png_levels,
+                              &new_cache.png_level_count,
+                              z,
+                              png_tile_x,
+                              png_tile_y,
+                              png_min_tile_x,
+                              png_max_tile_x,
+                              png_min_tile_y,
+                              png_max_tile_y);
+            if (new_cache.png_zoom < 0) {
+                new_cache.png_zoom = z;
+                new_cache.png_tile_x = png_tile_x;
+                new_cache.png_tile_y = png_tile_y;
+                new_cache.png_min_tile_x = png_min_tile_x;
+                new_cache.png_max_tile_x = png_max_tile_x;
+                new_cache.png_min_tile_y = png_min_tile_y;
+                new_cache.png_max_tile_y = png_max_tile_y;
+            }
         }
 
-        if (s_tile_zoom_cache.any_zoom < 0 && any_found
-            && find_matching_tile_in_zoom(zoom_path, any_exts, sizeof(any_exts) / sizeof(any_exts[0]),
-                              &s_tile_zoom_cache.any_tile_x, &s_tile_zoom_cache.any_tile_y)) {
-            s_tile_zoom_cache.any_zoom = z;
-            scan_tile_bounds_in_zoom(zoom_path, any_exts, sizeof(any_exts) / sizeof(any_exts[0]),
-                                     &s_tile_zoom_cache.any_min_tile_x, &s_tile_zoom_cache.any_max_tile_x,
-                                     &s_tile_zoom_cache.any_min_tile_y, &s_tile_zoom_cache.any_max_tile_y);
-        }
-
-        if (s_tile_zoom_cache.png_zoom < 0 && png_found
-            && find_matching_tile_in_zoom(zoom_path, png_exts, sizeof(png_exts) / sizeof(png_exts[0]),
-                              &s_tile_zoom_cache.png_tile_x, &s_tile_zoom_cache.png_tile_y)) {
-            s_tile_zoom_cache.png_zoom = z;
-            scan_tile_bounds_in_zoom(zoom_path, png_exts, sizeof(png_exts) / sizeof(png_exts[0]),
-                                     &s_tile_zoom_cache.png_min_tile_x, &s_tile_zoom_cache.png_max_tile_x,
-                                     &s_tile_zoom_cache.png_min_tile_y, &s_tile_zoom_cache.png_max_tile_y);
-        }
-
-        if (s_tile_zoom_cache.any_zoom >= 0 && s_tile_zoom_cache.png_zoom >= 0) {
+        if (new_cache.any_zoom >= 0 && new_cache.png_zoom >= 0) {
             break;
         }
     }
 
-    s_tile_zoom_cache.scanned_at_us = esp_timer_get_time();
+    new_cache.valid = true;
+    new_cache.scanned_at_us = esp_timer_get_time();
+    s_tile_zoom_cache = new_cache;
+    s_tile_zoom_cache_scanning = false;
 }
 
 void map_tile_invalidate_cache(void)
 {
+    s_tile_zoom_cache_scanning = false;
     s_tile_zoom_cache.valid = false;
+    s_tile_zoom_cache.scanned_at_us = 0;
 }
 
 bool map_tile_cache_ready(void)
 {
-    return s_tile_zoom_cache.valid;
+    return s_tile_zoom_cache.valid && !s_tile_zoom_cache_scanning && s_tile_zoom_cache.scanned_at_us > 0;
 }
 
 void map_tile_warm_cache(void)
@@ -420,7 +642,7 @@ static void tile_warm_task(void *arg)
 
 void map_tile_warm_cache_async(void)
 {
-    if (s_tile_zoom_cache.valid) return;            /* already warm */
+    if (s_tile_zoom_cache.valid || s_tile_zoom_cache_scanning) return;            /* already warm/in progress */
     if (xTaskCreate(tile_warm_task, "tile_warm",
                     TILE_WARM_STACK, NULL, 1, NULL) != pdPASS) {
         ESP_LOGW(TAG, "tile_warm task create failed, warming synchronously");
@@ -482,6 +704,39 @@ size_t map_tile_available_zooms(int *out_zooms, size_t max_zooms, bool png_only)
     return count;
 }
 
+size_t map_tile_browsable_zooms(int *out_zooms, size_t max_zooms)
+{
+    int png_zooms[TILE_ZOOM_CACHE_MAX_LEVELS];
+    int any_zooms[TILE_ZOOM_CACHE_MAX_LEVELS];
+    size_t png_count = 0;
+    size_t any_count = 0;
+    size_t written = 0;
+
+    if (!out_zooms || max_zooms == 0) return 0;
+
+    png_count = map_tile_available_zooms(png_zooms, sizeof(png_zooms) / sizeof(png_zooms[0]), true);
+    any_count = map_tile_available_zooms(any_zooms, sizeof(any_zooms) / sizeof(any_zooms[0]), false);
+
+    for (size_t i = 0; i < png_count && written < max_zooms; i++) {
+        out_zooms[written++] = png_zooms[i];
+    }
+
+    for (size_t i = 0; i < any_count && written < max_zooms; i++) {
+        bool already_listed = false;
+        for (size_t j = 0; j < written; j++) {
+            if (out_zooms[j] == any_zooms[i]) {
+                already_listed = true;
+                break;
+            }
+        }
+        if (!already_listed) {
+            out_zooms[written++] = any_zooms[i];
+        }
+    }
+
+    return written;
+}
+
 bool map_tile_available_zoom_json(char *buf, size_t buf_sz, bool png_only)
 {
     int zooms[20];
@@ -526,47 +781,65 @@ bool map_tile_get_fallback_center(bool png_only, int *out_zoom, double *out_lat,
     refresh_tile_zoom_cache();
 
     int zoom = png_only ? s_tile_zoom_cache.png_zoom : s_tile_zoom_cache.any_zoom;
-    int min_tx = png_only ? s_tile_zoom_cache.png_min_tile_x : s_tile_zoom_cache.any_min_tile_x;
-    int max_tx = png_only ? s_tile_zoom_cache.png_max_tile_x : s_tile_zoom_cache.any_max_tile_x;
-    int min_ty = png_only ? s_tile_zoom_cache.png_min_tile_y : s_tile_zoom_cache.any_min_tile_y;
-    int max_ty = png_only ? s_tile_zoom_cache.png_max_tile_y : s_tile_zoom_cache.any_max_tile_y;
+    double normalized_x = 0.0;
+    double normalized_y = 0.0;
     if (zoom < 0) return false;
 
-    /* Pick a random tile within the central ~50% of the available bounds
-     * so the view lands on a plausible area, not an extreme edge. */
-    int range_x = max_tx - min_tx;
-    int range_y = max_ty - min_ty;
-    int tile_x, tile_y;
+    if (!choose_preferred_focus_point(png_only, &normalized_x, &normalized_y, &zoom)) {
+        const tile_zoom_level_info_t *level = find_level_info(png_only, zoom);
+        if (!level) return false;
 
-    if (range_x > 3) {
-        int margin = range_x / 4;
-        int lo = min_tx + margin;
-        int span = range_x - 2 * margin;
-        tile_x = lo + (int)(esp_random() % (uint32_t)(span + 1));
-    } else {
-        tile_x = (min_tx + max_tx) / 2;
+        double denom = (double)(1U << zoom);
+        normalized_x = ((double)level->representative_tile_x + 0.5) / denom;
+        normalized_y = ((double)level->representative_tile_y + 0.5) / denom;
     }
-
-    if (range_y > 3) {
-        int margin = range_y / 4;
-        int lo = min_ty + margin;
-        int span = range_y - 2 * margin;
-        tile_y = lo + (int)(esp_random() % (uint32_t)(span + 1));
-    } else {
-        tile_y = (min_ty + max_ty) / 2;
-    }
-
-    double tiles_per_axis = (double)(1 << zoom);
-    double tx = (double)tile_x + 0.5;
-    double ty = (double)tile_y + 0.5;
 
     if (out_zoom) *out_zoom = zoom;
-    if (out_lon) *out_lon = (tx / tiles_per_axis) * 360.0 - 180.0;
+    if (out_lon) *out_lon = normalized_x * 360.0 - 180.0;
     if (out_lat) {
-        double lat_rad = atan(sinh(M_PI * (1.0 - (2.0 * ty / tiles_per_axis))));
+        double lat_rad = atan(sinh(M_PI * (1.0 - (2.0 * normalized_y))));
         *out_lat = lat_rad * 180.0 / M_PI;
     }
     return true;
+}
+
+int map_tile_resolve_view_zoom(int requested_zoom,
+                               double center_lat,
+                               double center_lon,
+                               int viewport_w,
+                               int viewport_h,
+                               bool png_only)
+{
+    size_t level_count = 0;
+    const tile_zoom_level_info_t *levels = NULL;
+    int best_zoom = requested_zoom;
+    int best_score = -1;
+    int best_distance = INT32_MAX;
+
+    refresh_tile_zoom_cache();
+    levels = tile_zoom_levels(png_only, &level_count);
+    if (!levels || level_count == 0) return requested_zoom;
+
+    for (size_t i = 0; i < level_count; i++) {
+        bool center_covered = false;
+        int score = level_view_coverage_score(&levels[i],
+                                              center_lat,
+                                              center_lon,
+                                              viewport_w,
+                                              viewport_h,
+                                              &center_covered);
+        int distance = abs(levels[i].zoom - requested_zoom);
+
+        if (score < 0) continue;
+        if (score > best_score || (score == best_score && distance < best_distance)
+            || (score == best_score && distance == best_distance && center_covered)) {
+            best_score = score;
+            best_distance = distance;
+            best_zoom = levels[i].zoom;
+        }
+    }
+
+    return best_zoom;
 }
 
 void map_tile_get_debug_info(map_tile_debug_info_t *out_info)
