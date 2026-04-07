@@ -260,6 +260,20 @@ static bool normalized_point_in_level(const tile_zoom_level_info_t *level,
         && normalized_y >= min_y && normalized_y < max_y;
 }
 
+static void level_normalized_center(const tile_zoom_level_info_t *level,
+                                    double *out_center_x,
+                                    double *out_center_y)
+{
+    if (!level) return;
+
+    double denom = (double)(1U << level->zoom);
+    double center_x = ((double)level->min_tile_x + (double)level->max_tile_x + 1.0) / (2.0 * denom);
+    double center_y = ((double)level->min_tile_y + (double)level->max_tile_y + 1.0) / (2.0 * denom);
+
+    if (out_center_x) *out_center_x = center_x;
+    if (out_center_y) *out_center_y = center_y;
+}
+
 static bool choose_preferred_focus_point(bool png_only,
                                          double *out_normalized_x,
                                          double *out_normalized_y,
@@ -279,10 +293,8 @@ static bool choose_preferred_focus_point(bool png_only,
         int support = 0;
         double candidate_x = 0.0;
         double candidate_y = 0.0;
-        double denom = (double)(1U << levels[i].zoom);
 
-        candidate_x = ((double)levels[i].representative_tile_x + 0.5) / denom;
-        candidate_y = ((double)levels[i].representative_tile_y + 0.5) / denom;
+        level_normalized_center(&levels[i], &candidate_x, &candidate_y);
 
         for (size_t j = 0; j < level_count; j++) {
             if (normalized_point_in_level(&levels[j], candidate_x, candidate_y)) {
@@ -977,9 +989,7 @@ bool map_tile_get_fallback_center(bool png_only, int *out_zoom, double *out_lat,
         const tile_zoom_level_info_t *level = find_level_info(png_only, zoom);
         if (!level) return false;
 
-        double denom = (double)(1U << zoom);
-        normalized_x = ((double)level->representative_tile_x + 0.5) / denom;
-        normalized_y = ((double)level->representative_tile_y + 0.5) / denom;
+        level_normalized_center(level, &normalized_x, &normalized_y);
     }
 
     if (out_zoom) *out_zoom = zoom;

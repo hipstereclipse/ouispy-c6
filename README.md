@@ -12,7 +12,7 @@
 
 OUI-Spy C6 consolidates three passive RF intelligence modes into a single flash image running on Waveshare's ESP32-C6-LCD-1.47 boards. It now supports both the original ST7789 model and the newer JD9853 touch variant from the same codebase. Pure ESP-IDF C, no Arduino — just bare metal and radio waves.
 
-Current firmware version: 0.44.00
+Current firmware version: 0.45.00
 
 ## Supported Boards
 
