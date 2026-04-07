@@ -42,6 +42,22 @@ GITHUB_REPO = "hipstereclipse/ouispy-c6"
 GITHUB_RELEASE_TAG = "latest"
 FIRMWARE_INFO_FILE = ".ouispy-firmware.json"
 
+BOARD_NON_TOUCH = {
+    "id": "lcd-1.47",
+    "name": "Waveshare ESP32-C6-LCD-1.47",
+    "short": "non-touch ST7789",
+    "board_touch": 0,
+    "supports_release": True,
+}
+
+BOARD_TOUCH = {
+    "id": "touch-lcd-1.47",
+    "name": "Waveshare ESP32-C6-Touch-LCD-1.47",
+    "short": "touch JD9853",
+    "board_touch": 1,
+    "supports_release": False,
+}
+
 CRASH_MARKERS = (
     "guru meditation",
     "backtrace:",
@@ -208,6 +224,35 @@ def _firmware_option_suffix(info):
         bits.append(str(source))
     return f" ({', '.join(bits)})" if bits else ""
 
+def board_touch_value(board_variant):
+    return int((board_variant or BOARD_NON_TOUCH).get("board_touch", 0))
+
+def board_variant_name(board_variant):
+    return (board_variant or BOARD_NON_TOUCH).get("name", BOARD_NON_TOUCH["name"])
+
+def board_variant_from_info(info):
+    if str((info or {}).get("board_touch", "")) == "1":
+        return BOARD_TOUCH
+    return BOARD_NON_TOUCH
+
+def prompt_board_variant(default_variant=None):
+    default_variant = default_variant or BOARD_NON_TOUCH
+
+    section("Board variant")
+    color_print("    [1] Waveshare ESP32-C6-LCD-1.47        (original, ST7789)", C.CYAN)
+    color_print("    [2] Waveshare ESP32-C6-Touch-LCD-1.47  (new variant, JD9853)\n", C.CYAN)
+
+    default_choice = "2" if board_touch_value(default_variant) else "1"
+    while True:
+        choice = input(f"  {C.BOLD}Select [1/2] (default: {default_choice}): {C.RESET}").strip()
+        if not choice:
+            choice = default_choice
+        if choice == "1":
+            return BOARD_NON_TOUCH
+        if choice == "2":
+            return BOARD_TOUCH
+        color_print("  Please choose 1 or 2.", C.YELLOW)
+
 def print_firmware_info(info, heading="Firmware selected"):
     info = info or {}
     section(heading)
@@ -221,6 +266,7 @@ def print_firmware_info(info, heading="Firmware selected"):
         color_print(f"  Git:     {info['git']}", C.CYAN)
     if info.get("target"):
         color_print(f"  Target:  {info['target']}", C.CYAN)
+    color_print(f"  Board:   {board_variant_name(board_variant_from_info(info))}", C.CYAN)
     if info.get("published_at"):
         color_print(f"  Published: {info['published_at']}", C.CYAN)
     print()
@@ -695,10 +741,11 @@ def ensure_idf_tools_installed(idf_path):
     install_sh = os.path.join(idf_path, "install.sh")
     return run_shell(f'"{install_sh}" {CHIP}', cwd=idf_path)
 
-def build_with_idf(idf_path):
+def build_with_idf(idf_path, board_variant):
     """Activate ESP-IDF environment and build the project. Returns True on success."""
     project = get_project_dir()
     build_dir = get_build_dir()
+    board_touch = str(board_touch_value(board_variant))
 
     # idf.py set-target triggers fullclean first. If a stale non-CMake build
     # directory exists, fullclean refuses to proceed and the build aborts.
@@ -708,6 +755,7 @@ def build_with_idf(idf_path):
 
     color_print(f"\n  ESP-IDF path: {idf_path}", C.DIM)
     color_print(f"  Project:      {project}", C.DIM)
+    color_print(f"  Board:        {board_variant_name(board_variant)}", C.DIM)
     color_print("  Building firmware (first build may take several minutes)...\n", C.YELLOW)
 
     if sys.platform == "win32":
@@ -722,7 +770,7 @@ def build_with_idf(idf_path):
             "cmd", "/d", "/c",
             "call", export,
             "&&", "idf.py", "set-target", CHIP,
-            "&&", "idf.py", "build",
+            "&&", "idf.py", f"-DBOARD_TOUCH={board_touch}", "build",
         ], cwd=project, env=env)
         ok = (r.returncode == 0)
     else:
@@ -730,14 +778,14 @@ def build_with_idf(idf_path):
         cmd = (
             f'source "{export}" > /dev/null 2>&1 && '
             f'idf.py set-target esp32c6 && '
-            f'idf.py build'
+            f'idf.py -DBOARD_TOUCH={board_touch} build'
         )
         ok = run_shell(cmd, cwd=project)
 
     return ok
 
 
-def _find_idf_and_build():
+def _find_idf_and_build(board_variant):
     """Locate (or install) ESP-IDF and build the project. Returns build dir or calls fail()."""
     bd = get_build_dir()
 
@@ -761,7 +809,7 @@ def _find_idf_and_build():
         fail("ESP-IDF tool installation failed.")
 
     section("Building firmware")
-    if not build_with_idf(idf_path):
+    if not build_with_idf(idf_path, board_variant):
         fail("Build failed. Check the errors above.")
 
     if not firmware_ready():
@@ -776,6 +824,9 @@ def _find_idf_and_build():
     info.update({
         "source": "local source build",
         "git": _get_local_git_description() or info.get("git"),
+        "board": board_variant_name(board_variant),
+        "board_id": board_variant["id"],
+        "board_touch": board_touch_value(board_variant),
         "built_at": datetime.now().isoformat(timespec="seconds"),
     })
     _save_firmware_info(bd, info)
@@ -836,12 +887,13 @@ def _download_release_binaries():
     return bd
 
 
-def ensure_firmware():
+def ensure_firmware(board_variant):
     """Make sure firmware binaries exist. Returns build dir."""
     bd = get_build_dir()
 
     local_ready = firmware_ready()
     local_info = _load_firmware_info(bd) if local_ready else {}
+    local_matches_board = local_ready and board_touch_value(board_variant_from_info(local_info)) == board_touch_value(board_variant)
 
     if local_ready:
         color_print("  Firmware is already available locally.", C.GREEN)
@@ -850,55 +902,121 @@ def ensure_firmware():
             color_print(f"    {name:28s}  {sz:>7.1f} kB", C.CYAN)
         if local_info.get("version") or local_info.get("release_tag"):
             color_print(f"  Detected firmware{_firmware_option_suffix(local_info)}", C.GREEN)
+        color_print(f"  Built for: {board_variant_name(board_variant_from_info(local_info))}", C.CYAN)
+        if not local_matches_board:
+            color_print(f"  Local firmware does not match selected board: {board_variant_name(board_variant)}", C.YELLOW)
         print()
     else:
         color_print("  Firmware has not been built yet.\n", C.YELLOW)
 
     # CLI flags can skip the interactive prompt
     if os.environ.get("OUISPY_FORCE_BUILD"):
-        return _find_idf_and_build()
+        return _find_idf_and_build(board_variant)
     if os.environ.get("OUISPY_FORCE_DOWNLOAD"):
+        if not board_variant.get("supports_release", False):
+            color_print("\n  Prebuilt GitHub releases are currently only available for the original non-touch board.", C.YELLOW)
+            return _find_idf_and_build(board_variant)
         result = _download_release_binaries()
         if result and firmware_ready():
+            info = _load_firmware_info(result)
+            info.update({
+                "board": board_variant_name(board_variant),
+                "board_id": board_variant["id"],
+                "board_touch": board_touch_value(board_variant),
+            })
+            _save_firmware_info(result, info)
             return result
         color_print("\n  Download failed — falling back to local build.", C.YELLOW)
-        return _find_idf_and_build()
+        return _find_idf_and_build(board_variant)
 
     color_print("  Firmware source options:\n", C.BOLD)
-    if local_ready:
+    if local_ready and local_matches_board:
         color_print(f"    [1] Use local firmware already in ./build{_firmware_option_suffix(local_info)}", C.CYAN)
-        color_print("    [2] Download latest prebuilt release from GitHub", C.CYAN)
+        if board_variant.get("supports_release", False):
+            color_print("    [2] Download latest prebuilt release from GitHub", C.CYAN)
+        else:
+            color_print("    [2] Download latest prebuilt release from GitHub (not available for touch board)", C.DIM)
         color_print("    [3] Build from local source code (ESP-IDF)\n", C.CYAN)
         choice = input(f"  {C.BOLD}Select [1/2/3] (default: 2): {C.RESET}").strip()
 
         if choice == "1":
             return bd
         if choice == "3":
-            return _find_idf_and_build()
+            return _find_idf_and_build(board_variant)
+
+        if not board_variant.get("supports_release", False):
+            color_print("\n  Touch-board prebuilt releases are not published yet — building locally instead.", C.YELLOW)
+            return _find_idf_and_build(board_variant)
 
         result = _download_release_binaries()
         if result and firmware_ready():
+            info = _load_firmware_info(result)
+            info.update({
+                "board": board_variant_name(board_variant),
+                "board_id": board_variant["id"],
+                "board_touch": board_touch_value(board_variant),
+            })
+            _save_firmware_info(result, info)
             return result
 
         color_print("\n  Download failed — keeping local firmware.", C.YELLOW)
         if ask_yes("  Build from source instead?", default_yes=False):
-            return _find_idf_and_build()
+            return _find_idf_and_build(board_variant)
         return bd
 
-    color_print("    [1] Download latest prebuilt release from GitHub (fast, no tools needed)", C.CYAN)
-    color_print("    [2] Build from local source code (requires ESP-IDF)\n", C.CYAN)
+    if local_ready and not local_matches_board:
+        color_print(f"    [1] Build firmware for {board_variant_name(board_variant)} (recommended)", C.CYAN)
+        if board_variant.get("supports_release", False):
+            color_print("    [2] Download latest prebuilt release from GitHub", C.CYAN)
+            color_print("    [3] Keep local firmware anyway (wrong board, not recommended)\n", C.YELLOW)
+            choice = input(f"  {C.BOLD}Select [1/2/3] (default: 1): {C.RESET}").strip()
+            if choice == "2":
+                result = _download_release_binaries()
+                if result and firmware_ready():
+                    info = _load_firmware_info(result)
+                    info.update({
+                        "board": board_variant_name(board_variant),
+                        "board_id": board_variant["id"],
+                        "board_touch": board_touch_value(board_variant),
+                    })
+                    _save_firmware_info(result, info)
+                    return result
+                color_print("\n  Download failed — building locally instead.", C.YELLOW)
+                return _find_idf_and_build(board_variant)
+            if choice == "3":
+                return bd
+            return _find_idf_and_build(board_variant)
 
-    choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
-    if choice == "2":
-        return _find_idf_and_build()
+        color_print("    [2] Keep local firmware anyway (wrong board, not recommended)\n", C.YELLOW)
+        choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
+        if choice == "2":
+            return bd
+        return _find_idf_and_build(board_variant)
 
-    # Try download; fall back to build on failure
-    result = _download_release_binaries()
-    if result and firmware_ready():
-        return result
+    if board_variant.get("supports_release", False):
+        color_print("    [1] Download latest prebuilt release from GitHub (fast, no tools needed)", C.CYAN)
+        color_print("    [2] Build from local source code (requires ESP-IDF)\n", C.CYAN)
 
-    color_print("\n  Download failed — falling back to local build.", C.YELLOW)
-    return _find_idf_and_build()
+        choice = input(f"  {C.BOLD}Select [1/2] (default: 1): {C.RESET}").strip()
+        if choice == "2":
+            return _find_idf_and_build(board_variant)
+
+        result = _download_release_binaries()
+        if result and firmware_ready():
+            info = _load_firmware_info(result)
+            info.update({
+                "board": board_variant_name(board_variant),
+                "board_id": board_variant["id"],
+                "board_touch": board_touch_value(board_variant),
+            })
+            _save_firmware_info(result, info)
+            return result
+
+        color_print("\n  Download failed — falling back to local build.", C.YELLOW)
+        return _find_idf_and_build(board_variant)
+
+    color_print("  Touch-board prebuilt releases are not published yet.", C.YELLOW)
+    return _find_idf_and_build(board_variant)
 
 
 # ═════════════════════════════════════════════
@@ -2066,8 +2184,13 @@ def main():
 
     # ── 2. Firmware (find IDF / install IDF / build — all automatic) ──
     section("Checking firmware")
-    build_dir = ensure_firmware()
+    default_board_variant = board_variant_from_info(_load_firmware_info(get_build_dir())) if firmware_ready() else BOARD_NON_TOUCH
+    board_variant = prompt_board_variant(default_board_variant)
+    build_dir = ensure_firmware(board_variant)
     firmware_info = _load_firmware_info(build_dir)
+    firmware_info.setdefault("board", board_variant_name(board_variant))
+    firmware_info.setdefault("board_id", board_variant["id"])
+    firmware_info.setdefault("board_touch", board_touch_value(board_variant))
 
     # ── 3. Serial port ──
     section("Detecting board")

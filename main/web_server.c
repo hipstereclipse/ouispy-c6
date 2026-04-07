@@ -41,6 +41,7 @@
 static const char *TAG = "websrv";
 static httpd_handle_t s_http_server = NULL;
 static httpd_handle_t s_https_server = NULL;
+static TaskHandle_t s_ws_push_task = NULL;
 #define GPS_READY_TIMEOUT_MS 20000
 #define LOG_RECENT_LIMIT 32
 #define WEB_MAX_URI_HANDLERS 32
@@ -311,10 +312,17 @@ static void set_security_headers(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Permissions-Policy", "geolocation=(self)");
 }
 
+static void set_no_store_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+}
+
 static esp_err_t get_index(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    set_no_store_headers(req);
     set_security_headers(req);
     size_t len = index_html_end - index_html_start;
     return httpd_resp_send(req, (const char *)index_html_start, len);
@@ -803,6 +811,7 @@ static esp_err_t get_state(httpd_req_t *req)
     char *json = build_state_json();
     if (!json) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
     httpd_resp_set_type(req, "application/json");
+    set_no_store_headers(req);
     set_security_headers(req);
     esp_err_t ret = httpd_resp_send(req, json, strlen(json));
     free(json);
@@ -1581,6 +1590,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (ret != ESP_OK) return ret;
 
     uint8_t *payload = NULL;
+    bool wants_state = true;
     if (frame.len > 0) {
         payload = (uint8_t *)malloc(frame.len + 1);
         if (!payload) {
@@ -1593,9 +1603,17 @@ static esp_err_t ws_handler(httpd_req_t *req)
             return ret;
         }
         payload[frame.len] = '\0';
+        if (strcmp((const char *)payload, "ping") == 0) {
+            wants_state = false;
+        }
     }
 
-    /* Echo state back on any client message */
+    if (!wants_state) {
+        if (payload) free(payload);
+        return ESP_OK;
+    }
+
+    /* Echo state back on initial client sync messages */
     char *json = build_state_json();
     if (!json) {
         if (payload) free(payload);
@@ -1616,6 +1634,31 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (payload) free(payload);
     free(json);
     return ret;
+}
+
+static size_t websocket_client_count_on_server(httpd_handle_t server)
+{
+    if (!server) return 0;
+
+    size_t clients = 8;
+    int fds[8] = {0};
+    size_t count = 0;
+    if (httpd_get_client_list(server, &clients, fds) != ESP_OK) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < clients; i++) {
+        if (httpd_ws_get_fd_info(server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static bool websocket_clients_connected(void)
+{
+    return websocket_client_count_on_server(s_http_server) > 0
+        || websocket_client_count_on_server(s_https_server) > 0;
 }
 
 /* ── Broadcast to all WS clients ── */
@@ -1659,8 +1702,15 @@ void web_server_broadcast(const char *json)
 /* ── Push task: sends state updates over WS every 1 s ── */
 static void ws_push_task(void *arg)
 {
-    while (s_http_server || s_https_server) {
-        if (esp_get_free_heap_size() > 8192) {
+    (void)arg;
+
+    for (;;) {
+        if (!(s_http_server || s_https_server)) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+        if (websocket_clients_connected() && esp_get_free_heap_size() > 8192) {
             char *json = build_state_json();
             if (json) {
                 web_server_broadcast(json);
@@ -1669,7 +1719,6 @@ static void ws_push_task(void *arg)
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    vTaskDelete(NULL);
 }
 
 /* ── Fox nearby candidates (streamed) ── */
@@ -1889,7 +1938,7 @@ void web_server_start(void)
     httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
     ssl_config.httpd.max_uri_handlers = WEB_MAX_URI_HANDLERS;
     ssl_config.httpd.stack_size = 6144;
-    ssl_config.httpd.max_open_sockets = 4;
+    ssl_config.httpd.max_open_sockets = 6;
     ssl_config.httpd.lru_purge_enable = true;
     ssl_config.httpd.server_port = 443;
     ssl_config.httpd.ctrl_port = 32769;
@@ -1909,7 +1958,7 @@ void web_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = WEB_MAX_URI_HANDLERS;
     config.stack_size       = 6144;
-    config.max_open_sockets = 3;
+    config.max_open_sockets = 6;
     config.lru_purge_enable = true;
     config.server_port      = 80;
     config.ctrl_port        = 32768;
@@ -1929,9 +1978,9 @@ void web_server_start(void)
 
     g_app.http_server = s_https_server ? s_https_server : s_http_server;
 
-    /* Start push task */
-    if (xTaskCreate(ws_push_task, "ws_push", TASK_STACK_WS, NULL, 1, NULL) != pdPASS) {
+    if (!s_ws_push_task && xTaskCreate(ws_push_task, "ws_push", TASK_STACK_WS, NULL, 1, &s_ws_push_task) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create WebSocket push task");
+        s_ws_push_task = NULL;
     }
 }
 

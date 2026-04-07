@@ -15,8 +15,68 @@
 
 static bool s_initialized = false;
 
+static void buzzer_tone_internal(uint32_t freq_hz, uint32_t duration_ms, bool force)
+{
+    if (!s_initialized || (!force && !g_app.sound_enabled)) return;
+    if (freq_hz < 100) freq_hz = 100;
+    if (freq_hz > 20000) freq_hz = 20000;
+
+    ledc_set_freq(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_TIMER, freq_hz);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_CHANNEL, 512);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_CHANNEL);
+
+    if (duration_ms > 0) {
+        vTaskDelay(pdMS_TO_TICKS(duration_ms));
+        buzzer_off();
+    }
+}
+
+static void buzzer_play_profile_internal(uint8_t profile, bool force)
+{
+    switch (profile) {
+    case SOUND_PROFILE_CHIRP:
+        buzzer_tone_internal(1800, 45, force);
+        vTaskDelay(pdMS_TO_TICKS(22));
+        buzzer_tone_internal(2300, 55, force);
+        break;
+
+    case SOUND_PROFILE_SONAR:
+        buzzer_tone_internal(820, 70, force);
+        vTaskDelay(pdMS_TO_TICKS(35));
+        buzzer_tone_internal(980, 80, force);
+        vTaskDelay(pdMS_TO_TICKS(35));
+        buzzer_tone_internal(1140, 95, force);
+        break;
+
+    case SOUND_PROFILE_RETRO:
+        buzzer_tone_internal(660, 60, force);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        buzzer_tone_internal(990, 60, force);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        buzzer_tone_internal(1320, 90, force);
+        break;
+
+    case SOUND_PROFILE_ALARM:
+        buzzer_tone_internal(1400, 45, force);
+        vTaskDelay(pdMS_TO_TICKS(25));
+        buzzer_tone_internal(900, 55, force);
+        vTaskDelay(pdMS_TO_TICKS(25));
+        buzzer_tone_internal(1400, 45, force);
+        break;
+
+    case SOUND_PROFILE_STANDARD:
+    default:
+        buzzer_tone_internal(2000, 70, force);
+        break;
+    }
+}
+
 void buzzer_init(void)
 {
+#if !HAS_BUZZER
+    ESP_LOGI("buzzer", "No buzzer on this board variant — skipping init");
+    return;
+#else
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << PIN_BUZZER,
         .mode         = GPIO_MODE_OUTPUT,
@@ -45,22 +105,12 @@ void buzzer_init(void)
     };
     ledc_channel_config(&ch);
     s_initialized = true;
+#endif /* HAS_BUZZER */
 }
 
 void buzzer_tone(uint32_t freq_hz, uint32_t duration_ms)
 {
-    if (!s_initialized || !g_app.sound_enabled) return;
-    if (freq_hz < 100) freq_hz = 100;
-    if (freq_hz > 20000) freq_hz = 20000;
-
-    ledc_set_freq(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_TIMER, freq_hz);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_CHANNEL, 512); /* 50% duty */
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_CHANNEL);
-
-    if (duration_ms > 0) {
-        vTaskDelay(pdMS_TO_TICKS(duration_ms));
-        buzzer_off();
-    }
+    buzzer_tone_internal(freq_hz, duration_ms, false);
 }
 
 void buzzer_beep(uint32_t duration_ms)
@@ -116,40 +166,10 @@ void buzzer_melody_sky(void)
 
 void buzzer_play_profile(uint8_t profile)
 {
-    switch (profile) {
-    case SOUND_PROFILE_CHIRP:
-        buzzer_tone(1800, 45);
-        vTaskDelay(pdMS_TO_TICKS(22));
-        buzzer_tone(2300, 55);
-        break;
+    buzzer_play_profile_internal(profile, false);
+}
 
-    case SOUND_PROFILE_SONAR:
-        buzzer_tone(820, 70);
-        vTaskDelay(pdMS_TO_TICKS(35));
-        buzzer_tone(980, 80);
-        vTaskDelay(pdMS_TO_TICKS(35));
-        buzzer_tone(1140, 95);
-        break;
-
-    case SOUND_PROFILE_RETRO:
-        buzzer_tone(660, 60);
-        vTaskDelay(pdMS_TO_TICKS(20));
-        buzzer_tone(990, 60);
-        vTaskDelay(pdMS_TO_TICKS(20));
-        buzzer_tone(1320, 90);
-        break;
-
-    case SOUND_PROFILE_ALARM:
-        buzzer_tone(1400, 45);
-        vTaskDelay(pdMS_TO_TICKS(25));
-        buzzer_tone(900, 55);
-        vTaskDelay(pdMS_TO_TICKS(25));
-        buzzer_tone(1400, 45);
-        break;
-
-    case SOUND_PROFILE_STANDARD:
-    default:
-        buzzer_beep(70);
-        break;
-    }
+void buzzer_play_profile_forced(uint8_t profile)
+{
+    buzzer_play_profile_internal(profile, true);
 }

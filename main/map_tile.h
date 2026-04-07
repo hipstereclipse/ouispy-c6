@@ -9,6 +9,7 @@
 
 #define MAP_TILE_SIZE 256
 #define MAP_TILE_DEBUG_MAX_ZOOMS 20
+#define MAP_TILE_PATH_MAX 320
 
 typedef struct {
     bool available;
@@ -25,7 +26,7 @@ typedef struct {
 
 typedef struct {
     bool root_available;
-    char root[32];
+    char root[MAP_TILE_PATH_MAX];
     int32_t cache_age_ms;
     map_tile_debug_family_t any;
     map_tile_debug_family_t png;

@@ -431,14 +431,18 @@ let flockMapDeviceFallbackCenter = null;
 let flockMapLocalAvailableZooms = null;
 let flockMapZoomLevel = 14;
 let flockMapDrawToken = 0;
+let flockMapDrawQueued = false;
+let flockMapDrawInFlight = false;
 let flockMapAlertDismissed = false;
 let flockMapDeviceDebug = null;
 let flockMapRenderDebug = null;
 let flockMapTileAttempts = [];
+let flockMapDeviceTileCache = new Map();
+let flockMapDeviceTileMissCache = new Map();
 let sharedMapPushTimer = null;
 let sharedMapPushInFlight = false;
 let sharedMapPushPending = false;
-let sharedMapLastPayload = '';
+let sharedMapLastPayload = '[]';
 let flockAutoMarkInFlight = false;
 let foxRegistrySortMode = 'recent';
 let logsData = null;
@@ -463,6 +467,8 @@ const SHARED_MAP_SYNC_DELAY_MS = 250;
 const FLOCK_AUTO_MARK_STALE_SEC = 15;
 const FLOCK_AUTO_MARK_REFRESH_MS = 60000;
 const FLOCK_AUTO_MARK_MOVE_M = 20;
+const FLOCK_MAP_DEVICE_TILE_CACHE_LIMIT = 96;
+const FLOCK_MAP_DEVICE_TILE_MISS_TTL_MS = 15000;
 
 function setMainSwitching(active) {
   const main = $('#main');
@@ -1465,6 +1471,23 @@ function flockMapAttemptAgeLabel(tsMs) {
   return `${hours}h ${minutes % 60}m ago`;
 }
 
+function flockMapTileCacheKey(z, x, y) {
+  return `${z}/${x}/${y}`;
+}
+
+function clearFlockMapDeviceTileCaches() {
+  flockMapDeviceTileCache.clear();
+  flockMapDeviceTileMissCache.clear();
+}
+
+function pruneFlockMapDeviceTileCache() {
+  while (flockMapDeviceTileCache.size > FLOCK_MAP_DEVICE_TILE_CACHE_LIMIT) {
+    const oldestKey = flockMapDeviceTileCache.keys().next().value;
+    if (!oldestKey) break;
+    flockMapDeviceTileCache.delete(oldestKey);
+  }
+}
+
 function flockMapDebugLine(label, value) {
   return `<div class="map-debug-line"><strong>${htmlEsc(label)}:</strong> ${htmlEsc(value)}</div>`;
 }
@@ -1606,23 +1629,44 @@ async function loadLocalTileBitmap(z, x, y) {
 async function loadDeviceTileBitmap(z, x, y) {
   if (!Number.isFinite(z) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
   if (z < 0 || x < 0 || y < 0) return null;
+  const key = flockMapTileCacheKey(z, x, y);
+  const cachedMissAt = flockMapDeviceTileMissCache.get(key);
+  if (typeof cachedMissAt === 'number' && (Date.now() - cachedMissAt) < FLOCK_MAP_DEVICE_TILE_MISS_TTL_MS) {
+    return null;
+  }
+
+  const cachedTile = flockMapDeviceTileCache.get(key);
+  if (cachedTile && cachedTile.blob) {
+    flockMapDeviceTileCache.delete(key);
+    flockMapDeviceTileCache.set(key, cachedTile);
+    return { bitmap: await createImageBitmap(cachedTile.blob), ext: cachedTile.ext };
+  }
+
   try {
-    const resp = await fetch(`/api/map/tile?z=${encodeURIComponent(z)}&x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, { cache: 'force-cache' });
+    const resp = await fetch(`/api/map/tile?z=${encodeURIComponent(z)}&x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, { cache: 'no-store' });
     if (!resp.ok) {
+      flockMapDeviceTileMissCache.set(key, Date.now());
       flockMapPushTileAttempt({ source: 'device', z, x, y, result: 'miss', detail: `HTTP ${resp.status}` });
       return null;
     }
     const blob = await resp.blob();
     const contentType = blob.type || resp.headers.get('content-type') || 'tile';
+    flockMapDeviceTileMissCache.delete(key);
+    flockMapDeviceTileCache.set(key, { blob, ext: contentType });
+    pruneFlockMapDeviceTileCache();
     flockMapPushTileAttempt({ source: 'device', z, x, y, result: 'hit', detail: contentType });
     return { bitmap: await createImageBitmap(blob), ext: contentType };
   } catch (e) {
+    flockMapDeviceTileMissCache.set(key, Date.now());
     flockMapPushTileAttempt({ source: 'device', z, x, y, result: 'error', detail: e && e.message ? e.message : 'fetch failed' });
   }
   return null;
 }
 
 async function refreshDeviceMapTileStatus() {
+  const prevAvailable = flockMapDeviceTilesAvailable;
+  const prevRoot = flockMapDeviceDebug && flockMapDeviceDebug.mapRoot ? flockMapDeviceDebug.mapRoot : '';
+  const prevZooms = JSON.stringify(mapZoomList(flockMapDeviceAvailableZooms));
   const status = await api('/api/map/status');
   flockMapDeviceTilesAvailable = !!(status && status.available);
   flockMapDeviceMaxZoom = (status && Number.isFinite(status.maxZoom)) ? status.maxZoom : null;
@@ -1634,6 +1678,13 @@ async function refreshDeviceMapTileStatus() {
   flockMapDeviceFallbackCenter = (status && status.fallbackAvailable && Number.isFinite(status.fallbackLat) && Number.isFinite(status.fallbackLon))
     ? { lat: Number(status.fallbackLat), lon: Number(status.fallbackLon), zoom: Number(status.fallbackZoom) }
     : null;
+  const nextRoot = flockMapDeviceDebug && flockMapDeviceDebug.mapRoot ? flockMapDeviceDebug.mapRoot : '';
+  const nextZooms = JSON.stringify(mapZoomList(flockMapDeviceAvailableZooms));
+  if (prevAvailable !== flockMapDeviceTilesAvailable || prevRoot !== nextRoot || prevZooms !== nextZooms) {
+    clearFlockMapDeviceTileCaches();
+  } else {
+    flockMapDeviceTileMissCache.clear();
+  }
   if (gpsMapEligible()) {
     renderFlockMapPanel();
     if (flockMapVisible) void drawFlockMap();
@@ -1790,56 +1841,70 @@ function drawFlockMapPins(ctx, canvas, center, zoom, pins) {
 }
 
 async function drawFlockMap() {
+  if (flockMapDrawInFlight) {
+    flockMapDrawQueued = true;
+    return;
+  }
+
   const canvas = $('#flockMapCanvas');
   if (!canvas || !flockMapVisible) return;
 
+  flockMapDrawInFlight = true;
   const ctx = canvas.getContext('2d');
-  const pins = flockMapRenderablePins();
-  const center = flockMapCenter(pins);
-  const requestedZoom = flockMapRequestedZoom();
-  const zoom = flockMapResolvedZoom();
-  const token = ++flockMapDrawToken;
+  try {
+    const pins = flockMapRenderablePins();
+    const center = flockMapCenter(pins);
+    const requestedZoom = flockMapRequestedZoom();
+    const zoom = flockMapResolvedZoom();
+    const token = ++flockMapDrawToken;
 
-  drawFlockMapGrid(ctx, canvas.width, canvas.height);
-  const tileStats = await drawFlockMapTiles(ctx, canvas, center, zoom, token);
-  if (token !== flockMapDrawToken) return;
-
-  if (!tileStats.drewAny) {
     drawFlockMapGrid(ctx, canvas.width, canvas.height);
+    const tileStats = await drawFlockMapTiles(ctx, canvas, center, zoom, token);
+    if (token !== flockMapDrawToken) return;
+
+    if (!tileStats.drewAny) {
+      drawFlockMapGrid(ctx, canvas.width, canvas.height);
+    }
+    const pinStats = drawFlockMapPins(ctx, canvas, center, zoom, pins);
+    flockMapRenderDebug = {
+      center,
+      requestedZoom,
+      resolvedZoom: zoom,
+      localZooms: mapZoomList(flockMapLocalAvailableZooms),
+      deviceZooms: mapZoomList(flockMapDeviceAvailableZooms),
+      pinStats,
+      tileStats,
+      fallback: pins.length
+        ? 'pin-centroid'
+        : (flockMapDeviceFallbackCenter
+            ? `device fallback z${Number(flockMapDeviceFallbackCenter.zoom || zoom)}`
+            : (lastBrowserPosition ? 'browser GPS' : 'origin'))
+    };
+
+    ctx.fillStyle = 'rgba(9,9,11,0.78)';
+    ctx.fillRect(8, canvas.height - 24, canvas.width - 16, 16);
+    ctx.fillStyle = '#d4d4d8';
+    ctx.font = '11px Segoe UI, Aptos, sans-serif';
+    const zoomLabel = zoom === requestedZoom ? `Zoom ${zoom}` : `Zoom ${zoom} (requested ${requestedZoom})`;
+    ctx.fillText(`${zoomLabel} · ${pins.length} map points${tileStats.drewAny ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
+
+    if (!pins.length) {
+      ctx.fillStyle = 'rgba(9,9,11,0.68)';
+      ctx.fillRect(40, 46, canvas.width - 80, 42);
+      ctx.fillStyle = '#e4e4e7';
+      ctx.fillText(tileStats.drewAny ? 'No pinned devices yet. Showing tile fallback.' : 'No pinned devices yet.', 54, 58);
+      ctx.fillStyle = '#a1a1aa';
+      ctx.fillText(tileStats.drewAny ? 'Last browser GPS or a device tile area is being used as the center.' : 'Save GPS or manual pins across the applets to populate the map.', 54, 72);
+    }
+
+    renderFlockMapDebugPanel();
+  } finally {
+    flockMapDrawInFlight = false;
+    if (flockMapDrawQueued && flockMapVisible) {
+      flockMapDrawQueued = false;
+      setTimeout(() => { void drawFlockMap(); }, 0);
+    }
   }
-  const pinStats = drawFlockMapPins(ctx, canvas, center, zoom, pins);
-  flockMapRenderDebug = {
-    center,
-    requestedZoom,
-    resolvedZoom: zoom,
-    localZooms: mapZoomList(flockMapLocalAvailableZooms),
-    deviceZooms: mapZoomList(flockMapDeviceAvailableZooms),
-    pinStats,
-    tileStats,
-    fallback: pins.length
-      ? 'pin-centroid'
-      : (flockMapDeviceFallbackCenter
-          ? `device fallback z${Number(flockMapDeviceFallbackCenter.zoom || zoom)}`
-          : (lastBrowserPosition ? 'browser GPS' : 'origin'))
-  };
-
-  ctx.fillStyle = 'rgba(9,9,11,0.78)';
-  ctx.fillRect(8, canvas.height - 24, canvas.width - 16, 16);
-  ctx.fillStyle = '#d4d4d8';
-  ctx.font = '11px Segoe UI, Aptos, sans-serif';
-  const zoomLabel = zoom === requestedZoom ? `Zoom ${zoom}` : `Zoom ${zoom} (requested ${requestedZoom})`;
-  ctx.fillText(`${zoomLabel} · ${pins.length} map points${tileStats.drewAny ? ' · offline tiles loaded' : ' · grid fallback'}`, 14, canvas.height - 21);
-
-  if (!pins.length) {
-    ctx.fillStyle = 'rgba(9,9,11,0.68)';
-    ctx.fillRect(40, 46, canvas.width - 80, 42);
-    ctx.fillStyle = '#e4e4e7';
-    ctx.fillText(tileStats.drewAny ? 'No pinned devices yet. Showing tile fallback.' : 'No pinned devices yet.', 54, 58);
-    ctx.fillStyle = '#a1a1aa';
-    ctx.fillText(tileStats.drewAny ? 'Last browser GPS or a device tile area is being used as the center.' : 'Save GPS or manual pins across the applets to populate the map.', 54, 72);
-  }
-
-  renderFlockMapDebugPanel();
 }
 
 function cycleFlockMapZoom() {
@@ -2005,8 +2070,8 @@ async function api(path, body) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   const opts = body
-    ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:controller.signal}
-    : {signal:controller.signal};
+    ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:controller.signal, cache:'no-store'}
+    : {signal:controller.signal, cache:'no-store'};
   try {
     const r = await fetch(path, opts);
     const text = await r.text();
@@ -2024,7 +2089,8 @@ async function apiPostOk(path, body) {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body || {}),
-      signal:controller.signal
+      signal:controller.signal,
+      cache:'no-store'
     });
     return !!r.ok;
   } catch(e) {
@@ -4126,8 +4192,13 @@ function updateSettingsLive() {
 wsConnect();
 startGpsWatcher();
 void refreshDeviceMapTileStatus();
-scheduleSharedMapSync(true);
-setInterval(() => { if(ws && ws.readyState===1) ws.send('ping'); }, 5000);
+scheduleSharedMapSync(false);
+setTimeout(async () => {
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+  if (state && Object.keys(state).length) return;
+  const s = await api('/api/state');
+  if (s) applyIncomingState(s);
+}, 900);
 // Also poll state in case WS is slow
 setInterval(async () => {
   if (ws && ws.readyState === 1) return;

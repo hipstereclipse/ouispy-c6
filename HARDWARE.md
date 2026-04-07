@@ -1,12 +1,21 @@
 # OUI-Spy C6 — External Hardware Wiring Guide
 
-This document explains how to add **push buttons** and a **piezo buzzer/speaker** to your Waveshare ESP32-C6-LCD-1.47 for standalone operation without a phone.
+This document explains how to add **push buttons** and, where supported, a **piezo buzzer/speaker** to the Waveshare ESP32-C6-LCD-1.47 board family for standalone operation without a phone.
+
+The wiring below primarily describes the original non-touch board. The touch variant is also supported by the firmware, but it reserves GPIO 18 and GPIO 19 for the touch controller, which changes what external hardware can be attached.
 
 ---
 
 ## Overview
 
-The board exposes 15 GPIOs on breadboard headers. The firmware reserves three GPIOs for buttons and one for the buzzer. All buttons use **active-low logic** with internal pull-up resistors — no external resistors needed. The buzzer uses **PWM output** for tone generation.
+The board exposes 15 GPIOs on breadboard headers. On the original board, the firmware reserves three GPIOs for buttons and one for the buzzer. On the touch board, only the Mode and Action button GPIOs remain available because GPIO 18 and GPIO 19 are used by the touch controller. All buttons use **active-low logic** with internal pull-up resistors — no external resistors needed. The buzzer uses **PWM output** for tone generation when the selected board exposes the pin.
+
+## Board Variants
+
+| Board | LCD / Input | Built-in detection indicator | External controls available |
+|-------|-------------|------------------------------|-----------------------------|
+| **ESP32-C6-LCD-1.47** | ST7789, no touch | WS2812 RGB LED | GPIO 10, 11, 19 buttons + GPIO 18 buzzer |
+| **ESP32-C6-Touch-LCD-1.47** | JD9853 + capacitive touch | On-screen animated border | GPIO 10 and 11 buttons only; GPIO 18/19 unavailable |
 
 ```
 ┌──────────────────────────────────────────┐
@@ -46,6 +55,8 @@ The board exposes 15 GPIOs on breadboard headers. The firmware reserves three GP
 | **Buzzer/Speaker** | 18 | Right header | PWM tone output |
 | **Boot Button** | 9 | Left header (built-in) | Also works as mode cycle |
 
+On the touch board, GPIO 19 and GPIO 18 are reserved for the touch I2C bus, so the Back Button and Buzzer rows above do not apply.
+
 ---
 
 ## Button Wiring
@@ -53,7 +64,8 @@ The board exposes 15 GPIOs on breadboard headers. The firmware reserves three GP
 Each button needs only **two wires**: one to the GPIO pin and one to **GND**.
 
 ### What You Need
-- 3× momentary push buttons (any normally-open tactile switch)
+- Original board: 3× momentary push buttons (any normally-open tactile switch)
+- Touch board: 2× momentary push buttons if you want external Mode + Action inputs
 - Hookup wire or breadboard jumpers
 
 ### Wiring Diagram
@@ -65,6 +77,8 @@ Each button needs only **two wires**: one to the GPIO pin and one to **GND**.
     
     ┤ ├ = momentary push button (normally open)
 ```
+
+On the touch board, omit the GPIO 19 Back Button because that pin is consumed by the touch controller.
 
 **Polarity**: Push buttons have no polarity — wire either leg to GPIO, the other to GND.
 
@@ -91,9 +105,13 @@ The firmware enables the **internal pull-up resistor** on each GPIO pin, so the 
 
 Shortcuts are configurable on-device under Settings (`Shortcut BTN10/11/19`).
 
+On the touch board, GPIO 19 is unavailable, so use the built-in BOOT button when you need an extra physical input.
+
 ---
 
 ## Buzzer / Speaker Wiring
+
+This section applies to the original non-touch board only. The touch board does not expose a free buzzer pin because GPIO 18 is assigned to the touch controller.
 
 ### Option A: Passive Piezo Buzzer (Recommended)
 
@@ -159,6 +177,8 @@ Buzzer (−)         —               GND
 
 Total: **4 signal wires + shared GND connections**. All connections go to the **right header** of the board.
 
+For the touch board, reduce that to **2 signal wires + shared GND** for GPIO 10 and GPIO 11 only.
+
 ---
 
 ## Breadboard Layout Example
@@ -183,7 +203,7 @@ Total: **4 signal wires + shared GND connections**. All connections go to the **
 
 ## Available GPIO Pins (Unused by this firmware)
 
-If you want to add more hardware, these GPIOs are completely free:
+If you want to add more hardware, these GPIOs are completely free on the original board:
 
 | GPIO | ADC | Suggested Use |
 |------|-----|---------------|
@@ -198,6 +218,8 @@ GPIO 4 and GPIO 5 are shared with the SD card slot — available when no SD card
 
 GPIO 12 and GPIO 13 are USB D-/D+ — avoid using these for other purposes unless you're certain USB is not needed.
 
+On the touch board, also treat GPIO 18 and GPIO 19 as reserved.
+
 ---
 
 ## Troubleshooting
@@ -211,6 +233,7 @@ GPIO 12 and GPIO 13 are USB D-/D+ — avoid using these for other purposes unles
 - Confirm polarity (+ to GPIO 18, - to GND)
 - Check that sound is enabled in the web UI settings
 - Try swapping to a different buzzer — some require 5V (this outputs 3.3V)
+- If you are using the touch board, this is expected: the buzzer pin is not available on that variant
 
 **Buzzer is quiet?**
 - Passive buzzers at 3.3V are inherently quiet — consider adding a small amplifier

@@ -35,6 +35,8 @@
 
 static const char *TAG = "map_tile";
 #define MAX_IDAT_BYTES (48 * 1024)   /* refuse tiles with > 48 KB compressed */
+#define MAX_TILE_FILE_BYTES (96 * 1024)
+#define TILE_MIN_DECODE_HEAP (96 * 1024)
 #define TILE_ZOOM_CACHE_MAX_LEVELS 20
 
 typedef struct {
@@ -72,7 +74,7 @@ typedef struct {
     int png_min_tile_y;
     int png_max_tile_y;
     int64_t scanned_at_us;
-    char root[32];
+    char root[MAP_TILE_PATH_MAX];
 } tile_zoom_cache_t;
 
 static tile_zoom_cache_t s_tile_zoom_cache = {
@@ -113,6 +115,74 @@ static void reset_tile_zoom_cache(tile_zoom_cache_t *cache, int64_t scanned_at_u
     cache->any_zoom = -1;
     cache->png_zoom = -1;
     cache->scanned_at_us = scanned_at_us;
+}
+
+static bool copy_string_checked(char *dst, size_t dst_sz, const char *src)
+{
+    size_t src_len = 0;
+
+    if (!dst || dst_sz == 0 || !src) return false;
+
+    src_len = strlen(src);
+    if (src_len >= dst_sz) return false;
+
+    memcpy(dst, src, src_len + 1);
+    return true;
+}
+
+static bool join_path_checked(char *dst, size_t dst_sz, const char *base, const char *name)
+{
+    size_t base_len = 0;
+    size_t name_len = 0;
+    size_t write_pos = 0;
+    bool need_sep = false;
+
+    if (!dst || dst_sz == 0 || !base || !name) return false;
+
+    base_len = strlen(base);
+    name_len = strlen(name);
+    need_sep = (base_len > 0 && base[base_len - 1] != '/');
+
+    if (base_len + (need_sep ? 1U : 0U) + name_len >= dst_sz) return false;
+
+    memcpy(dst, base, base_len);
+    write_pos = base_len;
+    if (need_sep) {
+        dst[write_pos++] = '/';
+    }
+    memcpy(dst + write_pos, name, name_len);
+    dst[write_pos + name_len] = '\0';
+    return true;
+}
+
+static bool build_zoom_path(char *dst, size_t dst_sz, const char *map_root, int zoom)
+{
+    char zoom_component[16];
+    int written = 0;
+
+    written = snprintf(zoom_component, sizeof(zoom_component), "%d", zoom);
+    if (written < 0 || (size_t)written >= sizeof(zoom_component)) return false;
+
+    return join_path_checked(dst, dst_sz, map_root, zoom_component);
+}
+
+static bool build_tile_path(char *dst,
+                            size_t dst_sz,
+                            const char *map_root,
+                            int zoom,
+                            int tx,
+                            int ty,
+                            const char *ext)
+{
+    char relative_path[64];
+    int written = 0;
+
+    if (!ext) return false;
+
+    written = snprintf(relative_path, sizeof(relative_path), "%d/%d/%d.%s", zoom, tx, ty, ext);
+    if (written < 0 || (size_t)written >= sizeof(relative_path)) return false;
+
+    return join_path_checked(dst, dst_sz, map_root, relative_path);
 }
 
 static const tile_zoom_level_info_t *tile_zoom_levels(bool png_only, size_t *out_count)
@@ -340,25 +410,111 @@ void map_tile_latlon_to_pixel(double lat, double lon, int zoom,
  *  File helpers
  * ────────────────────────────────────────────────────────── */
 
+static bool entry_is_dot_dir(const char *name)
+{
+    return name && (strcmp(name, ".") == 0 || strcmp(name, "..") == 0);
+}
+
 static const char *resolve_map_root(void)
 {
     struct stat st;
+
+    /* 1. Try well-known fixed paths first (fast path). */
     static const char *roots[] = {
         "/sdcard/map",
+        "/sdcard/maps",
+        "/sdcard/Map",
+        "/sdcard/Maps",
+        "/sdcard/tiles",
+        "/sdcard/Tiles",
         "/sdcard/sdcard/map",
+        "/sdcard/sdcard/maps",
     };
 
     for (size_t i = 0; i < (sizeof(roots) / sizeof(roots[0])); i++) {
         if (stat(roots[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+            ESP_LOGI(TAG, "map root (known): %s", roots[i]);
             return roots[i];
         }
     }
-    return NULL;
-}
 
-static bool entry_is_dot_dir(const char *name)
-{
-    return name && (strcmp(name, ".") == 0 || strcmp(name, "..") == 0);
+    /* 2. Check whether /sdcard itself contains numeric zoom directories
+     *    (tiles placed directly at /sdcard/Z/X/Y.ext). */
+    {
+        DIR *sd = opendir("/sdcard");
+        if (sd) {
+            struct dirent *e;
+            bool found_zoom = false;
+            while ((e = readdir(sd)) != NULL) {
+                if (entry_is_dot_dir(e->d_name)) continue;
+                char *end = NULL;
+                long val = strtol(e->d_name, &end, 10);
+                if (end && *end == '\0' && val >= 0 && val <= 19) {
+                    char sub[MAP_TILE_PATH_MAX];
+                    if (!join_path_checked(sub, sizeof(sub), "/sdcard", e->d_name)) continue;
+                    if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode)) {
+                        found_zoom = true;
+                        break;
+                    }
+                }
+            }
+            closedir(sd);
+            if (found_zoom) {
+                ESP_LOGI(TAG, "map root (direct): /sdcard");
+                return "/sdcard";
+            }
+        }
+    }
+
+    /* 3. Auto-discover: scan top-level /sdcard directories for any child
+     *    that contains a numeric zoom directory (0-19). */
+    {
+        static char discovered[MAP_TILE_PATH_MAX];
+        DIR *sd = opendir("/sdcard");
+        if (sd) {
+            struct dirent *e;
+            while ((e = readdir(sd)) != NULL) {
+                if (entry_is_dot_dir(e->d_name)) continue;
+                char candidate[MAP_TILE_PATH_MAX];
+                if (!join_path_checked(candidate, sizeof(candidate), "/sdcard", e->d_name)) continue;
+                if (stat(candidate, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+                /* Skip known non-tile directories */
+                if (strcmp(e->d_name, "ouispy_logs") == 0 ||
+                    strcmp(e->d_name, "System Volume Information") == 0) continue;
+
+                DIR *sub = opendir(candidate);
+                if (!sub) continue;
+                struct dirent *se;
+                bool has_zoom = false;
+                while ((se = readdir(sub)) != NULL) {
+                    if (entry_is_dot_dir(se->d_name)) continue;
+                    char *zend = NULL;
+                    long zval = strtol(se->d_name, &zend, 10);
+                    if (zend && *zend == '\0' && zval >= 0 && zval <= 19) {
+                        char zpath[MAP_TILE_PATH_MAX];
+                        if (!join_path_checked(zpath, sizeof(zpath), candidate, se->d_name)) continue;
+                        if (stat(zpath, &st) == 0 && S_ISDIR(st.st_mode)) {
+                            has_zoom = true;
+                            break;
+                        }
+                    }
+                }
+                closedir(sub);
+                if (has_zoom) {
+                    if (!copy_string_checked(discovered, sizeof(discovered), candidate)) {
+                        continue;
+                    }
+                    closedir(sd);
+                    ESP_LOGI(TAG, "map root (discovered): %s", discovered);
+                    return discovered;
+                }
+            }
+            closedir(sd);
+        }
+    }
+
+    ESP_LOGW(TAG, "no map root found on /sdcard");
+    return NULL;
 }
 
 static bool find_matching_tile_in_zoom(const char *zoom_path,
@@ -372,7 +528,7 @@ static bool find_matching_tile_in_zoom(const char *zoom_path,
 
     bool found = false;
     struct dirent *x_entry = NULL;
-    char x_path[320];
+    char x_path[MAP_TILE_PATH_MAX];
 
     while (!found && (x_entry = readdir(x_root)) != NULL) {
         if (entry_is_dot_dir(x_entry->d_name)) continue;
@@ -382,7 +538,7 @@ static bool find_matching_tile_in_zoom(const char *zoom_path,
         if (!x_end || *x_end != '\0' || x_val < 0 || x_val > INT32_MAX) continue;
 
         struct stat x_st = {0};
-        snprintf(x_path, sizeof(x_path), "%s/%s", zoom_path, x_entry->d_name);
+    if (!join_path_checked(x_path, sizeof(x_path), zoom_path, x_entry->d_name)) continue;
         if (stat(x_path, &x_st) != 0 || !S_ISDIR(x_st.st_mode)) continue;
 
         DIR *tile_dir = opendir(x_path);
@@ -428,7 +584,7 @@ static bool scan_tile_bounds_in_zoom(const char *zoom_path,
 
     bool found = false;
     struct dirent *x_entry = NULL;
-    char x_path[320];
+    char x_path[MAP_TILE_PATH_MAX];
     int min_tile_x = 0;
     int max_tile_x = 0;
     int min_tile_y = 0;
@@ -442,7 +598,7 @@ static bool scan_tile_bounds_in_zoom(const char *zoom_path,
         if (!x_end || *x_end != '\0' || x_val < 0 || x_val > INT32_MAX) continue;
 
         struct stat x_st = {0};
-        snprintf(x_path, sizeof(x_path), "%s/%s", zoom_path, x_entry->d_name);
+    if (!join_path_checked(x_path, sizeof(x_path), zoom_path, x_entry->d_name)) continue;
         if (stat(x_path, &x_st) != 0 || !S_ISDIR(x_st.st_mode)) continue;
 
         DIR *tile_dir = opendir(x_path);
@@ -499,7 +655,7 @@ static void refresh_tile_zoom_cache(void)
     const char *map_root = resolve_map_root();
     int64_t now_us = esp_timer_get_time();
 
-    ESP_LOGD(TAG, "refresh_cache root=%s", map_root ? map_root : "(none)");
+    ESP_LOGI(TAG, "refresh_cache root=%s", map_root ? map_root : "(none)");
 
     if (!map_root) {
         reset_tile_zoom_cache(&s_tile_zoom_cache, now_us);
@@ -522,10 +678,16 @@ static void refresh_tile_zoom_cache(void)
 
     s_tile_zoom_cache_scanning = true;
     reset_tile_zoom_cache(&new_cache, 0);   /* updated after scan completes */
-    snprintf(new_cache.root, sizeof(new_cache.root), "%s", map_root);
+    if (!copy_string_checked(new_cache.root, sizeof(new_cache.root), map_root)) {
+        ESP_LOGW(TAG, "map root path too long: %s", map_root);
+        reset_tile_zoom_cache(&s_tile_zoom_cache, now_us);
+        s_tile_zoom_cache.valid = true;
+        s_tile_zoom_cache_scanning = false;
+        return;
+    }
 
     for (int z = 19; z >= 0; z--) {
-        char zoom_path[48];
+        char zoom_path[MAP_TILE_PATH_MAX];
         struct stat st = {0};
         int any_tile_x = 0;
         int any_tile_y = 0;
@@ -540,7 +702,7 @@ static void refresh_tile_zoom_cache(void)
         int png_min_tile_y = 0;
         int png_max_tile_y = 0;
 
-        snprintf(zoom_path, sizeof(zoom_path), "%s/%d", map_root, z);
+        if (!build_zoom_path(zoom_path, sizeof(zoom_path), map_root, z)) continue;
         if (stat(zoom_path, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
 
         bool any_found = find_matching_tile_in_zoom(zoom_path, any_exts,
@@ -575,6 +737,8 @@ static void refresh_tile_zoom_cache(void)
                 new_cache.any_min_tile_y = any_min_tile_y;
                 new_cache.any_max_tile_y = any_max_tile_y;
             }
+            ESP_LOGI(TAG, "  zoom %d: any tiles x=%d..%d y=%d..%d", z,
+                     any_min_tile_x, any_max_tile_x, any_min_tile_y, any_max_tile_y);
         }
 
         if (png_found
@@ -604,10 +768,11 @@ static void refresh_tile_zoom_cache(void)
             }
         }
 
-        if (new_cache.any_zoom >= 0 && new_cache.png_zoom >= 0) {
-            break;
-        }
+        /* Scan all zoom levels — do not break early */
     }
+
+    ESP_LOGI(TAG, "tile cache: any_zooms=%d png_zooms=%d root=%s",
+             (int)new_cache.any_zoom_count, (int)new_cache.png_zoom_count, map_root);
 
     new_cache.valid = true;
     new_cache.scanned_at_us = esp_timer_get_time();
@@ -632,7 +797,7 @@ void map_tile_warm_cache(void)
     refresh_tile_zoom_cache();
 }
 
-#define TILE_WARM_STACK  4096
+#define TILE_WARM_STACK  12288
 
 static void tile_warm_task(void *arg)
 {
@@ -660,7 +825,7 @@ static bool find_tile_path(int zoom, int tx, int ty,
     /* Try PNG first (most common for OSM), then JPG/JPEG/WEBP */
     const char *exts[] = {"png", "jpg", "jpeg", "webp"};
     for (int i = 0; i < 4; i++) {
-        snprintf(path, path_sz, "%s/%d/%d/%d.%s", map_root, zoom, tx, ty, exts[i]);
+        if (!build_tile_path(path, path_sz, map_root, zoom, tx, ty, exts[i])) continue;
         if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
             if (is_png) *is_png = (i == 0);
             return true;
@@ -671,7 +836,7 @@ static bool find_tile_path(int zoom, int tx, int ty,
 
 bool map_tile_exists(int zoom, int tile_x, int tile_y)
 {
-    char path[128];
+    char path[MAP_TILE_PATH_MAX];
     return find_tile_path(zoom, tile_x, tile_y, path, sizeof(path), NULL);
 }
 
@@ -850,7 +1015,7 @@ void map_tile_get_debug_info(map_tile_debug_info_t *out_info)
     memset(out_info, 0, sizeof(*out_info));
 
     out_info->root_available = (s_tile_zoom_cache.root[0] != '\0');
-    snprintf(out_info->root, sizeof(out_info->root), "%s", s_tile_zoom_cache.root);
+    copy_string_checked(out_info->root, sizeof(out_info->root), s_tile_zoom_cache.root);
 
     if (s_tile_zoom_cache.scanned_at_us > 0) {
         int64_t now_us = esp_timer_get_time();
@@ -1081,9 +1246,33 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
 {
     char path[128];
     bool is_png = false;
+    struct stat st;
+    size_t free_heap = esp_get_free_heap_size();
+    size_t max_idat_bytes = MAX_IDAT_BYTES;
     if (!find_tile_path(zoom, tile_x, tile_y, path, sizeof(path), &is_png))
         return false;
     if (!is_png) return false;   /* only PNG supported for now */
+
+    if (free_heap < TILE_MIN_DECODE_HEAP) {
+        ESP_LOGW(TAG, "Skipping tile %s: low heap (%u bytes)", path, (unsigned)free_heap);
+        return false;
+    }
+    if (stat(path, &st) == 0) {
+        size_t file_size = (size_t)st.st_size;
+        size_t heap_budget = free_heap / 3U;
+        if (file_size > MAX_TILE_FILE_BYTES || file_size > heap_budget) {
+            ESP_LOGW(TAG, "Skipping tile %s: file=%u heap=%u budget=%u",
+                     path, (unsigned)file_size, (unsigned)free_heap, (unsigned)heap_budget);
+            return false;
+        }
+    }
+    if ((free_heap / 4U) < max_idat_bytes) {
+        max_idat_bytes = free_heap / 4U;
+    }
+    if (max_idat_bytes < (16 * 1024)) {
+        ESP_LOGW(TAG, "Skipping tile %s: IDAT budget too small (%u bytes)", path, (unsigned)max_idat_bytes);
+        return false;
+    }
 
     ESP_LOGD(TAG, "tile_draw z=%d tx=%d ty=%d heap=%lu",
              zoom, tile_x, tile_y, (unsigned long)esp_get_free_heap_size());
@@ -1144,13 +1333,14 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
             fseek(f, 4, SEEK_CUR);  /* skip CRC */
         }
         else if (ctype == 0x49444154) {  /* IDAT */
-            if (idat_len + clen > MAX_IDAT_BYTES) {
-                ESP_LOGW(TAG, "Tile IDAT too large (%u + %u)", (unsigned)idat_len, (unsigned)clen);
+            if (idat_len + clen > max_idat_bytes) {
+                ESP_LOGW(TAG, "Tile IDAT too large (%u + %u > %u)",
+                         (unsigned)idat_len, (unsigned)clen, (unsigned)max_idat_bytes);
                 goto done;
             }
             if (idat_len + clen > idat_cap) {
                 size_t new_cap = idat_len + clen + 1024;
-                if (new_cap > MAX_IDAT_BYTES) new_cap = MAX_IDAT_BYTES;
+                if (new_cap > max_idat_bytes) new_cap = max_idat_bytes;
                 uint8_t *new_buf = realloc(idat_buf, new_cap);
                 if (!new_buf) goto done;
                 idat_buf = new_buf;

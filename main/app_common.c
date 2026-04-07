@@ -28,6 +28,104 @@ static esp_log_level_t serial_log_level_from_pref(uint8_t pref)
     }
 }
 
+void app_palette_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    uint8_t rr = 255;
+    uint8_t gg = 170;
+    uint8_t bb = 20;
+
+    switch (idx) {
+    case MENU_LED_SAPPHIRE:     rr = 0;   gg = 82;  bb = 255; break;
+    case MENU_LED_AMBER:        rr = 255; gg = 140; bb = 0;   break;
+    case MENU_LED_ALEXANDRITE:  rr = 0;   gg = 140; bb = 120; break;
+    case MENU_LED_RUBY:         rr = 255; gg = 0;   bb = 60;  break;
+    case MENU_LED_PERIDOT:      rr = 140; gg = 255; bb = 0;   break;
+    case MENU_LED_MOONSTONE:    rr = 140; gg = 210; bb = 255; break;
+    case MENU_LED_DIAMOND:      rr = 255; gg = 255; bb = 255; break;
+    case MENU_LED_AMETHYST:     rr = 170; gg = 70;  bb = 255; break;
+    case MENU_LED_EMERALD:      rr = 0;   gg = 200; bb = 90;  break;
+    case MENU_LED_CITRINE:      rr = 255; gg = 224; bb = 64;  break;
+    case MENU_LED_CARNELIAN:    rr = 255; gg = 96;  bb = 32;  break;
+    case MENU_LED_ROSE_QUARTZ:  rr = 255; gg = 120; bb = 180; break;
+    case MENU_LED_TANZANITE:    rr = 92;  gg = 66;  bb = 220; break;
+    case MENU_LED_LABRADORITE:  rr = 24;  gg = 164; bb = 200; break;
+    case MENU_LED_CHALCOPYRITE: rr = 255; gg = 196; bb = 0;   break;
+    case MENU_LED_MALACHITE:    rr = 0;   gg = 180; bb = 120; break;
+    case MENU_LED_TOPAZ:
+    default:
+        break;
+    }
+
+    if (r) *r = rr;
+    if (g) *g = gg;
+    if (b) *b = bb;
+}
+
+uint16_t app_palette_rgb565(uint8_t idx)
+{
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+
+    app_palette_rgb(idx, &r, &g, &b);
+    return rgb565(r, g, b);
+}
+
+uint8_t app_mode_led_color(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return g_app.detect_flock_low;
+    case MODE_FOX_HUNTER:
+        return g_app.detect_fox_low;
+    case MODE_SKY_SPY:
+        return g_app.detect_sky_low;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return g_app.menu_led_color;
+    }
+}
+
+uint8_t app_mode_display_style(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return g_app.detect_flock_high;
+    case MODE_FOX_HUNTER:
+        return g_app.detect_fox_high;
+    case MODE_SKY_SPY:
+        return g_app.detect_sky_high;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return g_app.border_style;
+    }
+}
+
+uint8_t app_mode_display_color(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return g_app.detect_flock_custom;
+    case MODE_FOX_HUNTER:
+        return g_app.detect_fox_custom;
+    case MODE_SKY_SPY:
+        return g_app.detect_sky_custom;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return g_app.menu_led_color;
+    }
+}
+
+void app_apply_mode_visual_prefs(app_mode_t mode)
+{
+    if (mode == MODE_FLOCK_YOU || mode == MODE_FOX_HUNTER || mode == MODE_SKY_SPY) {
+        g_app.border_style = app_mode_display_style(mode);
+    }
+}
+
 void app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel)
 {
     static const struct {
@@ -70,6 +168,17 @@ void app_state_init(void)
     g_app.single_ap_name_enabled = false;
     g_app.display_sleep_timeout_sec = 60;
     g_app.menu_led_color = MENU_LED_TOPAZ;
+    g_app.border_style = BORDER_STYLE_PULSE;
+    g_app.detect_behavior = 0;
+    g_app.detect_flock_low = MENU_LED_RUBY;
+    g_app.detect_flock_high = BORDER_STYLE_RADIATION;
+    g_app.detect_flock_custom = MENU_LED_RUBY;
+    g_app.detect_fox_low = MENU_LED_AMBER;
+    g_app.detect_fox_high = BORDER_STYLE_VIPER;
+    g_app.detect_fox_custom = MENU_LED_CARNELIAN;
+    g_app.detect_sky_low = MENU_LED_EMERALD;
+    g_app.detect_sky_high = BORDER_STYLE_SONAR;
+    g_app.detect_sky_custom = MENU_LED_LABRADORITE;
     g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
     g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
     g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;
@@ -114,6 +223,14 @@ void app_state_init(void)
 void app_apply_runtime_logging_prefs(void)
 {
     esp_log_level_set("*", serial_log_level_from_pref(g_app.serial_log_verbosity));
+}
+
+float app_detection_behavior_strength(app_mode_t mode, float detected_strength)
+{
+    (void)mode;
+    if (detected_strength < 0.0f) detected_strength = 0.0f;
+    if (detected_strength > 1.0f) detected_strength = 1.0f;
+    return detected_strength;
 }
 
 uint32_t uptime_ms(void)

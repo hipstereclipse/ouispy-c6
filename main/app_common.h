@@ -17,9 +17,45 @@
 extern "C" {
 #endif
 
+/* ── Board Variant ───────────────────────────────────────── */
+/*
+ * BOARD_TOUCH selects between the two supported boards:
+ *   0 = Waveshare ESP32-C6-LCD-1.47        (ST7789, non-touch)  [default]
+ *   1 = Waveshare ESP32-C6-Touch-LCD-1.47  (JD9853, capacitive touch)
+ *
+ * Set via compiler flag:  -DBOARD_TOUCH=1
+ * Or in CMakeLists.txt:   target_compile_definitions(${COMPONENT_LIB} PUBLIC BOARD_TOUCH=1)
+ */
+#ifndef BOARD_TOUCH
+#define BOARD_TOUCH 0
+#endif
+
 /* ── Pin Definitions ─────────────────────────────────────── */
 
-/* Onboard (fixed by PCB) */
+#if BOARD_TOUCH
+/* Waveshare ESP32-C6-Touch-LCD-1.47
+ * SPI bus is on GPIO 1/2/3; I2C (touch) on GPIO 18/19.
+ * GPIO 18 & 19 are NOT available for buzzer/back-button. */
+#define PIN_LCD_MOSI    2
+#define PIN_LCD_SCLK    1
+#define PIN_LCD_CS      14
+#define PIN_LCD_DC      15
+#define PIN_LCD_RST     22
+#define PIN_LCD_BL      23
+#define PIN_SD_MISO     3
+#define PIN_SD_CS       4
+#define PIN_RGB_LED     8
+#define PIN_BOOT_BTN    9
+#define PIN_BTN_MODE    10
+#define PIN_BTN_ACTION  11
+#define PIN_BTN_BACK    (-1)  /* Not available — GPIO 19 is I2C_SCL */
+#define PIN_BUZZER      (-1)  /* Not available — GPIO 18 is I2C_SDA */
+#define HAS_BTN_BACK    0
+#define HAS_BUZZER      0
+#define HAS_RGB_LED     0     /* No WS2812 — use on-screen indicator instead */
+
+#else
+/* Waveshare ESP32-C6-LCD-1.47 (non-touch, original) */
 #define PIN_LCD_MOSI    6
 #define PIN_LCD_SCLK    7
 #define PIN_LCD_CS      14
@@ -30,12 +66,14 @@ extern "C" {
 #define PIN_SD_CS       4
 #define PIN_RGB_LED     8
 #define PIN_BOOT_BTN    9
-
-/* External hardware (active-low buttons, active buzzer/speaker) */
 #define PIN_BTN_MODE    10   /* Cycle modes       – wire between GPIO10 and GND */
 #define PIN_BTN_ACTION  11   /* Contextual action  – wire between GPIO11 and GND */
 #define PIN_BTN_BACK    19   /* Back / cancel      – wire between GPIO19 and GND */
 #define PIN_BUZZER      18   /* Piezo buzzer (+)   – wire + to GPIO18, – to GND  */
+#define HAS_BTN_BACK    1
+#define HAS_BUZZER      1
+#define HAS_RGB_LED     1     /* WS2812 addressable RGB LED on GPIO 8 */
+#endif
 
 /* ── Display Constants ───────────────────────────────────── */
 
@@ -90,6 +128,18 @@ typedef enum {
     SOUND_PROFILE_ALARM,
     SOUND_PROFILE_COUNT,
 } sound_profile_t;
+
+/* Detection border animation style (touch board on-screen indicator) */
+typedef enum {
+    BORDER_STYLE_PULSE = 0,      /* Smooth sine-wave glow on all edges        */
+    BORDER_STYLE_FLAMES,         /* Bottom-up flicker with random hot spots   */
+    BORDER_STYLE_RADIATION,      /* Corner bursts that rotate clockwise       */
+    BORDER_STYLE_GLITCH,         /* Random horizontal scan-line tears         */
+    BORDER_STYLE_VIPER,          /* Chasing segments that orbit the perimeter */
+    BORDER_STYLE_SONAR,          /* Expanding rings from the corners inward   */
+    BORDER_STYLE_NONE,           /* Disabled — no on-screen border at all     */
+    BORDER_STYLE_COUNT,
+} border_style_t;
 
 typedef enum {
     SHORTCUT_NONE = 0,
@@ -282,6 +332,17 @@ typedef struct {
     bool            single_ap_name_enabled; /* true = UniSpy-C6 for every mode */
     uint16_t        display_sleep_timeout_sec; /* 0 disables sleep */
     uint8_t         menu_led_color;
+    uint8_t         border_style;         /* active border_style_t for the current screen */
+    uint8_t         detect_behavior;      /* legacy persisted key, no longer user-facing */
+    uint8_t         detect_flock_low;     /* menu_led_color_t: Flock board LED color */
+    uint8_t         detect_flock_high;    /* border_style_t:   Flock display effect */
+    uint8_t         detect_flock_custom;  /* menu_led_color_t: Flock display accent color */
+    uint8_t         detect_fox_low;       /* menu_led_color_t: Fox board LED color */
+    uint8_t         detect_fox_high;      /* border_style_t:   Fox display effect */
+    uint8_t         detect_fox_custom;    /* menu_led_color_t: Fox display accent color */
+    uint8_t         detect_sky_low;       /* menu_led_color_t: Sky board LED color */
+    uint8_t         detect_sky_high;      /* border_style_t:   Sky display effect */
+    uint8_t         detect_sky_custom;    /* menu_led_color_t: Sky display accent color */
     uint8_t         sound_profile_flock;
     uint8_t         sound_profile_fox;
     uint8_t         sound_profile_sky;
@@ -332,6 +393,13 @@ extern app_state_t g_app;
 void     app_state_init(void);
 void     app_apply_runtime_logging_prefs(void);
 void     app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel);
+float    app_detection_behavior_strength(app_mode_t mode, float detected_strength);
+void     app_palette_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b);
+uint16_t app_palette_rgb565(uint8_t idx);
+uint8_t  app_mode_led_color(app_mode_t mode);
+uint8_t  app_mode_display_style(app_mode_t mode);
+uint8_t  app_mode_display_color(app_mode_t mode);
+void     app_apply_mode_visual_prefs(app_mode_t mode);
 uint32_t uptime_ms(void);
 void     mac_to_str(const uint8_t mac[6], char *buf, size_t buf_len);
 bool     mac_equal(const uint8_t a[6], const uint8_t b[6]);

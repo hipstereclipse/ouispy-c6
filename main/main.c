@@ -31,12 +31,26 @@ static const char *TAG = "main";
 #define LED_PHASE_SNIFFER_INIT  15,  50,  55
 #define LED_PHASE_MODE_START    30,  42,  28
 #define UI_GPS_READY_TIMEOUT_MS 20000
+#define UI_HOLD_MENU_WARN_MS    3500
+#define UI_HOLD_MENU_TOTAL_MS   5000
+#define UI_BORDER_PREVIEW_RAMP_UP_MS    10000
+#define UI_BORDER_PREVIEW_RAMP_DOWN_MS   3000
 
 enum {
     SET_ITEM_AP_BROADCAST = 0,
     SET_ITEM_SINGLE_AP_NAME,
     SET_ITEM_SLEEP_TIMEOUT,
     SET_ITEM_MENU_LED,
+    SET_ITEM_BORDER_STYLE,
+    SET_ITEM_DETECT_FLOCK_LOW,
+    SET_ITEM_DETECT_FLOCK_HIGH,
+    SET_ITEM_DETECT_FLOCK_CUSTOM,
+    SET_ITEM_DETECT_FOX_LOW,
+    SET_ITEM_DETECT_FOX_HIGH,
+    SET_ITEM_DETECT_FOX_CUSTOM,
+    SET_ITEM_DETECT_SKY_LOW,
+    SET_ITEM_DETECT_SKY_HIGH,
+    SET_ITEM_DETECT_SKY_CUSTOM,
     SET_ITEM_SOUND_FLOCK,
     SET_ITEM_SOUND_FOX,
     SET_ITEM_SOUND_SKY,
@@ -58,6 +72,9 @@ enum {
 typedef enum {
     SETTINGS_CAT_CONNECTIVITY = 0,
     SETTINGS_CAT_DISPLAY,
+    SETTINGS_CAT_FLOCK_IMPACT,
+    SETTINGS_CAT_FOX_IMPACT,
+    SETTINGS_CAT_SKY_IMPACT,
     SETTINGS_CAT_SOUND,
     SETTINGS_CAT_CONTROLS,
     SETTINGS_CAT_LOGGING,
@@ -107,6 +124,25 @@ static const int SETTINGS_CAT_CONNECTIVITY_ITEMS[] = {
 static const int SETTINGS_CAT_DISPLAY_ITEMS[] = {
     SET_ITEM_SLEEP_TIMEOUT,
     SET_ITEM_MENU_LED,
+    SET_ITEM_BORDER_STYLE,
+};
+
+static const int SETTINGS_CAT_FLOCK_IMPACT_ITEMS[] = {
+    SET_ITEM_DETECT_FLOCK_LOW,
+    SET_ITEM_DETECT_FLOCK_HIGH,
+    SET_ITEM_DETECT_FLOCK_CUSTOM,
+};
+
+static const int SETTINGS_CAT_FOX_IMPACT_ITEMS[] = {
+    SET_ITEM_DETECT_FOX_LOW,
+    SET_ITEM_DETECT_FOX_HIGH,
+    SET_ITEM_DETECT_FOX_CUSTOM,
+};
+
+static const int SETTINGS_CAT_SKY_IMPACT_ITEMS[] = {
+    SET_ITEM_DETECT_SKY_LOW,
+    SET_ITEM_DETECT_SKY_HIGH,
+    SET_ITEM_DETECT_SKY_CUSTOM,
 };
 
 static const int SETTINGS_CAT_SOUND_ITEMS[] = {
@@ -141,7 +177,10 @@ static const struct {
     int item_count;
 } SETTINGS_CATEGORIES[SETTINGS_CAT_COUNT] = {
     [SETTINGS_CAT_CONNECTIVITY] = {"Connectivity", "AP name, broadcast, GPS", SETTINGS_CAT_CONNECTIVITY_ITEMS, 3},
-    [SETTINGS_CAT_DISPLAY] = {"Display", "Sleep timeout and menu LED", SETTINGS_CAT_DISPLAY_ITEMS, 2},
+    [SETTINGS_CAT_DISPLAY] = {"Display", "Sleep, LED color, border", SETTINGS_CAT_DISPLAY_ITEMS, 3},
+        [SETTINGS_CAT_FLOCK_IMPACT] = {"Flock Visuals", "LED color, effect, accent", SETTINGS_CAT_FLOCK_IMPACT_ITEMS, 3},
+        [SETTINGS_CAT_FOX_IMPACT] = {"Fox Visuals", "LED color, effect, accent", SETTINGS_CAT_FOX_IMPACT_ITEMS, 3},
+        [SETTINGS_CAT_SKY_IMPACT] = {"Sky Visuals", "LED color, effect, accent", SETTINGS_CAT_SKY_IMPACT_ITEMS, 3},
     [SETTINGS_CAT_SOUND] = {"Sound Profiles", "Per-applet audio behavior", SETTINGS_CAT_SOUND_ITEMS, 3},
     [SETTINGS_CAT_CONTROLS] = {"Button Shortcuts", "Quick actions per button", SETTINGS_CAT_CONTROLS_ITEMS, 3},
     [SETTINGS_CAT_LOGGING] = {"Logging", "Storage, diagnostics, serial", SETTINGS_CAT_LOGGING_ITEMS, 6},
@@ -232,6 +271,20 @@ static const char *menu_led_name(uint8_t idx)
     }
 }
 
+static const char *border_style_name(uint8_t idx)
+{
+    switch (idx) {
+    case BORDER_STYLE_FLAMES:    return "FLAMES";
+    case BORDER_STYLE_RADIATION: return "RADIATION";
+    case BORDER_STYLE_GLITCH:    return "GLITCH";
+    case BORDER_STYLE_VIPER:     return "VIPER";
+    case BORDER_STYLE_SONAR:     return "SONAR";
+    case BORDER_STYLE_NONE:      return "OFF";
+    case BORDER_STYLE_PULSE:
+    default:                     return "PULSE";
+    }
+}
+
 static const char *sound_profile_name(uint8_t idx)
 {
     switch (idx) {
@@ -243,7 +296,6 @@ static const char *sound_profile_name(uint8_t idx)
     default: return "STANDARD";
     }
 }
-
 static const char *shortcut_name(uint8_t idx)
 {
     switch (idx) {
@@ -256,6 +308,74 @@ static const char *shortcut_name(uint8_t idx)
     case SHORTCUT_NONE:
     default: return "NONE";
     }
+}
+
+static bool settings_item_uses_visual_preview(int item)
+{
+    switch (item) {
+    case SET_ITEM_MENU_LED:
+    case SET_ITEM_BORDER_STYLE:
+    case SET_ITEM_DETECT_FLOCK_LOW:
+    case SET_ITEM_DETECT_FLOCK_HIGH:
+    case SET_ITEM_DETECT_FLOCK_CUSTOM:
+    case SET_ITEM_DETECT_FOX_LOW:
+    case SET_ITEM_DETECT_FOX_HIGH:
+    case SET_ITEM_DETECT_FOX_CUSTOM:
+    case SET_ITEM_DETECT_SKY_LOW:
+    case SET_ITEM_DETECT_SKY_HIGH:
+    case SET_ITEM_DETECT_SKY_CUSTOM:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static app_mode_t settings_preview_mode_for_item(int item)
+{
+    switch (item) {
+    case SET_ITEM_DETECT_FLOCK_LOW:
+    case SET_ITEM_DETECT_FLOCK_HIGH:
+    case SET_ITEM_DETECT_FLOCK_CUSTOM:
+        return MODE_FLOCK_YOU;
+    case SET_ITEM_DETECT_FOX_LOW:
+    case SET_ITEM_DETECT_FOX_HIGH:
+    case SET_ITEM_DETECT_FOX_CUSTOM:
+        return MODE_FOX_HUNTER;
+    case SET_ITEM_DETECT_SKY_LOW:
+    case SET_ITEM_DETECT_SKY_HIGH:
+    case SET_ITEM_DETECT_SKY_CUSTOM:
+        return MODE_SKY_SPY;
+    case SET_ITEM_MENU_LED:
+    case SET_ITEM_BORDER_STYLE:
+    default:
+        return MODE_SELECT;
+    }
+}
+
+static uint8_t settings_preview_intensity_for_item(int item, uint32_t now)
+{
+    uint32_t cycle_ms = UI_BORDER_PREVIEW_RAMP_UP_MS + UI_BORDER_PREVIEW_RAMP_DOWN_MS;
+    uint32_t pos = cycle_ms ? (now % cycle_ms) : 0;
+    uint8_t preview = 255;
+
+    if (item == SET_ITEM_BORDER_STYLE) {
+        if (pos < UI_BORDER_PREVIEW_RAMP_UP_MS) {
+            preview = (uint8_t)(72 + ((uint32_t)183 * pos) / UI_BORDER_PREVIEW_RAMP_UP_MS);
+        } else {
+            uint32_t down = pos - UI_BORDER_PREVIEW_RAMP_UP_MS;
+            preview = (uint8_t)(255 - ((uint32_t)183 * down) / UI_BORDER_PREVIEW_RAMP_DOWN_MS);
+        }
+    } else if (settings_item_uses_visual_preview(item)) {
+        float raw = (pos < UI_BORDER_PREVIEW_RAMP_UP_MS)
+            ? ((float)pos / (float)UI_BORDER_PREVIEW_RAMP_UP_MS)
+            : (1.0f - ((float)(pos - UI_BORDER_PREVIEW_RAMP_UP_MS) / (float)UI_BORDER_PREVIEW_RAMP_DOWN_MS));
+        float eff = app_detection_behavior_strength(settings_preview_mode_for_item(item), raw);
+        if (eff < 0.0f) eff = 0.0f;
+        if (eff > 1.0f) eff = 1.0f;
+        preview = (uint8_t)(46 + (eff * 209.0f));
+    }
+
+    return preview;
 }
 
 static bool settings_is_root_menu(void)
@@ -279,6 +399,16 @@ static const char *settings_item_label(int item)
     case SET_ITEM_SINGLE_AP_NAME: return "Single AP Name";
     case SET_ITEM_SLEEP_TIMEOUT: return "Sleep Timeout";
     case SET_ITEM_MENU_LED: return "Menu LED";
+    case SET_ITEM_BORDER_STYLE: return "Detect Border";
+    case SET_ITEM_DETECT_FLOCK_LOW: return "Board LED";
+    case SET_ITEM_DETECT_FLOCK_HIGH: return "Display FX";
+    case SET_ITEM_DETECT_FLOCK_CUSTOM: return "Accent Color";
+    case SET_ITEM_DETECT_FOX_LOW: return "Board LED";
+    case SET_ITEM_DETECT_FOX_HIGH: return "Display FX";
+    case SET_ITEM_DETECT_FOX_CUSTOM: return "Accent Color";
+    case SET_ITEM_DETECT_SKY_LOW: return "Board LED";
+    case SET_ITEM_DETECT_SKY_HIGH: return "Display FX";
+    case SET_ITEM_DETECT_SKY_CUSTOM: return "Accent Color";
     case SET_ITEM_SOUND_FLOCK: return "Sound: Flock";
     case SET_ITEM_SOUND_FOX: return "Sound: Fox";
     case SET_ITEM_SOUND_SKY: return "Sound: Sky";
@@ -312,6 +442,36 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         break;
     case SET_ITEM_MENU_LED:
         snprintf(val, val_sz, "%s", menu_led_name(g_app.menu_led_color));
+        break;
+    case SET_ITEM_BORDER_STYLE:
+        snprintf(val, val_sz, "%s", border_style_name(g_app.border_style));
+        break;
+    case SET_ITEM_DETECT_FLOCK_LOW:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_flock_low));
+        break;
+    case SET_ITEM_DETECT_FLOCK_HIGH:
+        snprintf(val, val_sz, "%s", border_style_name(g_app.detect_flock_high));
+        break;
+    case SET_ITEM_DETECT_FLOCK_CUSTOM:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_flock_custom));
+        break;
+    case SET_ITEM_DETECT_FOX_LOW:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_fox_low));
+        break;
+    case SET_ITEM_DETECT_FOX_HIGH:
+        snprintf(val, val_sz, "%s", border_style_name(g_app.detect_fox_high));
+        break;
+    case SET_ITEM_DETECT_FOX_CUSTOM:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_fox_custom));
+        break;
+    case SET_ITEM_DETECT_SKY_LOW:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_sky_low));
+        break;
+    case SET_ITEM_DETECT_SKY_HIGH:
+        snprintf(val, val_sz, "%s", border_style_name(g_app.detect_sky_high));
+        break;
+    case SET_ITEM_DETECT_SKY_CUSTOM:
+        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_sky_custom));
         break;
     case SET_ITEM_SOUND_FLOCK:
         snprintf(val, val_sz, "%s", sound_profile_name(g_app.sound_profile_flock));
@@ -440,13 +600,56 @@ static void restart_ap_for_mode(app_mode_t mode)
     }
 }
 
+static void draw_hold_menu_progress(float progress)
+{
+    uint8_t r = 0, g = 0, b = 0;
+    uint16_t accent;
+    int fill_h;
+    int fill_w;
+    int band_h;
+
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    get_menu_led_rgb(g_app.menu_led_color, &r, &g, &b);
+    accent = rgb565(r, g, b);
+    fill_h = (int)((LCD_V_RES / 2.0f) * progress);
+    fill_w = (int)((LCD_H_RES / 2.0f) * progress);
+    band_h = LCD_V_RES - 2 * fill_h;
+
+    if (fill_h > 0) {
+        display_draw_rect(0, 0, LCD_H_RES, fill_h, accent);
+        display_draw_rect(0, LCD_V_RES - fill_h, LCD_H_RES, fill_h, accent);
+    }
+    if (fill_w > 0 && band_h > 0) {
+        display_draw_rect(0, fill_h, fill_w, band_h, accent);
+        display_draw_rect(LCD_H_RES - fill_w, fill_h, fill_w, band_h, accent);
+    }
+
+    if ((LCD_H_RES - 2 * fill_w) > 42 && band_h > 22) {
+        uint16_t text = progress > 0.6f ? rgb565(14, 10, 16) : rgb565(248, 245, 240);
+        display_draw_text_centered(148, "HOLD TO MENU", text, accent);
+        display_draw_text_centered(162, progress >= 0.95f ? "RELEASING" : "KEEP HOLDING", text, accent);
+    }
+}
+
 static void reset_warning_flash_task(void *arg)
 {
-    for (int i = 0; i < 3; i++) {
-        led_ctrl_set_forced(255, 140, 0);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        led_ctrl_off();
-        vTaskDelay(pdMS_TO_TICKS(80));
+    button_id_t btn = (button_id_t)(intptr_t)arg;
+    uint32_t start_ms = uptime_ms();
+
+    while (g_app.current_mode != MODE_SELECT
+            && g_app.current_mode != MODE_SETTINGS
+            && !g_app.mode_change_pending
+            && button_is_pressed(btn)) {
+        uint32_t elapsed = uptime_ms() - start_ms;
+        float progress = (float)elapsed / (float)(UI_HOLD_MENU_TOTAL_MS - UI_HOLD_MENU_WARN_MS);
+        draw_hold_menu_progress(progress);
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+
+    if (!g_app.mode_change_pending) {
+        g_app.ui_refresh_token++;
     }
 
     s_reset_warn_task = NULL;
@@ -469,15 +672,15 @@ static void stop_current_mode(void)
 
 static void render_mode_select_screen(int cursor)
 {
-    uint16_t bg          = rgb565(12, 10, 16);
-    uint16_t card_bg     = rgb565(24, 20, 32);
-    uint16_t card_alt    = rgb565(20, 18, 28);
+    uint16_t bg          = rgb565(10, 9, 15);
+    uint16_t panel       = rgb565(22, 20, 30);
+    uint16_t panel_alt   = rgb565(16, 15, 23);
     uint16_t gold        = rgb565(251, 191, 36);
     uint16_t purple_dim  = rgb565(88, 28, 135);
     uint16_t border      = rgb565(55, 48, 70);
     uint16_t text_main   = rgb565(250, 250, 250);
     uint16_t text_dim    = rgb565(161, 161, 170);
-    uint16_t selected_bg = rgb565(38, 30, 52);
+    uint16_t text_soft   = rgb565(122, 122, 136);
     uint16_t text_link   = rgb565(196, 168, 255);
     bool gps_tag_active  = ui_gps_tag_active();
 
@@ -498,47 +701,60 @@ static void render_mode_select_screen(int cursor)
 
     display_fill(bg);
 
-    display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, purple_dim);
-    display_draw_rect(0, DISPLAY_STATUS_BAR_Y + 30, LCD_H_RES, 2, gold);
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 7, "OUI-SPY C6", gold, purple_dim);
-    display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, "MAIN MENU", rgb565(216, 180, 254), purple_dim);
+    /* Header: gold crown accent at top, solid purple block below */
+    display_draw_rect(0, 0, LCD_H_RES, 44, purple_dim);
+    display_draw_rect(0, 0, LCD_H_RES, 2, gold);
+    display_draw_text_centered(10, "OUI-SPY C6", gold, purple_dim);
+    display_draw_text_centered(22, "MAIN MENU", rgb565(216, 180, 254), purple_dim);
+    display_draw_rect(0, 42, LCD_H_RES, 2, rgb565(42, 36, 56));
     ui_draw_logging_badge(purple_dim);
 
-    display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 58, border, card_bg);
-    display_draw_text(14, 53, "WiFi:", text_dim, card_bg);
     const char *ap_ssid = MODE_CFG[MODE_SELECT].ssid;
     const char *ap_pass = MODE_CFG[MODE_SELECT].pass;
     uint8_t ap_channel = MODE_CFG[MODE_SELECT].channel;
     mode_ap_credentials(g_app.current_mode, &ap_ssid, &ap_pass, &ap_channel);
 
-    display_draw_text(44, 53, ap_ssid, text_main, card_bg);
-    display_draw_text(14, 67, "Pass:", text_dim, card_bg);
-    display_draw_text(44, 67, ap_pass, text_main, card_bg);
-    display_draw_text(14, 81, g_app.ap_broadcast_enabled ? "AP:":"AP:", text_dim, card_bg);
-    display_draw_text(44, 81, g_app.ap_broadcast_enabled ? "Broadcast" : "Hidden", text_link, card_bg);
-    display_draw_text(14, 93, "GPS:", text_dim, card_bg);
-    display_draw_text(44, 93,
-                      gps_tag_active ? "TAG ON" : "TAG OFF",
-                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                      card_bg);
+    display_draw_bordered_rect(8, 46, LCD_H_RES - 16, 70, entries[cursor].accent_col, panel);
+    display_draw_rect(12, 50, 6, 62, entries[cursor].accent_col);
+    display_draw_text(24, 54, entries[cursor].label, text_main, panel);
+    display_draw_text(24, 68, entries[cursor].desc, text_link, panel);
+    display_draw_text(24, 82, ap_ssid, text_main, panel);
+    display_draw_text(24, 96, ap_pass, text_dim, panel);
+    display_draw_text(LCD_H_RES - 38, 58, "GO", entries[cursor].accent_col, panel);
+    display_draw_text(LCD_H_RES - 42, 72, "NOW", text_soft, panel);
 
-    display_draw_text_centered(116, "Select a mode", text_dim, bg);
+    display_draw_bordered_rect(8, 122, 48, 22, border, panel_alt);
+    display_draw_text(12, 128, "AP", text_soft, panel_alt);
+    display_draw_text(28, 128, g_app.ap_broadcast_enabled ? "OPEN" : "HIDE", text_link, panel_alt);
+
+    display_draw_bordered_rect(62, 122, 52, 22, border, panel_alt);
+    display_draw_text(66, 128, "GPS", text_soft, panel_alt);
+    display_draw_text(88, 128, gps_tag_active ? "ON" : "OFF",
+                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113), panel_alt);
+
+    display_draw_bordered_rect(120, 122, 44, 22, border, panel_alt);
+    display_draw_text(124, 128, "CH", text_soft, panel_alt);
+    char ch_buf[8];
+    snprintf(ch_buf, sizeof(ch_buf), "%u", ap_channel);
+    display_draw_text(142, 128, ch_buf, text_main, panel_alt);
+
+    display_draw_text_centered(156, "Select a mode", text_dim, bg);
 
     for (int i = 0; i < entry_count; i++) {
-        int y = 132 + i * 28;
+        int y = 176 + i * 22;
         bool selected = (i == cursor);
-        uint16_t row_bg = selected ? selected_bg : card_alt;
+        uint16_t row_bg = selected ? rgb565(38, 30, 52) : panel_alt;
         uint16_t row_fg = selected ? rgb565(248, 245, 240) : text_main;
-        uint16_t row_desc = selected ? rgb565(178, 175, 168) : text_dim;
+        uint16_t row_desc = selected ? rgb565(188, 182, 205) : text_dim;
         uint16_t row_border = selected ? entries[i].accent_col : border;
 
-        display_draw_bordered_rect(8, y, LCD_H_RES - 16, 24, row_border, row_bg);
-        display_draw_rect(12, y + 3, 5, 18, entries[i].accent_col);
+        display_draw_bordered_rect(8, y, LCD_H_RES - 16, 18, row_border, row_bg);
+        display_draw_rect(12, y + 2, 4, 14, entries[i].accent_col);
         if (selected) {
-            display_draw_text(LCD_H_RES - 34, y + 8, "GO", entries[i].accent_col, row_bg);
+            display_draw_text(LCD_H_RES - 26, y + 5, ">", entries[i].accent_col, row_bg);
         }
-        display_draw_text(24, y + 4, entries[i].label, row_fg, row_bg);
-        display_draw_text(24, y + 14, entries[i].desc, row_desc, row_bg);
+        display_draw_text(22, y + 2, entries[i].label, row_fg, row_bg);
+        display_draw_text(102, y + 2, entries[i].desc, row_desc, row_bg);
     }
 
     /* microSD card status - bottom of display */
@@ -565,10 +781,9 @@ static void render_mode_select_screen(int cursor)
     } else {
         snprintf(microsd_text, sizeof(microsd_text), "microSD: Not found");
     }
-    display_draw_text_centered(246, microsd_text, microsd_color, bg);
-
-    display_draw_text_centered(270, "Click next   DblClk prev", text_dim, bg);
-    display_draw_text_centered(282, "Hold select  Hold 5s reset", text_dim, bg);
+    display_draw_bordered_rect(8, 274, LCD_H_RES - 16, 18, border, panel_alt);
+    display_draw_text_centered(280, microsd_text, microsd_color, panel_alt);
+    display_draw_text_centered(298, "Click next  DblClk prev  Hold launch", text_dim, bg);
 }
 
 static void render_settings_screen(int cursor)
@@ -593,11 +808,6 @@ static void render_settings_screen(int cursor)
     display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 32, rgb565(38, 24, 54));
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 8, header_title, rgb565(235, 220, 255), rgb565(38, 24, 54));
     display_draw_text_centered(DISPLAY_STATUS_BAR_Y + 19, header_hint, text_dim, rgb565(38, 24, 54));
-    display_draw_text(120, DISPLAY_STATUS_BAR_Y + 8, "GPS", text_dim, rgb565(38, 24, 54));
-    display_draw_text(140, DISPLAY_STATUS_BAR_Y + 8,
-                      gps_tag_active ? "ON" : "OFF",
-                      gps_tag_active ? rgb565(74, 222, 128) : rgb565(248, 113, 113),
-                      rgb565(38, 24, 54));
     ui_draw_logging_badge(rgb565(38, 24, 54));
 
     int start = cursor - 3;
@@ -645,9 +855,10 @@ static void render_settings_screen(int cursor)
                           sel ? rgb565(32, 26, 44) : card);
     }
 
-    display_draw_text_centered(272,
-                               root_menu ? "Triple-click: Exit settings" : "Triple-click: Back to sections",
-                               text_dim,
+    snprintf(val, sizeof(val), "GPS %s", gps_tag_active ? "READY" : (g_app.gps_tagging_enabled ? "WAITING" : "OFF"));
+    display_draw_text_centered(270,
+                               val,
+                               gps_tag_active ? rgb565(74, 222, 128) : (g_app.gps_tagging_enabled ? rgb565(251, 191, 36) : text_dim),
                                bg);
 
     if (!root_menu && s_settings_category == SETTINGS_CAT_DISPLAY && g_app.display_sleep_timeout_sec > 0) {
@@ -657,7 +868,8 @@ static void render_settings_screen(int cursor)
         snprintf(val, sizeof(val), "%d items", SETTINGS_CATEGORIES[s_settings_category].item_count);
         display_draw_text_centered(286, val, text_dim, bg);
     } else {
-        display_draw_text_centered(286, "6 sections + exit", text_dim, bg);
+        snprintf(val, sizeof(val), "%d sections + exit", SETTINGS_CAT_COUNT);
+        display_draw_text_centered(286, val, text_dim, bg);
     }
 }
 
@@ -695,7 +907,7 @@ static void mode_select_task(void *arg)
     int last_logging_blocked = -1;
     uint8_t r, g, b;
     get_menu_led_rgb(g_app.menu_led_color, &r, &g, &b);
-    led_ctrl_breathe(r, g, b, 2200);
+    led_ctrl_breathe_forced(r, g, b, 2200);
 
     while (g_app.current_mode == MODE_SELECT) {
         bool gps_tag_active = ui_gps_tag_active();
@@ -744,8 +956,11 @@ static void settings_task(void *arg)
     int last_logging_active = -1;
     int last_logging_blocked = -1;
     uint32_t last_refresh_token = 0;
-    bool led_preview_active = false;
-    uint8_t led_preview_color = 0xFF;
+    bool visual_preview_active = false;
+    int visual_preview_item = -1;
+    uint8_t visual_preview_color = 0xFF;
+    uint8_t visual_preview_style = 0xFF;
+    uint32_t border_preview_started_ms = 0;
     while (g_app.current_mode == MODE_SETTINGS) {
         bool gps_tag_active = ui_gps_tag_active();
         storage_status_t sd_status = storage_ext_get_status();
@@ -756,19 +971,52 @@ static void settings_task(void *arg)
         if (g_app.ui_cursor >= g_app.ui_item_count) g_app.ui_cursor = g_app.ui_item_count - 1;
         if (g_app.ui_cursor < 0) g_app.ui_cursor = 0;
 
-        bool wants_led_preview = g_app.led_enabled && (settings_current_leaf_item() == SET_ITEM_MENU_LED);
-        if (wants_led_preview) {
-            if (!led_preview_active || led_preview_color != g_app.menu_led_color) {
-                uint8_t r = 0, g = 0, b = 0;
-                get_menu_led_rgb(g_app.menu_led_color, &r, &g, &b);
-                led_ctrl_set_forced(r, g, b);
-                led_preview_active = true;
-                led_preview_color = g_app.menu_led_color;
+        int preview_item = settings_current_leaf_item();
+        bool wants_visual_preview = settings_item_uses_visual_preview(preview_item);
+        if (wants_visual_preview) {
+            uint32_t now = uptime_ms();
+
+            if (visual_preview_item != preview_item || border_preview_started_ms == 0) {
+                border_preview_started_ms = now;
             }
-        } else if (led_preview_active) {
+
+            led_ctrl_set_effect_intensity(settings_preview_intensity_for_item(preview_item, now - border_preview_started_ms));
+
+            app_mode_t preview_mode = settings_preview_mode_for_item(preview_item);
+            uint8_t preview_color_idx = (preview_mode == MODE_SELECT)
+                ? g_app.menu_led_color
+                : app_mode_display_color(preview_mode);
+            uint8_t preview_style = (preview_mode == MODE_SELECT)
+                ? g_app.border_style
+                : app_mode_display_style(preview_mode);
+
+            if (!visual_preview_active
+                    || visual_preview_item != preview_item
+                    || visual_preview_color != preview_color_idx
+                    || visual_preview_style != preview_style) {
+                uint8_t r = 0, g = 0, b = 0;
+                if (preview_mode != MODE_SELECT) {
+                    g_app.border_style = preview_style;
+                }
+                app_palette_rgb(preview_color_idx, &r, &g, &b);
+                led_ctrl_breathe_forced(r, g, b, 2200);
+                visual_preview_active = true;
+                visual_preview_item = preview_item;
+                visual_preview_color = preview_color_idx;
+                visual_preview_style = preview_style;
+            }
+        } else if (visual_preview_active) {
+            border_preview_started_ms = 0;
+            led_ctrl_set_effect_intensity(255);
+            led_ctrl_breathe_stop();
             led_ctrl_off();
-            led_preview_active = false;
-            led_preview_color = 0xFF;
+            visual_preview_active = false;
+            visual_preview_item = -1;
+            visual_preview_color = 0xFF;
+            visual_preview_style = 0xFF;
+        } else {
+            border_preview_started_ms = 0;
+            led_ctrl_set_effect_intensity(255);
         }
 
         if (g_app.ui_cursor != last_cursor
@@ -793,7 +1041,9 @@ static void settings_task(void *arg)
         }
         vTaskDelay(pdMS_TO_TICKS(90));
     }
-    if (led_preview_active) {
+    if (visual_preview_active) {
+        led_ctrl_set_effect_intensity(255);
+        led_ctrl_breathe_stop();
         led_ctrl_off();
     }
     s_settings_task = NULL;
@@ -805,6 +1055,7 @@ static void start_mode(app_mode_t mode)
     const char *names[] = {"SELECT", "FLOCK YOU", "FOX HUNTER", "SKY SPY", "SETTINGS"};
 
     ESP_LOGI(TAG, "Starting mode %d", mode);
+    app_apply_mode_visual_prefs(mode);
 
     /* Check if WiFi AP config actually changes for this mode */
     const char *old_ssid = NULL, *old_pass = NULL;
@@ -988,21 +1239,81 @@ static void apply_settings_leaf_action(int item)
         log_msg = "menu_led_updated";
         break;
 
+    case SET_ITEM_BORDER_STYLE:
+        g_app.border_style = (g_app.border_style + 1) % BORDER_STYLE_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "border_style_updated";
+        break;
+
+    case SET_ITEM_DETECT_FLOCK_LOW:
+        g_app.detect_flock_low = (g_app.detect_flock_low + 1) % MENU_LED_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_flock_low_updated";
+        break;
+
+    case SET_ITEM_DETECT_FLOCK_HIGH:
+        g_app.detect_flock_high = (g_app.detect_flock_high + 1) % BORDER_STYLE_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_flock_high_updated";
+        break;
+
+    case SET_ITEM_DETECT_FLOCK_CUSTOM:
+        g_app.detect_flock_custom = (g_app.detect_flock_custom + 1) % MENU_LED_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_flock_custom_updated";
+        break;
+
+    case SET_ITEM_DETECT_FOX_LOW:
+        g_app.detect_fox_low = (g_app.detect_fox_low + 1) % MENU_LED_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_fox_low_updated";
+        break;
+
+    case SET_ITEM_DETECT_FOX_HIGH:
+        g_app.detect_fox_high = (g_app.detect_fox_high + 1) % BORDER_STYLE_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_fox_high_updated";
+        break;
+
+    case SET_ITEM_DETECT_FOX_CUSTOM:
+        g_app.detect_fox_custom = (g_app.detect_fox_custom + 1) % MENU_LED_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_fox_custom_updated";
+        break;
+
+    case SET_ITEM_DETECT_SKY_LOW:
+        g_app.detect_sky_low = (g_app.detect_sky_low + 1) % MENU_LED_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_sky_low_updated";
+        break;
+
+    case SET_ITEM_DETECT_SKY_HIGH:
+        g_app.detect_sky_high = (g_app.detect_sky_high + 1) % BORDER_STYLE_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_sky_high_updated";
+        break;
+
+    case SET_ITEM_DETECT_SKY_CUSTOM:
+        g_app.detect_sky_custom = (g_app.detect_sky_custom + 1) % MENU_LED_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_sky_custom_updated";
+        break;
+
     case SET_ITEM_SOUND_FLOCK:
         g_app.sound_profile_flock = (g_app.sound_profile_flock + 1) % SOUND_PROFILE_COUNT;
-        buzzer_play_profile(g_app.sound_profile_flock);
+        buzzer_play_profile_forced(g_app.sound_profile_flock);
         log_msg = "sound_flock_updated";
         break;
 
     case SET_ITEM_SOUND_FOX:
         g_app.sound_profile_fox = (g_app.sound_profile_fox + 1) % SOUND_PROFILE_COUNT;
-        buzzer_play_profile(g_app.sound_profile_fox);
+        buzzer_play_profile_forced(g_app.sound_profile_fox);
         log_msg = "sound_fox_updated";
         break;
 
     case SET_ITEM_SOUND_SKY:
         g_app.sound_profile_sky = (g_app.sound_profile_sky + 1) % SOUND_PROFILE_COUNT;
-        buzzer_play_profile(g_app.sound_profile_sky);
+        buzzer_play_profile_forced(g_app.sound_profile_sky);
         log_msg = "sound_sky_updated";
         break;
 
@@ -1317,7 +1628,7 @@ static void on_button_event(button_id_t btn, button_event_t evt)
 
     case BTN_EVT_LONG_HOLD_WARN:
         if (g_app.current_mode != MODE_SELECT && g_app.current_mode != MODE_SETTINGS && s_reset_warn_task == NULL) {
-            if (xTaskCreate(reset_warning_flash_task, "reset_warn", 2048, NULL, 3, &s_reset_warn_task) != pdPASS) {
+            if (xTaskCreate(reset_warning_flash_task, "reset_warn", 3072, (void *)(intptr_t)btn, 3, &s_reset_warn_task) != pdPASS) {
                 s_reset_warn_task = NULL;
             }
         }
@@ -1376,10 +1687,11 @@ void app_main(void)
     const esp_app_desc_t *app_desc = esp_app_get_description();
     const char *fw_version = (app_desc && app_desc->version[0]) ? app_desc->version : "unknown";
     bool resume_saved_mode = nvs_store_mark_firmware_seen(fw_version);
-    app_mode_t saved_mode = resume_saved_mode ? nvs_store_load_mode() : MODE_SELECT;
-    if (saved_mode >= MODE_COUNT) saved_mode = MODE_SELECT;
+    app_mode_t saved_mode = MODE_SELECT;
     if (!resume_saved_mode) {
         ESP_LOGI(TAG, "New firmware version detected (%s); starting in mode selector", fw_version);
+    } else {
+        ESP_LOGI(TAG, "Starting in mode selector; saved-mode auto-resume disabled for stability");
     }
     ESP_LOGI(TAG, "Phase 4: starting saved mode %d", saved_mode);
     set_init_phase_led(LED_PHASE_MODE_START);

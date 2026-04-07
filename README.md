@@ -1,6 +1,6 @@
 # OUI-Spy C6
 
-**Official ESP32-C6 RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47**
+**Official ESP32-C6 RF intelligence firmware for the Waveshare ESP32-C6-LCD-1.47 board family**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Platform: ESP32-C6](https://img.shields.io/badge/Platform-ESP32--C6-0a7ea4)
@@ -10,9 +10,14 @@
 
 > This project is a from-scratch C rewrite and hardware-specific spinoff of [**OUI-Spy Unified Blue**](https://github.com/colonelpanichacks/oui-spy-unified-blue) by [ColonelPanicHacks](https://github.com/colonelpanichacks). The original project pioneered the concept of passive BLE surveillance hardware detection and drone monitoring on ESP32 — this version ports and extends those ideas natively to the ESP32-C6 platform with a custom display UI, hardware buzzer integration, and a modern web interface.
 
-OUI-Spy C6 consolidates three passive RF intelligence modes into a single flash image running on the Waveshare ESP32-C6-LCD-1.47 dev board. Pure ESP-IDF C, no Arduino — just bare metal and radio waves.
+OUI-Spy C6 consolidates three passive RF intelligence modes into a single flash image running on Waveshare's ESP32-C6-LCD-1.47 boards. It now supports both the original ST7789 model and the newer JD9853 touch variant from the same codebase. Pure ESP-IDF C, no Arduino — just bare metal and radio waves.
 
-Current firmware version: 0.41.00
+Current firmware version: 0.43.00
+
+## Supported Boards
+
+- **Waveshare ESP32-C6-LCD-1.47**: original ST7789 board with WS2812 RGB LED, optional external buzzer on GPIO 18, and optional external back button on GPIO 19
+- **Waveshare ESP32-C6-Touch-LCD-1.47**: JD9853 touch board with local-source build support in `flash.py`; GPIO 18 and GPIO 19 are reserved by the touch controller, so detection feedback uses an on-screen border effect instead of a physical RGB LED and no external buzzer/back button is available
 
 ## Quick Links
 
@@ -95,7 +100,7 @@ If you use HTTP on iPhone Safari, GPS remains unavailable and the UI keeps GPS s
 - Flock You GPS ON/OFF safety toggle; GPS marking only when enabled and secure (HTTPS)
 - GPS toggle is synchronized to firmware state (`gpsTagging`) so web + device stay in sync
 - GPS status is now surfaced across the web interface and in the on-device Settings screen, not only in Flock You
-- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), LED color palette, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls with per-source filters
+- Settings panel: LCD brightness, AP broadcast visibility, single AP naming (UniSpy-C6), per-mode board LED color plus display effect/accent controls, sound profiles, GPS tagging, button shortcut mappings, and microSD logging controls with per-source filters
 - The on-device Settings screen now uses grouped submenus for Connectivity, Display, Sound Profiles, Button Shortcuts, Logging, and Maintenance so you can reach related options without scrolling one flat list
 - microSD status is surfaced as `Available`, `Needs Format`, or `Not Found` in both the LCD UI and web UI
 - This project vendors the ESP-IDF `fatfs` component locally with `FF_FS_EXFAT` enabled, so compatible microSD cards formatted as exFAT can mount without reflashing a custom IDF toolchain
@@ -155,7 +160,9 @@ Fox Hunter now uses a compact merged device console instead of separate source l
 
 ## Hardware
 
-### LED Behavior Summary
+### Detection Indicator Summary
+
+On the original board, these states drive the built-in WS2812 RGB LED. On the touch board, the same mode states drive the animated on-screen border indicator instead.
 
 | Mode | LED State |
 |------|-----------|
@@ -188,9 +195,11 @@ In operational modes, single-click can trigger per-button shortcuts (configurabl
 
 ### Hardware Requirements
 
-- **Waveshare ESP32-C6-LCD-1.47** (ASIN B0DK5J6LX3)
+- **Waveshare ESP32-C6-LCD-1.47** (original ST7789 board, ASIN B0DK5J6LX3)
+- **Waveshare ESP32-C6-Touch-LCD-1.47** (JD9853 touch variant)
 - USB-C cable for power and flashing
-- Optional: 3 push buttons + piezo buzzer/speaker (see [HARDWARE.md](HARDWARE.md))
+- Optional on original board: 3 push buttons + piezo buzzer/speaker (see [HARDWARE.md](HARDWARE.md))
+- Optional on touch board: 2 external push buttons on GPIO 10 and GPIO 11; GPIO 18 and GPIO 19 are reserved for the touch controller
 
 ---
 
@@ -240,6 +249,8 @@ python flash.py --port COMx
 
 `flash.py` can first offer downloading the latest prebuilt firmware release (no local build required), or build from source, then flashes the board, starts a serial monitor, and saves timestamped crash logs under `logs/`.
 
+`flash.py` now prompts for the board variant before building or flashing. Prebuilt GitHub releases currently cover the original board only; the touch board builds locally from source with `BOARD_TOUCH=1`.
+
 ### Manual Flash
 
 ```bash
@@ -285,8 +296,8 @@ Replace `COMx` with your serial port (e.g., `COM3` on Windows, `/dev/ttyACM0` on
 main.c              — Boot flow, mode transitions, main loop
 app_common.c/h      — Shared types, global state, utility functions
 display.c/h         — ST7789V3 LCD driver (esp_lcd + LEDC backlight)
-led_ctrl.c/h        — WS2812 RGB LED with sine-wave breathing (RMT backend)
-buzzer.c/h          — Piezo buzzer via LEDC PWM
+led_ctrl.c/h        — WS2812 RGB LED backend on the original board, or animated on-screen border indicator on the touch board
+buzzer.c/h          — Piezo buzzer via LEDC PWM when the selected board exposes a free buzzer pin
 button.c/h          — Multi-gesture button state machine (click, double-click, triple-click, quintuple-click, hold, long-hold)
 nvs_store.c/h       — NVS persistent storage for mode + preferences
 wifi_manager.c/h    — SoftAP management with per-mode SSID
@@ -325,7 +336,7 @@ ouispy-c6/
 ├── CMakeLists.txt          — Top-level project cmake
 ├── flash.py                — Build, flash, and serial-monitor helper
 ├── flash.bat               — Windows wrapper for flash.py
-├── HARDWARE.md             — Wiring guide for buttons and buzzer
+├── HARDWARE.md             — Wiring guide for external buttons/buzzer, including touch-board pin limitations
 ├── partitions.csv          — Custom partition table (3.4MB app + 512KB storage)
 ├── sdkconfig.defaults      — ESP-IDF config defaults
 ├── logs/                   — Timestamped serial monitor captures

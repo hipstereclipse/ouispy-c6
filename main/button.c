@@ -49,6 +49,7 @@ static void button_poll_task(void *arg)
 {
     while (1) {
         for (int i = 0; i < BTN_COUNT; i++) {
+            if (s_pins[i] < 0) continue;  /* Pin not available */
             bool level = (gpio_get_level(s_pins[i]) == 0); /* Active low */
             uint32_t now = uptime_ms();
 
@@ -131,6 +132,11 @@ void button_init(button_event_cb_t event_cb)
     s_event_cb = event_cb;
 
     for (int i = 0; i < BTN_COUNT; i++) {
+        if (s_pins[i] < 0) {
+            /* Pin not available on this board variant — skip */
+            memset(&s_state[i], 0, sizeof(btn_state_t));
+            continue;
+        }
         gpio_config_t io = {
             .pin_bit_mask = 1ULL << s_pins[i],
             .mode         = GPIO_MODE_INPUT,
@@ -149,5 +155,6 @@ void button_init(button_event_cb_t event_cb)
 bool button_is_pressed(button_id_t btn)
 {
     if (btn >= BTN_COUNT) return false;
+    if (s_pins[btn] < 0) return false;  /* Pin not available */
     return gpio_get_level(s_pins[btn]) == 0;
 }

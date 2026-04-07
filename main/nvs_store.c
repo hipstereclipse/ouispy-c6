@@ -124,6 +124,17 @@ void nvs_store_save_prefs(void)
         nvs_set_u8(h, "ap_single", g_app.single_ap_name_enabled ? 1 : 0);
         nvs_set_u16(h, "sleep_sec", g_app.display_sleep_timeout_sec);
         nvs_set_u8(h, "menu_led", g_app.menu_led_color);
+        nvs_set_u8(h, "bdr_style", g_app.border_style);
+        nvs_set_u8(h, "det_beh", g_app.detect_behavior);
+        nvs_set_u8(h, "det_fl_lo", g_app.detect_flock_low);
+        nvs_set_u8(h, "det_fl_hi", g_app.detect_flock_high);
+        nvs_set_u8(h, "det_fl_cu", g_app.detect_flock_custom);
+        nvs_set_u8(h, "det_fx_lo", g_app.detect_fox_low);
+        nvs_set_u8(h, "det_fx_hi", g_app.detect_fox_high);
+        nvs_set_u8(h, "det_fx_cu", g_app.detect_fox_custom);
+        nvs_set_u8(h, "det_sk_lo", g_app.detect_sky_low);
+        nvs_set_u8(h, "det_sk_hi", g_app.detect_sky_high);
+        nvs_set_u8(h, "det_sk_cu", g_app.detect_sky_custom);
         nvs_set_u8(h, "snd_flock", g_app.sound_profile_flock);
         nvs_set_u8(h, "snd_fox", g_app.sound_profile_fox);
         nvs_set_u8(h, "snd_sky", g_app.sound_profile_sky);
@@ -241,6 +252,17 @@ void nvs_store_load_prefs(void)
         if (nvs_get_u8(h, "ap_single", &tmp) == ESP_OK) g_app.single_ap_name_enabled = (tmp != 0);
         if (nvs_get_u16(h, "sleep_sec", &sleep_tmp) == ESP_OK) g_app.display_sleep_timeout_sec = sleep_tmp;
         if (nvs_get_u8(h, "menu_led", &tmp) == ESP_OK) g_app.menu_led_color = tmp;
+        if (nvs_get_u8(h, "bdr_style", &tmp) == ESP_OK) g_app.border_style = tmp;
+        if (nvs_get_u8(h, "det_beh", &tmp) == ESP_OK) g_app.detect_behavior = tmp;
+        if (nvs_get_u8(h, "det_fl_lo", &tmp) == ESP_OK) g_app.detect_flock_low = tmp;
+        if (nvs_get_u8(h, "det_fl_hi", &tmp) == ESP_OK) g_app.detect_flock_high = tmp;
+        if (nvs_get_u8(h, "det_fl_cu", &tmp) == ESP_OK) g_app.detect_flock_custom = tmp;
+        if (nvs_get_u8(h, "det_fx_lo", &tmp) == ESP_OK) g_app.detect_fox_low = tmp;
+        if (nvs_get_u8(h, "det_fx_hi", &tmp) == ESP_OK) g_app.detect_fox_high = tmp;
+        if (nvs_get_u8(h, "det_fx_cu", &tmp) == ESP_OK) g_app.detect_fox_custom = tmp;
+        if (nvs_get_u8(h, "det_sk_lo", &tmp) == ESP_OK) g_app.detect_sky_low = tmp;
+        if (nvs_get_u8(h, "det_sk_hi", &tmp) == ESP_OK) g_app.detect_sky_high = tmp;
+        if (nvs_get_u8(h, "det_sk_cu", &tmp) == ESP_OK) g_app.detect_sky_custom = tmp;
         if (nvs_get_u8(h, "snd_flock", &tmp) == ESP_OK) g_app.sound_profile_flock = tmp;
         if (nvs_get_u8(h, "snd_fox", &tmp) == ESP_OK) g_app.sound_profile_fox = tmp;
         if (nvs_get_u8(h, "snd_sky", &tmp) == ESP_OK) g_app.sound_profile_sky = tmp;
@@ -264,6 +286,17 @@ void nvs_store_load_prefs(void)
     }
 
     if (g_app.menu_led_color >= MENU_LED_COUNT) g_app.menu_led_color = MENU_LED_TOPAZ;
+    if (g_app.border_style >= BORDER_STYLE_COUNT) g_app.border_style = BORDER_STYLE_PULSE;
+    g_app.detect_behavior = 0;
+    if (g_app.detect_flock_low >= MENU_LED_COUNT) g_app.detect_flock_low = MENU_LED_RUBY;
+    if (g_app.detect_flock_high >= BORDER_STYLE_COUNT) g_app.detect_flock_high = BORDER_STYLE_RADIATION;
+    if (g_app.detect_flock_custom >= MENU_LED_COUNT) g_app.detect_flock_custom = MENU_LED_RUBY;
+    if (g_app.detect_fox_low >= MENU_LED_COUNT) g_app.detect_fox_low = MENU_LED_AMBER;
+    if (g_app.detect_fox_high >= BORDER_STYLE_COUNT) g_app.detect_fox_high = BORDER_STYLE_VIPER;
+    if (g_app.detect_fox_custom >= MENU_LED_COUNT) g_app.detect_fox_custom = MENU_LED_CARNELIAN;
+    if (g_app.detect_sky_low >= MENU_LED_COUNT) g_app.detect_sky_low = MENU_LED_EMERALD;
+    if (g_app.detect_sky_high >= BORDER_STYLE_COUNT) g_app.detect_sky_high = BORDER_STYLE_SONAR;
+    if (g_app.detect_sky_custom >= MENU_LED_COUNT) g_app.detect_sky_custom = MENU_LED_LABRADORITE;
     if (g_app.sound_profile_flock >= SOUND_PROFILE_COUNT) g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
     if (g_app.sound_profile_fox >= SOUND_PROFILE_COUNT) g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
     if (g_app.sound_profile_sky >= SOUND_PROFILE_COUNT) g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;

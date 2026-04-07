@@ -11,6 +11,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_jd9853.h"
 #include "esp_heap_caps.h"
 #include <string.h>
 #include <stdio.h>
@@ -215,13 +216,17 @@ void display_init(void)
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &s_io));
 
-    /* ── ST7789 Panel ── */
+    /* ── Panel ── */
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num   = PIN_LCD_RST,
         .rgb_ele_order    = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel   = 16,
     };
+#if BOARD_TOUCH
+    ESP_ERROR_CHECK(esp_lcd_new_panel_jd9853(s_io, &panel_config, &s_panel));
+#else
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(s_io, &panel_config, &s_panel));
+#endif
 
     esp_lcd_panel_reset(s_panel);
     esp_lcd_panel_init(s_panel);
@@ -232,7 +237,14 @@ void display_init(void)
     display_set_brightness(g_app.lcd_brightness);
     display_fill(0x0000);
 
-    ESP_LOGI(TAG, "Display initialized %dx%d", LCD_H_RES, LCD_V_RES);
+    ESP_LOGI(TAG, "Display initialized %dx%d (%s)",
+             LCD_H_RES, LCD_V_RES,
+#if BOARD_TOUCH
+             "JD9853 touch"
+#else
+             "ST7789"
+#endif
+    );
 }
 
 void display_set_brightness(uint8_t level)
@@ -688,7 +700,7 @@ static int collect_local_map_pins(app_mode_t mode,
     return count;
 }
 
-void display_draw_shared_map_view(app_mode_t mode)
+void display_draw_shared_map_view(app_mode_t mode, bool initial_draw)
 {
     bool diag = map_terminal_diagnostics_enabled();
     if (diag) {
@@ -736,17 +748,24 @@ void display_draw_shared_map_view(app_mode_t mode)
     const int map_y = 34;
     const int map_w = LCD_H_RES;
     const int map_h = 210;
+    const int info_y = map_y + map_h + 2;
+    const int info_h = DISPLAY_FOOTER_BAR_Y - info_y;
     int footer_zoom = map_tile_zoom_for_idx(g_app.local_map_zoom_idx);
 
-    /* Clear only the regions outside the tile area to avoid the visible
-     * full-screen flash that causes map flicker on periodic redraws. */
-    display_draw_rect(0, 0, LCD_H_RES, map_y, bg);
-    display_draw_rect(0, map_y + map_h, LCD_H_RES, LCD_V_RES - (map_y + map_h), bg);
+    /* Only repaint the static header on first open. Repainting the entire
+     * top band every refresh still causes visible flash even without a full
+     * screen clear. */
+    if (initial_draw) {
+        display_draw_rect(0, 0, LCD_H_RES, map_y, bg);
+        display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, panel);
+        display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
+        display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, title, text_main, panel);
+        display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "Shared pinned-device view", text_dim, panel);
+    }
 
-    display_draw_rect(0, DISPLAY_STATUS_BAR_Y, LCD_H_RES, 26, panel);
-    display_draw_rect(0, DISPLAY_STATUS_DIV_Y, LCD_H_RES, 2, accent);
-    display_draw_text_centered(DISPLAY_STATUS_TEXT_Y, title, text_main, panel);
-    display_draw_text_centered(DISPLAY_STATUS_SUB_Y, "Shared pinned-device view", text_dim, panel);
+    /* The below-map summary area is dynamic, but keep the repaint scoped to
+     * that text strip so the footer band itself stays stable on periodic draws. */
+    display_draw_rect(0, info_y, LCD_H_RES, info_h, bg);
 
     {
         /* Center on pins when available, otherwise on a representative downloaded tile. */
@@ -835,13 +854,18 @@ void display_draw_shared_map_view(app_mode_t mode)
         double origin_px = cpx - (map_w / 2.0);
         double origin_py = cpy - (map_h / 2.0);
 
-        /* Always seed the viewport with a deterministic fallback background so
-         * sparse tile sets do not leave stale or black gaps between draws. */
-        display_draw_rect(map_x, map_y, map_w, map_h, panel);
-        for (int x = map_x + 18; x < map_x + map_w; x += 18)
-            display_draw_rect(x, map_y, 1, map_h, grid);
-        for (int y = map_y + 18; y < map_y + map_h; y += 18)
-            display_draw_rect(map_x, y, map_w, 1, grid);
+        /* On the first draw in a map session, seed the viewport with a
+         * clean background so old list-view pixels don't show through tile
+         * gaps.  On subsequent periodic redraws, skip this fill entirely —
+         * tiles overwrite their own pixels in-place and the full-area clear
+         * was the sole cause of the visible screen flash on every refresh. */
+        if (initial_draw) {
+            display_draw_rect(map_x, map_y, map_w, map_h, panel);
+            for (int x = map_x + 18; x < map_x + map_w; x += 18)
+                display_draw_rect(x, map_y, 1, map_h, grid);
+            for (int y = map_y + 18; y < map_y + map_h; y += 18)
+                display_draw_rect(map_x, y, map_w, 1, grid);
+        }
 
         /* ── Draw tile background ── */
         bool has_tiles = false;
@@ -976,8 +1000,12 @@ void display_draw_shared_map_view(app_mode_t mode)
     }
 
 draw_footer:
-    display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
-    display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border);
+    if (initial_draw) {
+        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, DISPLAY_FOOTER_BAR_H, footer);
+        display_draw_rect(0, DISPLAY_FOOTER_BAR_Y, LCD_H_RES, 1, border);
+    } else {
+        display_draw_rect(0, DISPLAY_FOOTER_TEXT_Y, LCD_H_RES, 8, footer);
+    }
     char foot[32];
     if (mode == MODE_FLOCK_YOU)
         snprintf(foot, sizeof(foot), "3x:back 2x:Z%d hold:sel", footer_zoom);

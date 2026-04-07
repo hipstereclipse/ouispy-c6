@@ -15,3 +15,4 @@ void buzzer_melody_flock(void);
 void buzzer_melody_fox(void);
 void buzzer_melody_sky(void);
 void buzzer_play_profile(uint8_t profile);
+void buzzer_play_profile_forced(uint8_t profile);

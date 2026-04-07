@@ -23,6 +23,7 @@
 #include <math.h>
 
 static const char *TAG = "skyspy";
+static TaskHandle_t s_led_task = NULL;
 
 /* ── DJI OUI prefixes ── */
 static const uint8_t DJI_OUI[][3] = {
@@ -59,6 +60,91 @@ static void sky_draw_logging_badge(uint16_t bg)
     uint16_t fg = logging_active ? rgb565(74, 222, 128) : rgb565(239, 68, 68);
     display_draw_rect(LCD_H_RES - 14, DISPLAY_STATUS_TEXT_Y, 6, 8, bg);
     display_draw_text(LCD_H_RES - 14, DISPLAY_STATUS_TEXT_Y, "l", fg, bg);
+}
+
+static int8_t sky_strongest_recent_rssi(void)
+{
+    int8_t strongest = -127;
+    uint32_t now = uptime_ms();
+
+    if (xSemaphoreTake(g_app.drone_mutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return -127;
+    }
+
+    for (int i = 0; i < g_app.drone_count; i++) {
+        drone_info_t *d = &g_app.drones[i];
+        if ((now - d->last_seen) > 5000U) continue;
+        if (d->rssi > strongest) strongest = d->rssi;
+    }
+
+    xSemaphoreGive(g_app.drone_mutex);
+    return strongest;
+}
+
+static void sky_led_apply_heartbeat(int8_t rssi, uint32_t now)
+{
+    uint8_t base_r = 0;
+    uint8_t base_g = 200;
+    uint8_t base_b = 90;
+    app_palette_rgb(app_mode_led_color(MODE_SKY_SPY), &base_r, &base_g, &base_b);
+
+    if (rssi <= -120) {
+        float impact = app_detection_behavior_strength(MODE_SKY_SPY, 0.0f);
+        uint32_t period = 3200;
+        float t = (float)(now % period) / (float)period;
+        float breath = (1.0f - cosf(t * 2.0f * 3.14159265f)) * 0.5f;
+        breath = breath * breath;
+        breath = 0.08f + breath * 0.92f;
+        breath *= (0.55f + 0.45f * impact);
+
+        if (g_app.drone_count == 0) {
+            led_ctrl_set((uint8_t)(base_r * breath * 0.34f),
+                         (uint8_t)(base_g * breath * 0.34f),
+                         (uint8_t)(base_b * breath * 0.34f));
+        } else {
+            led_ctrl_set((uint8_t)(base_r * breath * 0.56f),
+                         (uint8_t)(base_g * breath * 0.56f),
+                         (uint8_t)(base_b * breath * 0.56f));
+        }
+        return;
+    }
+
+    {
+        float str = (rssi + 100.0f) / 80.0f;
+        float impact;
+        uint32_t period_ms;
+        uint32_t beat;
+        uint8_t peak_b;
+        uint8_t peak_g;
+        uint8_t peak_r;
+        if (str < 0.0f) str = 0.0f;
+        if (str > 1.0f) str = 1.0f;
+        impact = app_detection_behavior_strength(MODE_SKY_SPY, str);
+        period_ms = 700U - (uint32_t)(impact * 520.0f);
+        if (period_ms < 120U) period_ms = 120U;
+        beat = now % period_ms;
+        peak_r = (uint8_t)(base_r * (0.18f + (impact * impact) * 0.82f));
+        peak_g = (uint8_t)(base_g * (0.18f + impact * 0.82f));
+        peak_b = (uint8_t)(base_b * (0.18f + impact * 0.82f));
+
+        if (beat < (period_ms / 3U)) {
+            led_ctrl_set(peak_r, peak_g, peak_b);
+        } else {
+            led_ctrl_set((uint8_t)(peak_r / 4U), (uint8_t)(peak_g / 4U), (uint8_t)(peak_b / 5U));
+        }
+    }
+}
+
+static void sky_led_task(void *arg)
+{
+    while (g_app.current_mode == MODE_SKY_SPY) {
+        sky_led_apply_heartbeat(sky_strongest_recent_rssi(), uptime_ms());
+        vTaskDelay(pdMS_TO_TICKS(70));
+    }
+
+    led_ctrl_off();
+    s_led_task = NULL;
+    vTaskDelete(NULL);
 }
 
 /* ── OpenDroneID minimal parser ── */
@@ -382,7 +468,7 @@ static void sky_display_task(void *arg)
             }
             last_map_zoom_idx = g_app.local_map_zoom_idx;
             last_map_refresh_token = g_app.ui_refresh_token;
-            display_draw_shared_map_view(MODE_SKY_SPY);
+            display_draw_shared_map_view(MODE_SKY_SPY, !was_map_open);
             last_map_draw_ms = now_ms;
             was_map_open = true;
             full_drawn = false;
@@ -592,8 +678,7 @@ void sky_spy_start(void)
 
     g_app.drone_count = 0;
 
-    /* Breathing green LED for Sky Spy scan state */
-    led_ctrl_breathe(8, 140, 30, 3000);
+    led_ctrl_set(8, 140, 30);
 
     /* Start WiFi sniffer (promiscuous on current AP channel) */
     sniffer_start(sky_wifi_cb);
@@ -601,15 +686,21 @@ void sky_spy_start(void)
     /* Start BLE scan with 50% duty for wifi coexistence */
     ble_scanner_start(sky_ble_cb, 100, 50, true);
 
-    /* LCD task — create before warming the tile cache so the UI renders
-     * immediately even if the SD-card directory scan is slow. */
+    /* Warm the tile cache asynchronously so the mode launches without
+     * blocking on potentially slow SD-card directory scans. */
+    if (!map_tile_cache_ready()) {
+        map_tile_warm_cache_async();
+    }
+
+    /* LCD task */
     if (xTaskCreate(sky_display_task, "sky_lcd", TASK_STACK_UI, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Sky Spy display task");
     }
 
-    /* Warm the tile-zoom cache asynchronously so the main task (and the
-     * button-event loop) are never blocked by slow SD-card I/O. */
-    map_tile_warm_cache_async();
+    if (xTaskCreate(sky_led_task, "sky_led", TASK_STACK_UI, NULL, 2, &s_led_task) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Sky Spy LED task");
+        s_led_task = NULL;
+    }
 }
 
 void sky_spy_stop(void)

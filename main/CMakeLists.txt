@@ -26,6 +26,7 @@ idf_component_register(
         esp_driver_ledc
         esp_driver_spi
         esp_lcd
+        esp_lcd_jd9853
         nvs_flash
         json
             fatfs
@@ -33,3 +34,9 @@ idf_component_register(
             esp_driver_sdspi
     EMBED_TXTFILES "index.html" "certs/servercert.pem" "certs/prvtkey.pem"
 )
+
+if(NOT DEFINED BOARD_TOUCH)
+    set(BOARD_TOUCH 0)
+endif()
+
+target_compile_definitions(${COMPONENT_LIB} PUBLIC BOARD_TOUCH=${BOARD_TOUCH})

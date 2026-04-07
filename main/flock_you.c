@@ -130,9 +130,14 @@ static int8_t flock_strongest_recent_rssi(void)
 
 static void flock_led_apply_warning(uint32_t now)
 {
+    uint8_t base_r = 255;
+    uint8_t base_g = 96;
+    uint8_t base_b = 0;
     uint32_t elapsed = now - s_warning_started_ms;
     uint32_t phase = elapsed / FLOCK_LED_WARNING_FLASH_MS;
     uint32_t total_phases = FLOCK_LED_WARNING_FLASHES * 2;
+
+    app_palette_rgb(app_mode_led_color(MODE_FLOCK_YOU), &base_r, &base_g, &base_b);
 
     if (phase >= total_phases) {
         s_warning_started_ms = 0;
@@ -140,7 +145,7 @@ static void flock_led_apply_warning(uint32_t now)
     }
 
     if ((phase % 2U) == 0U) {
-        led_ctrl_set(255, 96, 0);
+        led_ctrl_set(base_r, base_g, base_b);
     } else {
         led_ctrl_off();
     }
@@ -148,7 +153,13 @@ static void flock_led_apply_warning(uint32_t now)
 
 static void flock_led_apply_heartbeat(int8_t rssi, uint32_t now)
 {
+    uint8_t base_r = 255;
+    uint8_t base_g = 0;
+    uint8_t base_b = 60;
+    app_palette_rgb(app_mode_led_color(MODE_FLOCK_YOU), &base_r, &base_g, &base_b);
+
     if (rssi <= -120) {
+        float impact = app_detection_behavior_strength(MODE_FLOCK_YOU, 0.0f);
         /* No active signal — breathing indicates scan state */
         uint32_t period = 2800;
         uint32_t phase = now % period;
@@ -158,35 +169,36 @@ static void flock_led_apply_heartbeat(int8_t rssi, uint32_t now)
         breath = breath * breath;                 /* gamma */
         float floor = 0.06f;
         breath = floor + breath * (1.0f - floor);
+        breath *= (0.55f + 0.45f * impact);
 
         if (g_app.device_count == 0) {
-            /* Nothing detected yet: visible green pulse */
-            led_ctrl_set((uint8_t)(8  * breath),
-                         (uint8_t)(140 * breath),
-                         (uint8_t)(30  * breath));
+            led_ctrl_set((uint8_t)(base_r * breath * 0.28f),
+                         (uint8_t)(base_g * breath * 0.28f),
+                         (uint8_t)(base_b * breath * 0.28f));
         } else {
-            /* Something was detected previously: purple breathing */
-            led_ctrl_set((uint8_t)(80 * breath),
-                         (uint8_t)(15 * breath),
-                         (uint8_t)(100 * breath));
+            led_ctrl_set((uint8_t)(base_r * breath * 0.62f),
+                         (uint8_t)(base_g * breath * 0.62f),
+                         (uint8_t)(base_b * breath * 0.62f));
         }
         return;
     }
 
     uint8_t strength = flock_signal_level(rssi);
-    uint8_t peak_red = (uint8_t)(48 + (strength * 207 / 255));
-    uint8_t ember_green = (uint8_t)(strength / 18);
+    float impact = app_detection_behavior_strength(MODE_FLOCK_YOU, (float)strength / 255.0f);
+    uint8_t peak_red = (uint8_t)(base_r * (0.2f + 0.8f * impact));
+    uint8_t peak_green = (uint8_t)(base_g * (0.2f + 0.8f * impact));
+    uint8_t peak_blue = (uint8_t)(base_b * (0.2f + 0.8f * impact));
     int period_ms = flock_heartbeat_period_ms(rssi);
     uint32_t beat = now % (uint32_t)period_ms;
 
     if (beat < 90) {
-        led_ctrl_set(peak_red, ember_green, 0);
+        led_ctrl_set(peak_red, peak_green, peak_blue);
     } else if (beat < 160) {
-        led_ctrl_set((uint8_t)(peak_red / 5), 0, 0);
+        led_ctrl_set((uint8_t)(peak_red / 5), (uint8_t)(peak_green / 5), (uint8_t)(peak_blue / 5));
     } else if (beat < 240) {
-        led_ctrl_set((uint8_t)(peak_red * 4 / 5), 0, 0);
+        led_ctrl_set((uint8_t)(peak_red * 4 / 5), (uint8_t)(peak_green * 4 / 5), (uint8_t)(peak_blue * 4 / 5));
     } else if (beat < 360) {
-        led_ctrl_set((uint8_t)(peak_red / 6), 0, 0);
+        led_ctrl_set((uint8_t)(peak_red / 6), (uint8_t)(peak_green / 6), (uint8_t)(peak_blue / 6));
     } else {
         led_ctrl_off();
     }
@@ -428,8 +440,12 @@ static void flock_display_task(void *arg)
     int last_logging_active = -1;
     int last_logging_blocked = -1;
     int last_map_open = -1;
+    int last_map_zoom_idx = -1;
     bool was_map_open = false;
     uint32_t last_refresh_token = 0;
+    uint32_t last_map_refresh_token = 0;
+    uint32_t last_map_draw_ms = 0;
+    const uint32_t map_refresh_period_ms = 1500;
 
     while (g_app.current_mode == MODE_FLOCK_YOU) {
         uint32_t now_ms = uptime_ms();
@@ -470,9 +486,19 @@ static void flock_display_task(void *arg)
                          (unsigned long)esp_get_free_heap_size(),
                          (unsigned)uxTaskGetStackHighWaterMark(NULL));
             }
-            display_draw_shared_map_view(MODE_FLOCK_YOU);
+            bool map_dirty = !was_map_open
+                          || (g_app.local_map_zoom_idx != last_map_zoom_idx)
+                          || (g_app.ui_refresh_token != last_map_refresh_token);
+            if (!map_dirty && (now_ms - last_map_draw_ms) < map_refresh_period_ms) {
+                vTaskDelay(pdMS_TO_TICKS(120));
+                continue;
+            }
+            last_map_zoom_idx = g_app.local_map_zoom_idx;
+            last_map_refresh_token = g_app.ui_refresh_token;
+            display_draw_shared_map_view(MODE_FLOCK_YOU, !was_map_open);
+            last_map_draw_ms = now_ms;
             was_map_open = true;
-            vTaskDelay(pdMS_TO_TICKS(250));
+            vTaskDelay(pdMS_TO_TICKS(map_dirty ? 250 : 120));
             continue;
         }
 
@@ -599,15 +625,16 @@ void flock_you_start(void)
         s_led_task = NULL;
     }
 
-    /* LCD status task — create before warming the tile cache so the UI
-     * renders immediately even if the SD-card directory scan is slow. */
+    /* Warm the tile cache asynchronously so the mode launches without
+     * blocking on potentially slow SD-card directory scans. */
+    if (!map_tile_cache_ready()) {
+        map_tile_warm_cache_async();
+    }
+
+    /* LCD status task */
     if (xTaskCreate(flock_display_task, "flock_lcd", TASK_STACK_UI, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Flock You display task");
     }
-
-    /* Warm the tile-zoom cache asynchronously so the main task (and the
-     * button-event loop) are never blocked by slow SD-card I/O. */
-    map_tile_warm_cache_async();
 }
 
 void flock_you_stop(void)
