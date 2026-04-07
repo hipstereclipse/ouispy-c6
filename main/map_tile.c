@@ -661,9 +661,8 @@ static void refresh_tile_zoom_cache(void)
         return;
     }
 
-    ESP_LOGI(TAG, "refresh_cache root=%s", map_root ? map_root : "(none)");
-
     if (!map_root) {
+        ESP_LOGI(TAG, "refresh_cache root=(none)");
         reset_tile_zoom_cache(&s_tile_zoom_cache, now_us);
         s_tile_zoom_cache.valid = true;
         s_tile_zoom_cache.root[0] = '\0';
@@ -680,6 +679,8 @@ static void refresh_tile_zoom_cache(void)
         app_spi_bus_unlock();
         return;
     }
+
+    ESP_LOGI(TAG, "refresh_cache root=%s", map_root);
 
     static const char *const any_exts[] = {"png", "jpg", "jpeg", "webp"};
     static const char *const png_exts[] = {"png"};
@@ -905,19 +906,19 @@ size_t map_tile_browsable_zooms(int *out_zooms, size_t max_zooms)
     any_count = map_tile_available_zooms(any_zooms, sizeof(any_zooms) / sizeof(any_zooms[0]), false);
 
     for (size_t i = 0; i < png_count && written < max_zooms; i++) {
-        out_zooms[written++] = png_zooms[i];
+        out_zooms[written++] = png_zooms[png_count - 1 - i];
     }
 
     for (size_t i = 0; i < any_count && written < max_zooms; i++) {
         bool already_listed = false;
         for (size_t j = 0; j < written; j++) {
-            if (out_zooms[j] == any_zooms[i]) {
+            if (out_zooms[j] == any_zooms[any_count - 1 - i]) {
                 already_listed = true;
                 break;
             }
         }
         if (!already_listed) {
-            out_zooms[written++] = any_zooms[i];
+            out_zooms[written++] = any_zooms[any_count - 1 - i];
         }
     }
 
@@ -999,9 +1000,17 @@ int map_tile_resolve_view_zoom(int requested_zoom,
 {
     size_t level_count = 0;
     const tile_zoom_level_info_t *levels = NULL;
-    int best_zoom = requested_zoom;
-    int best_score = -1;
-    int best_distance = INT32_MAX;
+    int best_center_zoom = requested_zoom;
+    int best_center_distance = INT32_MAX;
+    int best_center_overlap = -1;
+    bool best_center_found = false;
+    int best_overlap_zoom = requested_zoom;
+    int best_overlap_distance = INT32_MAX;
+    int best_overlap_tiles = -1;
+    bool best_overlap_found = false;
+    int fallback_zoom = requested_zoom;
+    int fallback_score = -1;
+    int fallback_distance = INT32_MAX;
 
     refresh_tile_zoom_cache();
     levels = tile_zoom_levels(png_only, &level_count);
@@ -1016,17 +1025,50 @@ int map_tile_resolve_view_zoom(int requested_zoom,
                                               viewport_h,
                                               &center_covered);
         int distance = abs(levels[i].zoom - requested_zoom);
+        int overlap_tiles = score - (center_covered ? 8 : 0);
+
+        if (overlap_tiles < 0) overlap_tiles = 0;
 
         if (score < 0) continue;
-        if (score > best_score || (score == best_score && distance < best_distance)
-            || (score == best_score && distance == best_distance && center_covered)) {
-            best_score = score;
-            best_distance = distance;
-            best_zoom = levels[i].zoom;
+
+        if (center_covered) {
+            if (!best_center_found
+                || distance < best_center_distance
+                || (distance == best_center_distance && levels[i].zoom > best_center_zoom)
+                || (distance == best_center_distance && levels[i].zoom == best_center_zoom
+                    && overlap_tiles > best_center_overlap)) {
+                best_center_found = true;
+                best_center_distance = distance;
+                best_center_overlap = overlap_tiles;
+                best_center_zoom = levels[i].zoom;
+            }
+        }
+
+        if (overlap_tiles > 0) {
+            if (!best_overlap_found
+                || distance < best_overlap_distance
+                || (distance == best_overlap_distance && levels[i].zoom > best_overlap_zoom)
+                || (distance == best_overlap_distance && levels[i].zoom == best_overlap_zoom
+                    && overlap_tiles > best_overlap_tiles)) {
+                best_overlap_found = true;
+                best_overlap_distance = distance;
+                best_overlap_tiles = overlap_tiles;
+                best_overlap_zoom = levels[i].zoom;
+            }
+        }
+
+        if (score > fallback_score
+            || (score == fallback_score && distance < fallback_distance)
+            || (score == fallback_score && distance == fallback_distance && levels[i].zoom > fallback_zoom)) {
+            fallback_score = score;
+            fallback_distance = distance;
+            fallback_zoom = levels[i].zoom;
         }
     }
 
-    return best_zoom;
+    if (best_center_found) return best_center_zoom;
+    if (best_overlap_found) return best_overlap_zoom;
+    return fallback_zoom;
 }
 
 void map_tile_get_debug_info(map_tile_debug_info_t *out_info)
