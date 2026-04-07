@@ -6,10 +6,13 @@
 #include "storage_ext.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 app_state_t g_app;
+
+static const uint8_t FX_INTENSITY_STEPS[] = {48, 80, 112, 144, 176, 208, 240, 255};
 
 static esp_log_level_t serial_log_level_from_pref(uint8_t pref)
 {
@@ -71,6 +74,70 @@ uint16_t app_palette_rgb565(uint8_t idx)
     return rgb565(r, g, b);
 }
 
+uint8_t app_mode_default_led_color(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return MENU_LED_RUBY;
+    case MODE_FOX_HUNTER:
+        return MENU_LED_AMBER;
+    case MODE_SKY_SPY:
+        return MENU_LED_EMERALD;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return MENU_LED_TOPAZ;
+    }
+}
+
+uint8_t app_mode_default_display_style(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return BORDER_STYLE_RADIATION;
+    case MODE_FOX_HUNTER:
+        return BORDER_STYLE_VIPER;
+    case MODE_SKY_SPY:
+        return BORDER_STYLE_SONAR;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return BORDER_STYLE_PULSE;
+    }
+}
+
+uint8_t app_mode_default_display_color(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return MENU_LED_RUBY;
+    case MODE_FOX_HUNTER:
+        return MENU_LED_CARNELIAN;
+    case MODE_SKY_SPY:
+        return MENU_LED_LABRADORITE;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return MENU_LED_TOPAZ;
+    }
+}
+
+static uint8_t app_mode_display_style_pref(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return g_app.detect_flock_high;
+    case MODE_FOX_HUNTER:
+        return g_app.detect_fox_high;
+    case MODE_SKY_SPY:
+        return g_app.detect_sky_high;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return g_app.border_style;
+    }
+}
+
 uint8_t app_mode_led_color(app_mode_t mode)
 {
     switch (mode) {
@@ -89,22 +156,53 @@ uint8_t app_mode_led_color(app_mode_t mode)
 
 uint8_t app_mode_display_style(app_mode_t mode)
 {
+    uint8_t style = app_mode_display_style_pref(mode);
+
+    if (style == BORDER_STYLE_DEFAULT || style >= BORDER_STYLE_COUNT) {
+        return app_mode_default_display_style(mode);
+    }
+
+    return style;
+}
+
+uint8_t app_mode_display_behavior(app_mode_t mode)
+{
     switch (mode) {
     case MODE_FLOCK_YOU:
-        return g_app.detect_flock_high;
+        return g_app.detect_flock_behavior;
     case MODE_FOX_HUNTER:
-        return g_app.detect_fox_high;
+        return g_app.detect_fox_behavior;
     case MODE_SKY_SPY:
-        return g_app.detect_sky_high;
+        return g_app.detect_sky_behavior;
     case MODE_SETTINGS:
     case MODE_SELECT:
     default:
-        return g_app.border_style;
+        return FX_BEHAVIOR_STANDARD;
+    }
+}
+
+uint8_t app_mode_display_intensity(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return g_app.detect_flock_intensity;
+    case MODE_FOX_HUNTER:
+        return g_app.detect_fox_intensity;
+    case MODE_SKY_SPY:
+        return g_app.detect_sky_intensity;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return g_app.menu_fx_intensity;
     }
 }
 
 uint8_t app_mode_display_color(app_mode_t mode)
 {
+    if (app_mode_display_style_pref(mode) == BORDER_STYLE_DEFAULT) {
+        return app_mode_default_display_color(mode);
+    }
+
     switch (mode) {
     case MODE_FLOCK_YOU:
         return g_app.detect_flock_custom;
@@ -121,9 +219,68 @@ uint8_t app_mode_display_color(app_mode_t mode)
 
 void app_apply_mode_visual_prefs(app_mode_t mode)
 {
-    if (mode == MODE_FLOCK_YOU || mode == MODE_FOX_HUNTER || mode == MODE_SKY_SPY) {
-        g_app.border_style = app_mode_display_style(mode);
+    g_app.active_border_style = app_mode_display_style(mode);
+}
+
+bool app_spi_bus_lock(TickType_t wait_ticks)
+{
+    if (!g_app.spi_bus_mutex) {
+        g_app.spi_bus_mutex = xSemaphoreCreateRecursiveMutex();
+        if (!g_app.spi_bus_mutex) {
+            ESP_LOGE("app", "Failed to create SPI bus mutex");
+            return false;
+        }
     }
+
+    return xSemaphoreTakeRecursive(g_app.spi_bus_mutex, wait_ticks) == pdTRUE;
+}
+
+void app_spi_bus_unlock(void)
+{
+    if (g_app.spi_bus_mutex) {
+        xSemaphoreGiveRecursive(g_app.spi_bus_mutex);
+    }
+}
+
+uint8_t app_fx_sanitize_intensity(uint8_t value, uint8_t fallback)
+{
+    uint8_t best = fallback;
+    int best_diff = INT32_MAX;
+
+    if (fallback == 0) {
+        fallback = FX_INTENSITY_STEPS[sizeof(FX_INTENSITY_STEPS) / sizeof(FX_INTENSITY_STEPS[0]) - 1];
+    }
+
+    if (value == 0) return fallback;
+
+    for (size_t i = 0; i < (sizeof(FX_INTENSITY_STEPS) / sizeof(FX_INTENSITY_STEPS[0])); i++) {
+        int diff = abs((int)value - (int)FX_INTENSITY_STEPS[i]);
+        if (diff < best_diff) {
+            best = FX_INTENSITY_STEPS[i];
+            best_diff = diff;
+        }
+    }
+
+    return best;
+}
+
+uint8_t app_fx_cycle_intensity(uint8_t current)
+{
+    uint8_t normalized = app_fx_sanitize_intensity(current, FX_INTENSITY_STEPS[0]);
+
+    for (size_t i = 0; i < (sizeof(FX_INTENSITY_STEPS) / sizeof(FX_INTENSITY_STEPS[0])); i++) {
+        if (FX_INTENSITY_STEPS[i] == normalized) {
+            return FX_INTENSITY_STEPS[(i + 1) % (sizeof(FX_INTENSITY_STEPS) / sizeof(FX_INTENSITY_STEPS[0]))];
+        }
+    }
+
+    return FX_INTENSITY_STEPS[0];
+}
+
+uint8_t app_fx_percent(uint8_t value)
+{
+    uint8_t normalized = app_fx_sanitize_intensity(value, FX_INTENSITY_STEPS[sizeof(FX_INTENSITY_STEPS) / sizeof(FX_INTENSITY_STEPS[0]) - 1]);
+    return (uint8_t)(((uint16_t)normalized * 100U + 127U) / 255U);
 }
 
 void app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char **pass, uint8_t *channel)
@@ -167,18 +324,26 @@ void app_state_init(void)
     g_app.ap_broadcast_enabled = true;
     g_app.single_ap_name_enabled = false;
     g_app.display_sleep_timeout_sec = 60;
-    g_app.menu_led_color = MENU_LED_TOPAZ;
-    g_app.border_style = BORDER_STYLE_PULSE;
+    g_app.menu_led_color = app_mode_default_display_color(MODE_SELECT);
+    g_app.border_style = BORDER_STYLE_DEFAULT;
+    g_app.active_border_style = app_mode_display_style(MODE_SELECT);
+    g_app.menu_fx_intensity = 176;
     g_app.detect_behavior = 0;
-    g_app.detect_flock_low = MENU_LED_RUBY;
-    g_app.detect_flock_high = BORDER_STYLE_RADIATION;
-    g_app.detect_flock_custom = MENU_LED_RUBY;
-    g_app.detect_fox_low = MENU_LED_AMBER;
-    g_app.detect_fox_high = BORDER_STYLE_VIPER;
-    g_app.detect_fox_custom = MENU_LED_CARNELIAN;
-    g_app.detect_sky_low = MENU_LED_EMERALD;
-    g_app.detect_sky_high = BORDER_STYLE_SONAR;
-    g_app.detect_sky_custom = MENU_LED_LABRADORITE;
+    g_app.detect_flock_low = app_mode_default_led_color(MODE_FLOCK_YOU);
+    g_app.detect_flock_high = BORDER_STYLE_DEFAULT;
+    g_app.detect_flock_custom = app_mode_default_display_color(MODE_FLOCK_YOU);
+    g_app.detect_flock_behavior = FX_BEHAVIOR_STANDARD;
+    g_app.detect_flock_intensity = 224;
+    g_app.detect_fox_low = app_mode_default_led_color(MODE_FOX_HUNTER);
+    g_app.detect_fox_high = BORDER_STYLE_DEFAULT;
+    g_app.detect_fox_custom = app_mode_default_display_color(MODE_FOX_HUNTER);
+    g_app.detect_fox_behavior = FX_BEHAVIOR_STANDARD;
+    g_app.detect_fox_intensity = 255;
+    g_app.detect_sky_low = app_mode_default_led_color(MODE_SKY_SPY);
+    g_app.detect_sky_high = BORDER_STYLE_DEFAULT;
+    g_app.detect_sky_custom = app_mode_default_display_color(MODE_SKY_SPY);
+    g_app.detect_sky_behavior = FX_BEHAVIOR_STANDARD;
+    g_app.detect_sky_intensity = 224;
     g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
     g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
     g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;
@@ -211,6 +376,7 @@ void app_state_init(void)
     g_app.local_map_zoom_idx = 2;
     g_app.last_input_ms = uptime_ms();
     g_app.display_sleeping = false;
+    g_app.spi_bus_mutex   = xSemaphoreCreateRecursiveMutex();
     g_app.device_mutex    = xSemaphoreCreateMutex();
     g_app.drone_mutex     = xSemaphoreCreateMutex();
     g_app.map_mutex       = xSemaphoreCreateMutex();
@@ -227,10 +393,26 @@ void app_apply_runtime_logging_prefs(void)
 
 float app_detection_behavior_strength(app_mode_t mode, float detected_strength)
 {
-    (void)mode;
+    uint8_t behavior = app_mode_display_behavior(mode);
+
     if (detected_strength < 0.0f) detected_strength = 0.0f;
     if (detected_strength > 1.0f) detected_strength = 1.0f;
-    return detected_strength;
+
+    switch (behavior) {
+    case FX_BEHAVIOR_BREATHE:
+        return powf(detected_strength, 1.35f);
+    case FX_BEHAVIOR_TRACKER:
+        return 1.0f - powf(1.0f - detected_strength, 1.75f);
+    case FX_BEHAVIOR_STING:
+        return 1.0f - powf(1.0f - detected_strength, 2.10f);
+    case FX_BEHAVIOR_STANDARD:
+    default:
+        if (mode == MODE_FOX_HUNTER) {
+            float sharpness = g_app.fox_led_mode ? 2.00f : 1.75f;
+            return 1.0f - powf(1.0f - detected_strength, sharpness);
+        }
+        return detected_strength;
+    }
 }
 
 uint32_t uptime_ms(void)

@@ -189,11 +189,11 @@ def _load_firmware_info(build_dir):
     info = _read_json_file(get_firmware_info_path(build_dir)) or {}
     project = _get_build_project_description(build_dir)
 
-    if project.get("project_version") and not info.get("version"):
+    if project.get("project_version"):
         info["version"] = str(project["project_version"])
-    if project.get("project_name") and not info.get("project_name"):
+    if project.get("project_name"):
         info["project_name"] = str(project["project_name"])
-    if project.get("target") and not info.get("target"):
+    if project.get("target"):
         info["target"] = str(project["target"])
 
     if not info.get("git"):

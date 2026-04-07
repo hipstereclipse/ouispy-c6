@@ -204,6 +204,112 @@ static void flock_led_apply_heartbeat(int8_t rssi, uint32_t now)
     }
 }
 
+static void flock_led_apply_breathe(int8_t rssi, uint32_t now)
+{
+    uint8_t base_r = 255;
+    uint8_t base_g = 0;
+    uint8_t base_b = 60;
+    float raw_strength = 0.0f;
+    float impact;
+    uint32_t period_ms;
+    float phase;
+    float breath;
+    float reach;
+
+    app_palette_rgb(app_mode_led_color(MODE_FLOCK_YOU), &base_r, &base_g, &base_b);
+
+    if (rssi > -120) {
+        raw_strength = (float)flock_signal_level(rssi) / 255.0f;
+    }
+    impact = app_detection_behavior_strength(MODE_FLOCK_YOU, raw_strength);
+
+    period_ms = 1200U + (uint32_t)(impact * 1800.0f);
+    phase = (float)(now % period_ms) / (float)period_ms;
+    breath = (1.0f - cosf(phase * 2.0f * 3.14159265f)) * 0.5f;
+    breath = breath * breath;
+
+    if (rssi <= -120) {
+        reach = (g_app.device_count == 0) ? 0.20f : 0.34f;
+    } else {
+        reach = 0.30f + impact * 0.70f;
+    }
+
+    breath = 0.04f + breath * reach;
+    led_ctrl_set((uint8_t)(base_r * breath),
+                 (uint8_t)(base_g * breath),
+                 (uint8_t)(base_b * breath));
+}
+
+static void flock_led_apply_tracker(int8_t rssi, uint32_t now)
+{
+    uint8_t base_r = 255;
+    uint8_t base_g = 0;
+    uint8_t base_b = 60;
+
+    app_palette_rgb(app_mode_led_color(MODE_FLOCK_YOU), &base_r, &base_g, &base_b);
+
+    if (rssi <= -120) {
+        float idle_scale = (g_app.device_count == 0) ? 0.08f : 0.14f;
+        led_ctrl_set((uint8_t)(base_r * idle_scale),
+                     (uint8_t)(base_g * idle_scale),
+                     (uint8_t)(base_b * idle_scale));
+        return;
+    }
+
+    {
+        float raw_strength = (float)flock_signal_level(rssi) / 255.0f;
+        float impact = app_detection_behavior_strength(MODE_FLOCK_YOU, raw_strength);
+        uint32_t period_ms = 820U - (uint32_t)(impact * 700.0f);
+        uint32_t beat;
+        uint8_t peak_red;
+        uint8_t peak_green;
+        uint8_t peak_blue;
+        uint8_t low_red;
+        uint8_t low_green;
+        uint8_t low_blue;
+
+        if (period_ms < 90U) period_ms = 90U;
+        beat = now % period_ms;
+        peak_red = (uint8_t)(base_r * (0.18f + impact * 0.82f));
+        peak_green = (uint8_t)(base_g * (0.18f + impact * 0.82f));
+        peak_blue = (uint8_t)(base_b * (0.18f + impact * 0.82f));
+        low_red = (uint8_t)(peak_red / 4U);
+        low_green = (uint8_t)(peak_green / 4U);
+        low_blue = (uint8_t)(peak_blue / 4U);
+
+        if (beat < (period_ms / 2U)) {
+            led_ctrl_set(peak_red, peak_green, peak_blue);
+        } else {
+            led_ctrl_set(low_red, low_green, low_blue);
+        }
+    }
+}
+
+static void flock_led_apply_sting(int8_t rssi)
+{
+    uint8_t base_r = 255;
+    uint8_t base_g = 0;
+    uint8_t base_b = 60;
+
+    app_palette_rgb(app_mode_led_color(MODE_FLOCK_YOU), &base_r, &base_g, &base_b);
+
+    if (rssi <= -120) {
+        float idle_scale = (g_app.device_count == 0) ? 0.06f : 0.12f;
+        led_ctrl_set((uint8_t)(base_r * idle_scale),
+                     (uint8_t)(base_g * idle_scale),
+                     (uint8_t)(base_b * idle_scale));
+        return;
+    }
+
+    {
+        float raw_strength = (float)flock_signal_level(rssi) / 255.0f;
+        float impact = app_detection_behavior_strength(MODE_FLOCK_YOU, raw_strength);
+        led_ctrl_set((uint8_t)(base_r * (0.16f + impact * 0.84f)),
+                     (uint8_t)(base_g * (0.16f + impact * 0.84f)),
+                     (uint8_t)(base_b * (0.16f + impact * 0.84f)));
+    }
+}
+
 static void flock_led_task(void *arg)
 {
     while (g_app.current_mode == MODE_FLOCK_YOU) {
@@ -212,7 +318,23 @@ static void flock_led_task(void *arg)
         if (s_warning_started_ms != 0) {
             flock_led_apply_warning(now);
         } else {
-            flock_led_apply_heartbeat(flock_strongest_recent_rssi(), now);
+            int8_t strongest = flock_strongest_recent_rssi();
+
+            switch (app_mode_display_behavior(MODE_FLOCK_YOU)) {
+            case FX_BEHAVIOR_BREATHE:
+                flock_led_apply_breathe(strongest, now);
+                break;
+            case FX_BEHAVIOR_TRACKER:
+                flock_led_apply_tracker(strongest, now);
+                break;
+            case FX_BEHAVIOR_STING:
+                flock_led_apply_sting(strongest);
+                break;
+            case FX_BEHAVIOR_STANDARD:
+            default:
+                flock_led_apply_heartbeat(strongest, now);
+                break;
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(60));
@@ -632,7 +754,7 @@ void flock_you_start(void)
     }
 
     /* LCD status task */
-    if (xTaskCreate(flock_display_task, "flock_lcd", TASK_STACK_UI, NULL, 2, NULL) != pdPASS) {
+    if (xTaskCreate(flock_display_task, "flock_lcd", TASK_STACK_MAP_UI, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Flock You display task");
     }
 }

@@ -9,6 +9,8 @@
 static const char *TAG = "nvs_store";
 #define NVS_NAMESPACE "ouispy"
 #define NVS_FW_VERSION_KEY "fw_ver"
+#define NVS_FX_SCHEMA_KEY "fx_schema"
+#define NVS_FX_SCHEMA_VERSION 1
 
 typedef struct {
     uint8_t  mac[6];
@@ -23,6 +25,20 @@ typedef struct {
     char     notes[FOX_REG_NOTES_LEN];
     char     section[FOX_REG_SECTION_LEN];
 } fox_reg_entry_v2_t;
+
+static uint8_t migrate_legacy_fx_behavior(uint8_t legacy_value)
+{
+    switch (legacy_value) {
+    case 0:
+        return FX_BEHAVIOR_BREATHE;
+    case 1:
+        return FX_BEHAVIOR_STANDARD;
+    case 2:
+        return FX_BEHAVIOR_TRACKER;
+    default:
+        return FX_BEHAVIOR_STANDARD;
+    }
+}
 
 void nvs_store_init(void)
 {
@@ -125,16 +141,24 @@ void nvs_store_save_prefs(void)
         nvs_set_u16(h, "sleep_sec", g_app.display_sleep_timeout_sec);
         nvs_set_u8(h, "menu_led", g_app.menu_led_color);
         nvs_set_u8(h, "bdr_style", g_app.border_style);
+        nvs_set_u8(h, NVS_FX_SCHEMA_KEY, NVS_FX_SCHEMA_VERSION);
+        nvs_set_u8(h, "mfx_int", g_app.menu_fx_intensity);
         nvs_set_u8(h, "det_beh", g_app.detect_behavior);
         nvs_set_u8(h, "det_fl_lo", g_app.detect_flock_low);
         nvs_set_u8(h, "det_fl_hi", g_app.detect_flock_high);
         nvs_set_u8(h, "det_fl_cu", g_app.detect_flock_custom);
+        nvs_set_u8(h, "fl_beh", g_app.detect_flock_behavior);
+        nvs_set_u8(h, "fl_int", g_app.detect_flock_intensity);
         nvs_set_u8(h, "det_fx_lo", g_app.detect_fox_low);
         nvs_set_u8(h, "det_fx_hi", g_app.detect_fox_high);
         nvs_set_u8(h, "det_fx_cu", g_app.detect_fox_custom);
+        nvs_set_u8(h, "fx_beh", g_app.detect_fox_behavior);
+        nvs_set_u8(h, "fx_int", g_app.detect_fox_intensity);
         nvs_set_u8(h, "det_sk_lo", g_app.detect_sky_low);
         nvs_set_u8(h, "det_sk_hi", g_app.detect_sky_high);
         nvs_set_u8(h, "det_sk_cu", g_app.detect_sky_custom);
+        nvs_set_u8(h, "sk_beh", g_app.detect_sky_behavior);
+        nvs_set_u8(h, "sk_int", g_app.detect_sky_intensity);
         nvs_set_u8(h, "snd_flock", g_app.sound_profile_flock);
         nvs_set_u8(h, "snd_fox", g_app.sound_profile_fox);
         nvs_set_u8(h, "snd_sky", g_app.sound_profile_sky);
@@ -243,8 +267,10 @@ void nvs_store_load_prefs(void)
 {
     nvs_handle_t h;
     uint8_t tmp;
+    uint8_t fx_schema = 0;
     uint16_t sleep_tmp;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_u8(h, NVS_FX_SCHEMA_KEY, &fx_schema);
         if (nvs_get_u8(h, "brightness", &tmp) == ESP_OK) g_app.lcd_brightness = tmp;
         if (nvs_get_u8(h, "sound", &tmp) == ESP_OK) g_app.sound_enabled = (tmp != 0);
         if (nvs_get_u8(h, "led", &tmp) == ESP_OK) g_app.led_enabled = (tmp != 0);
@@ -253,16 +279,23 @@ void nvs_store_load_prefs(void)
         if (nvs_get_u16(h, "sleep_sec", &sleep_tmp) == ESP_OK) g_app.display_sleep_timeout_sec = sleep_tmp;
         if (nvs_get_u8(h, "menu_led", &tmp) == ESP_OK) g_app.menu_led_color = tmp;
         if (nvs_get_u8(h, "bdr_style", &tmp) == ESP_OK) g_app.border_style = tmp;
+        if (nvs_get_u8(h, "mfx_int", &tmp) == ESP_OK) g_app.menu_fx_intensity = tmp;
         if (nvs_get_u8(h, "det_beh", &tmp) == ESP_OK) g_app.detect_behavior = tmp;
         if (nvs_get_u8(h, "det_fl_lo", &tmp) == ESP_OK) g_app.detect_flock_low = tmp;
         if (nvs_get_u8(h, "det_fl_hi", &tmp) == ESP_OK) g_app.detect_flock_high = tmp;
         if (nvs_get_u8(h, "det_fl_cu", &tmp) == ESP_OK) g_app.detect_flock_custom = tmp;
+        if (nvs_get_u8(h, "fl_beh", &tmp) == ESP_OK) g_app.detect_flock_behavior = tmp;
+        if (nvs_get_u8(h, "fl_int", &tmp) == ESP_OK) g_app.detect_flock_intensity = tmp;
         if (nvs_get_u8(h, "det_fx_lo", &tmp) == ESP_OK) g_app.detect_fox_low = tmp;
         if (nvs_get_u8(h, "det_fx_hi", &tmp) == ESP_OK) g_app.detect_fox_high = tmp;
         if (nvs_get_u8(h, "det_fx_cu", &tmp) == ESP_OK) g_app.detect_fox_custom = tmp;
+        if (nvs_get_u8(h, "fx_beh", &tmp) == ESP_OK) g_app.detect_fox_behavior = tmp;
+        if (nvs_get_u8(h, "fx_int", &tmp) == ESP_OK) g_app.detect_fox_intensity = tmp;
         if (nvs_get_u8(h, "det_sk_lo", &tmp) == ESP_OK) g_app.detect_sky_low = tmp;
         if (nvs_get_u8(h, "det_sk_hi", &tmp) == ESP_OK) g_app.detect_sky_high = tmp;
         if (nvs_get_u8(h, "det_sk_cu", &tmp) == ESP_OK) g_app.detect_sky_custom = tmp;
+        if (nvs_get_u8(h, "sk_beh", &tmp) == ESP_OK) g_app.detect_sky_behavior = tmp;
+        if (nvs_get_u8(h, "sk_int", &tmp) == ESP_OK) g_app.detect_sky_intensity = tmp;
         if (nvs_get_u8(h, "snd_flock", &tmp) == ESP_OK) g_app.sound_profile_flock = tmp;
         if (nvs_get_u8(h, "snd_fox", &tmp) == ESP_OK) g_app.sound_profile_fox = tmp;
         if (nvs_get_u8(h, "snd_sky", &tmp) == ESP_OK) g_app.sound_profile_sky = tmp;
@@ -285,18 +318,32 @@ void nvs_store_load_prefs(void)
         nvs_close(h);
     }
 
+    if (fx_schema < NVS_FX_SCHEMA_VERSION) {
+        g_app.detect_flock_behavior = migrate_legacy_fx_behavior(g_app.detect_flock_behavior);
+        g_app.detect_fox_behavior = migrate_legacy_fx_behavior(g_app.detect_fox_behavior);
+        g_app.detect_sky_behavior = migrate_legacy_fx_behavior(g_app.detect_sky_behavior);
+    }
+
     if (g_app.menu_led_color >= MENU_LED_COUNT) g_app.menu_led_color = MENU_LED_TOPAZ;
-    if (g_app.border_style >= BORDER_STYLE_COUNT) g_app.border_style = BORDER_STYLE_PULSE;
+    if (g_app.border_style >= BORDER_STYLE_COUNT) g_app.border_style = BORDER_STYLE_DEFAULT;
+    g_app.active_border_style = app_mode_display_style(MODE_SELECT);
+    g_app.menu_fx_intensity = app_fx_sanitize_intensity(g_app.menu_fx_intensity, 176);
     g_app.detect_behavior = 0;
     if (g_app.detect_flock_low >= MENU_LED_COUNT) g_app.detect_flock_low = MENU_LED_RUBY;
-    if (g_app.detect_flock_high >= BORDER_STYLE_COUNT) g_app.detect_flock_high = BORDER_STYLE_RADIATION;
+    if (g_app.detect_flock_high >= BORDER_STYLE_COUNT) g_app.detect_flock_high = BORDER_STYLE_DEFAULT;
     if (g_app.detect_flock_custom >= MENU_LED_COUNT) g_app.detect_flock_custom = MENU_LED_RUBY;
+    if (g_app.detect_flock_behavior >= FX_BEHAVIOR_COUNT) g_app.detect_flock_behavior = FX_BEHAVIOR_STANDARD;
+    g_app.detect_flock_intensity = app_fx_sanitize_intensity(g_app.detect_flock_intensity, 224);
     if (g_app.detect_fox_low >= MENU_LED_COUNT) g_app.detect_fox_low = MENU_LED_AMBER;
-    if (g_app.detect_fox_high >= BORDER_STYLE_COUNT) g_app.detect_fox_high = BORDER_STYLE_VIPER;
+    if (g_app.detect_fox_high >= BORDER_STYLE_COUNT) g_app.detect_fox_high = BORDER_STYLE_DEFAULT;
     if (g_app.detect_fox_custom >= MENU_LED_COUNT) g_app.detect_fox_custom = MENU_LED_CARNELIAN;
+    if (g_app.detect_fox_behavior >= FX_BEHAVIOR_COUNT) g_app.detect_fox_behavior = FX_BEHAVIOR_STANDARD;
+    g_app.detect_fox_intensity = app_fx_sanitize_intensity(g_app.detect_fox_intensity, 255);
     if (g_app.detect_sky_low >= MENU_LED_COUNT) g_app.detect_sky_low = MENU_LED_EMERALD;
-    if (g_app.detect_sky_high >= BORDER_STYLE_COUNT) g_app.detect_sky_high = BORDER_STYLE_SONAR;
+    if (g_app.detect_sky_high >= BORDER_STYLE_COUNT) g_app.detect_sky_high = BORDER_STYLE_DEFAULT;
     if (g_app.detect_sky_custom >= MENU_LED_COUNT) g_app.detect_sky_custom = MENU_LED_LABRADORITE;
+    if (g_app.detect_sky_behavior >= FX_BEHAVIOR_COUNT) g_app.detect_sky_behavior = FX_BEHAVIOR_STANDARD;
+    g_app.detect_sky_intensity = app_fx_sanitize_intensity(g_app.detect_sky_intensity, 224);
     if (g_app.sound_profile_flock >= SOUND_PROFILE_COUNT) g_app.sound_profile_flock = SOUND_PROFILE_STANDARD;
     if (g_app.sound_profile_fox >= SOUND_PROFILE_COUNT) g_app.sound_profile_fox = SOUND_PROFILE_SONAR;
     if (g_app.sound_profile_sky >= SOUND_PROFILE_COUNT) g_app.sound_profile_sky = SOUND_PROFILE_CHIRP;

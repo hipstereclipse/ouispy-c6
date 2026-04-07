@@ -9,10 +9,10 @@
  * Memory budget (all heap, freed after each tile):
  *   tinfl_decompressor   ~11 KB
  *   LZ dictionary         32 KB
- *   compressed IDAT buf   variable  (capped at 48 KB)
+ *   streamed IDAT buf      2 KB
  *   two row buffers       2 × (256×4+1) ≈ 2 KB
  *   LCD row buf (DMA)     172×2 = 344 B
- *   total peak            ≈ 50 KB
+ *   total peak            ≈ 47 KB
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,7 +36,8 @@
 static const char *TAG = "map_tile";
 #define MAX_IDAT_BYTES (48 * 1024)   /* refuse tiles with > 48 KB compressed */
 #define MAX_TILE_FILE_BYTES (96 * 1024)
-#define TILE_MIN_DECODE_HEAP (96 * 1024)
+#define TILE_MIN_DECODE_HEAP (64 * 1024)
+#define PNG_STREAM_CHUNK_BYTES 2048
 #define TILE_ZOOM_CACHE_MAX_LEVELS 20
 
 typedef struct {
@@ -654,6 +655,11 @@ static void refresh_tile_zoom_cache(void)
 {
     const char *map_root = resolve_map_root();
     int64_t now_us = esp_timer_get_time();
+    tile_zoom_cache_t *new_cache = NULL;
+
+    if (!app_spi_bus_lock(pdMS_TO_TICKS(1000))) {
+        return;
+    }
 
     ESP_LOGI(TAG, "refresh_cache root=%s", map_root ? map_root : "(none)");
 
@@ -662,27 +668,41 @@ static void refresh_tile_zoom_cache(void)
         s_tile_zoom_cache.valid = true;
         s_tile_zoom_cache.root[0] = '\0';
         s_tile_zoom_cache_scanning = false;
+        app_spi_bus_unlock();
         return;
     }
 
     if (s_tile_zoom_cache.valid) {
+        app_spi_bus_unlock();
         return;
     }
     if (s_tile_zoom_cache_scanning) {
+        app_spi_bus_unlock();
         return;
     }
 
     static const char *const any_exts[] = {"png", "jpg", "jpeg", "webp"};
     static const char *const png_exts[] = {"png"};
-    tile_zoom_cache_t new_cache;
 
     s_tile_zoom_cache_scanning = true;
-    reset_tile_zoom_cache(&new_cache, 0);   /* updated after scan completes */
-    if (!copy_string_checked(new_cache.root, sizeof(new_cache.root), map_root)) {
+    new_cache = calloc(1, sizeof(*new_cache));
+    if (!new_cache) {
+        ESP_LOGW(TAG, "tile cache alloc failed");
+        reset_tile_zoom_cache(&s_tile_zoom_cache, now_us);
+        s_tile_zoom_cache.valid = true;
+        s_tile_zoom_cache_scanning = false;
+        app_spi_bus_unlock();
+        return;
+    }
+
+    reset_tile_zoom_cache(new_cache, 0);   /* updated after scan completes */
+    if (!copy_string_checked(new_cache->root, sizeof(new_cache->root), map_root)) {
         ESP_LOGW(TAG, "map root path too long: %s", map_root);
         reset_tile_zoom_cache(&s_tile_zoom_cache, now_us);
         s_tile_zoom_cache.valid = true;
         s_tile_zoom_cache_scanning = false;
+        free(new_cache);
+        app_spi_bus_unlock();
         return;
     }
 
@@ -716,11 +736,11 @@ static void refresh_tile_zoom_cache(void)
             && scan_tile_bounds_in_zoom(zoom_path, any_exts, sizeof(any_exts) / sizeof(any_exts[0]),
                                         &any_min_tile_x, &any_max_tile_x,
                                         &any_min_tile_y, &any_max_tile_y)) {
-            if (new_cache.any_zoom_count < (sizeof(new_cache.any_zooms) / sizeof(new_cache.any_zooms[0]))) {
-                new_cache.any_zooms[new_cache.any_zoom_count++] = z;
+            if (new_cache->any_zoom_count < (sizeof(new_cache->any_zooms) / sizeof(new_cache->any_zooms[0]))) {
+                new_cache->any_zooms[new_cache->any_zoom_count++] = z;
             }
-            append_zoom_level(new_cache.any_levels,
-                              &new_cache.any_level_count,
+            append_zoom_level(new_cache->any_levels,
+                              &new_cache->any_level_count,
                               z,
                               any_tile_x,
                               any_tile_y,
@@ -728,14 +748,14 @@ static void refresh_tile_zoom_cache(void)
                               any_max_tile_x,
                               any_min_tile_y,
                               any_max_tile_y);
-            if (new_cache.any_zoom < 0) {
-                new_cache.any_zoom = z;
-                new_cache.any_tile_x = any_tile_x;
-                new_cache.any_tile_y = any_tile_y;
-                new_cache.any_min_tile_x = any_min_tile_x;
-                new_cache.any_max_tile_x = any_max_tile_x;
-                new_cache.any_min_tile_y = any_min_tile_y;
-                new_cache.any_max_tile_y = any_max_tile_y;
+            if (new_cache->any_zoom < 0) {
+                new_cache->any_zoom = z;
+                new_cache->any_tile_x = any_tile_x;
+                new_cache->any_tile_y = any_tile_y;
+                new_cache->any_min_tile_x = any_min_tile_x;
+                new_cache->any_max_tile_x = any_max_tile_x;
+                new_cache->any_min_tile_y = any_min_tile_y;
+                new_cache->any_max_tile_y = any_max_tile_y;
             }
             ESP_LOGI(TAG, "  zoom %d: any tiles x=%d..%d y=%d..%d", z,
                      any_min_tile_x, any_max_tile_x, any_min_tile_y, any_max_tile_y);
@@ -745,11 +765,11 @@ static void refresh_tile_zoom_cache(void)
             && scan_tile_bounds_in_zoom(zoom_path, png_exts, sizeof(png_exts) / sizeof(png_exts[0]),
                                         &png_min_tile_x, &png_max_tile_x,
                                         &png_min_tile_y, &png_max_tile_y)) {
-            if (new_cache.png_zoom_count < (sizeof(new_cache.png_zooms) / sizeof(new_cache.png_zooms[0]))) {
-                new_cache.png_zooms[new_cache.png_zoom_count++] = z;
+            if (new_cache->png_zoom_count < (sizeof(new_cache->png_zooms) / sizeof(new_cache->png_zooms[0]))) {
+                new_cache->png_zooms[new_cache->png_zoom_count++] = z;
             }
-            append_zoom_level(new_cache.png_levels,
-                              &new_cache.png_level_count,
+            append_zoom_level(new_cache->png_levels,
+                              &new_cache->png_level_count,
                               z,
                               png_tile_x,
                               png_tile_y,
@@ -757,14 +777,14 @@ static void refresh_tile_zoom_cache(void)
                               png_max_tile_x,
                               png_min_tile_y,
                               png_max_tile_y);
-            if (new_cache.png_zoom < 0) {
-                new_cache.png_zoom = z;
-                new_cache.png_tile_x = png_tile_x;
-                new_cache.png_tile_y = png_tile_y;
-                new_cache.png_min_tile_x = png_min_tile_x;
-                new_cache.png_max_tile_x = png_max_tile_x;
-                new_cache.png_min_tile_y = png_min_tile_y;
-                new_cache.png_max_tile_y = png_max_tile_y;
+            if (new_cache->png_zoom < 0) {
+                new_cache->png_zoom = z;
+                new_cache->png_tile_x = png_tile_x;
+                new_cache->png_tile_y = png_tile_y;
+                new_cache->png_min_tile_x = png_min_tile_x;
+                new_cache->png_max_tile_x = png_max_tile_x;
+                new_cache->png_min_tile_y = png_min_tile_y;
+                new_cache->png_max_tile_y = png_max_tile_y;
             }
         }
 
@@ -772,12 +792,14 @@ static void refresh_tile_zoom_cache(void)
     }
 
     ESP_LOGI(TAG, "tile cache: any_zooms=%d png_zooms=%d root=%s",
-             (int)new_cache.any_zoom_count, (int)new_cache.png_zoom_count, map_root);
+             (int)new_cache->any_zoom_count, (int)new_cache->png_zoom_count, map_root);
 
-    new_cache.valid = true;
-    new_cache.scanned_at_us = esp_timer_get_time();
-    s_tile_zoom_cache = new_cache;
+    new_cache->valid = true;
+    new_cache->scanned_at_us = esp_timer_get_time();
+    s_tile_zoom_cache = *new_cache;
     s_tile_zoom_cache_scanning = false;
+    free(new_cache);
+    app_spi_bus_unlock();
 }
 
 void map_tile_invalidate_cache(void)
@@ -797,7 +819,7 @@ void map_tile_warm_cache(void)
     refresh_tile_zoom_cache();
 }
 
-#define TILE_WARM_STACK  12288
+#define TILE_WARM_STACK  16384
 
 static void tile_warm_task(void *arg)
 {
@@ -1159,9 +1181,133 @@ typedef struct {
     /* LCD blit target */
     int dst_x0, dst_y0;
     uint16_t *lcd_row;      /* DMA-capable output buffer (out_w pixels) */
+    int visible_rows_drawn;
 
     bool ok;
 } png_ctx_t;
+
+static void png_feed_bytes(png_ctx_t *ctx, const uint8_t *data, size_t len);
+
+static bool png_finish_idat_stream(png_ctx_t *ctx,
+                                   tinfl_decompressor *decomp,
+                                   uint8_t *dict,
+                                   size_t *dict_ofs)
+{
+    while (ctx->ok) {
+        size_t in_bytes = 0;
+        size_t out_bytes = TINFL_LZ_DICT_SIZE - *dict_ofs;
+        tinfl_status status = tinfl_decompress(
+            decomp,
+            dict,
+            &in_bytes,
+            dict,
+            dict + *dict_ofs,
+            &out_bytes,
+            0);
+
+        if (out_bytes > 0 && ctx->ok) {
+            png_feed_bytes(ctx, dict + *dict_ofs, out_bytes);
+        }
+
+        *dict_ofs = (*dict_ofs + out_bytes) & (TINFL_LZ_DICT_SIZE - 1);
+
+        if (ctx->current_row >= ctx->src_y0 + ctx->out_h) {
+            return true;
+        }
+
+        if (status == TINFL_STATUS_DONE) {
+            return ctx->ok;
+        }
+
+        if (status < 0 || (in_bytes == 0 && out_bytes == 0)) {
+            ESP_LOGD(TAG, "tinfl finalize error %d", status);
+            ctx->ok = false;
+            return false;
+        }
+    }
+
+    return false;
+}
+
+static void free_png_ctx(png_ctx_t *ctx)
+{
+    if (!ctx) return;
+
+    free(ctx->row_cur);
+    free(ctx->row_prev);
+    free(ctx->lcd_row);
+    free(ctx);
+}
+
+static bool png_stream_idat_chunk(FILE *f,
+                                  uint32_t chunk_len,
+                                  png_ctx_t *ctx,
+                                  tinfl_decompressor *decomp,
+                                  uint8_t *dict,
+                                  size_t *dict_ofs,
+                                  uint8_t *io_buf,
+                                  size_t io_buf_sz,
+                                  size_t *zlib_skip,
+                                  bool *stream_done)
+{
+    if (stream_done) *stream_done = false;
+
+    while (chunk_len > 0) {
+        size_t read_len = chunk_len < io_buf_sz ? (size_t)chunk_len : io_buf_sz;
+        const uint8_t *next_in = io_buf;
+        size_t next_in_len = read_len;
+
+        if (fread(io_buf, 1, read_len, f) != read_len) return false;
+        chunk_len -= (uint32_t)read_len;
+
+        if (*zlib_skip > 0) {
+            size_t skip = next_in_len < *zlib_skip ? next_in_len : *zlib_skip;
+            next_in += skip;
+            next_in_len -= skip;
+            *zlib_skip -= skip;
+        }
+
+        while (next_in_len > 0) {
+            size_t in_bytes = next_in_len;
+            size_t out_bytes = TINFL_LZ_DICT_SIZE - *dict_ofs;
+            tinfl_status status = tinfl_decompress(
+                decomp,
+                next_in,
+                &in_bytes,
+                dict,
+                dict + *dict_ofs,
+                &out_bytes,
+                TINFL_FLAG_HAS_MORE_INPUT);
+
+            next_in += in_bytes;
+            next_in_len -= in_bytes;
+
+            if (out_bytes > 0 && ctx->ok) {
+                png_feed_bytes(ctx, dict + *dict_ofs, out_bytes);
+            }
+
+            *dict_ofs = (*dict_ofs + out_bytes) & (TINFL_LZ_DICT_SIZE - 1);
+
+            if (ctx->current_row >= ctx->src_y0 + ctx->out_h) {
+                if (stream_done) *stream_done = true;
+                return true;
+            }
+
+            if (status == TINFL_STATUS_DONE) {
+                if (stream_done) *stream_done = true;
+                return ctx->ok;
+            }
+
+            if (status < 0 || (in_bytes == 0 && out_bytes == 0)) {
+                ESP_LOGD(TAG, "tinfl error %d", status);
+                ctx->ok = false;
+                return false;
+            }
+        }
+    }
+
+    return ctx->ok;
+}
 
 /* Called whenever tinfl outputs a chunk of decompressed bytes.
  * Accumulates raw PNG scanlines, unfilters, converts, blits. */
@@ -1219,6 +1365,7 @@ static void png_feed_bytes(png_ctx_t *ctx, const uint8_t *data, size_t len)
                 }
             }
             display_blit_rgb565(ctx->dst_x0, lcd_y, ctx->out_w, 1, ctx->lcd_row);
+            ctx->visible_rows_drawn++;
         }
 
         /* Swap cur/prev for filter reference */
@@ -1248,7 +1395,6 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
     bool is_png = false;
     struct stat st;
     size_t free_heap = esp_get_free_heap_size();
-    size_t max_idat_bytes = MAX_IDAT_BYTES;
     if (!find_tile_path(zoom, tile_x, tile_y, path, sizeof(path), &is_png))
         return false;
     if (!is_png) return false;   /* only PNG supported for now */
@@ -1259,31 +1405,37 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
     }
     if (stat(path, &st) == 0) {
         size_t file_size = (size_t)st.st_size;
-        size_t heap_budget = free_heap / 3U;
-        if (file_size > MAX_TILE_FILE_BYTES || file_size > heap_budget) {
-            ESP_LOGW(TAG, "Skipping tile %s: file=%u heap=%u budget=%u",
-                     path, (unsigned)file_size, (unsigned)free_heap, (unsigned)heap_budget);
+        if (file_size > MAX_TILE_FILE_BYTES) {
+            ESP_LOGW(TAG, "Skipping tile %s: file=%u exceeds cap=%u",
+                     path, (unsigned)file_size, (unsigned)MAX_TILE_FILE_BYTES);
             return false;
         }
-    }
-    if ((free_heap / 4U) < max_idat_bytes) {
-        max_idat_bytes = free_heap / 4U;
-    }
-    if (max_idat_bytes < (16 * 1024)) {
-        ESP_LOGW(TAG, "Skipping tile %s: IDAT budget too small (%u bytes)", path, (unsigned)max_idat_bytes);
-        return false;
     }
 
     ESP_LOGD(TAG, "tile_draw z=%d tx=%d ty=%d heap=%lu",
              zoom, tile_x, tile_y, (unsigned long)esp_get_free_heap_size());
 
+    if (!app_spi_bus_lock(pdMS_TO_TICKS(1000))) {
+        return false;
+    }
+
     FILE *f = fopen(path, "rb");
-    if (!f) return false;
+    if (!f) {
+        app_spi_bus_unlock();
+        return false;
+    }
 
     bool result = false;
-    uint8_t *idat_buf = NULL;
-    size_t   idat_len = 0;
-    size_t   idat_cap = 0;
+    png_ctx_t *ctx = calloc(1, sizeof(*ctx));
+    tinfl_decompressor *decomp = NULL;
+    uint8_t *dict = NULL;
+    uint8_t *io_buf = NULL;
+    size_t total_idat_bytes = 0;
+    size_t dict_ofs = 0;
+    size_t zlib_skip = 2;
+    bool decode_ready = false;
+
+    if (!ctx) goto done;
 
     /* ── 1. Read and validate PNG signature + IHDR ── */
     uint8_t sig[8];
@@ -1291,10 +1443,7 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
     static const uint8_t PNG_SIG[8] = {137,80,78,71,13,10,26,10};
     if (memcmp(sig, PNG_SIG, 8) != 0) goto done;
 
-    png_hdr_t hdr;
-    memset(&hdr, 0, sizeof(hdr));
-
-    /* Read chunks sequentially, collecting IHDR, PLTE, and IDAT data */
+    /* Read chunks sequentially, parsing headers and streaming IDAT payloads. */
 
     for (;;) {
         uint8_t chunk_hdr[8];
@@ -1305,49 +1454,93 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
         if (ctype == 0x49484452) {  /* IHDR */
             uint8_t ihdr[13];
             if (clen < 13 || fread(ihdr, 1, 13, f) != 13) goto done;
-            hdr.width      = read_be32(ihdr);
-            hdr.height     = read_be32(ihdr + 4);
-            hdr.bit_depth  = ihdr[8];
-            hdr.color_type = ihdr[9];
-            hdr.interlace  = ihdr[12];
-            hdr.bpp        = (uint8_t)png_bytes_per_pixel(hdr.color_type);
-            if (hdr.bit_depth != 8 || hdr.interlace != 0 || hdr.bpp == 0
-                || hdr.width == 0 || hdr.width > 256
-                || hdr.height == 0 || hdr.height > 256) {
+            ctx->hdr.width      = read_be32(ihdr);
+            ctx->hdr.height     = read_be32(ihdr + 4);
+            ctx->hdr.bit_depth  = ihdr[8];
+            ctx->hdr.color_type = ihdr[9];
+            ctx->hdr.interlace  = ihdr[12];
+            ctx->hdr.bpp        = (uint8_t)png_bytes_per_pixel(ctx->hdr.color_type);
+            if (ctx->hdr.bit_depth != 8 || ctx->hdr.interlace != 0 || ctx->hdr.bpp == 0
+                || ctx->hdr.width == 0 || ctx->hdr.width > 256
+                || ctx->hdr.height == 0 || ctx->hdr.height > 256) {
                 ESP_LOGD(TAG, "Unsupported PNG: %" PRIu32 "x%" PRIu32 " bd=%d ct=%d il=%d",
-                         hdr.width, hdr.height, hdr.bit_depth, hdr.color_type, hdr.interlace);
+                         ctx->hdr.width, ctx->hdr.height,
+                         ctx->hdr.bit_depth, ctx->hdr.color_type, ctx->hdr.interlace);
                 goto done;
             }
             fseek(f, 4, SEEK_CUR);  /* skip CRC */
         }
         else if (ctype == 0x504C5445) {  /* PLTE */
             if (clen > 768) { fseek(f, clen + 4, SEEK_CUR); continue; }
-            uint8_t plte[768];
-            if (fread(plte, 1, clen, f) != clen) goto done;
-            hdr.palette_count = (int)(clen / 3);
-            for (int i = 0; i < hdr.palette_count && i < 256; i++) {
-                hdr.palette[i][0] = plte[i*3];
-                hdr.palette[i][1] = plte[i*3+1];
-                hdr.palette[i][2] = plte[i*3+2];
-            }
+            if (fread(ctx->hdr.palette, 1, clen, f) != clen) goto done;
+            ctx->hdr.palette_count = (int)(clen / 3);
             fseek(f, 4, SEEK_CUR);  /* skip CRC */
         }
         else if (ctype == 0x49444154) {  /* IDAT */
-            if (idat_len + clen > max_idat_bytes) {
-                ESP_LOGW(TAG, "Tile IDAT too large (%u + %u > %u)",
-                         (unsigned)idat_len, (unsigned)clen, (unsigned)max_idat_bytes);
+            bool stream_done = false;
+
+            total_idat_bytes += clen;
+            if (total_idat_bytes > MAX_IDAT_BYTES) {
+                ESP_LOGW(TAG, "Tile IDAT too large (%u > %u)",
+                         (unsigned)total_idat_bytes, (unsigned)MAX_IDAT_BYTES);
                 goto done;
             }
-            if (idat_len + clen > idat_cap) {
-                size_t new_cap = idat_len + clen + 1024;
-                if (new_cap > max_idat_bytes) new_cap = max_idat_bytes;
-                uint8_t *new_buf = realloc(idat_buf, new_cap);
-                if (!new_buf) goto done;
-                idat_buf = new_buf;
-                idat_cap = new_cap;
+
+            if (!decode_ready) {
+                int row_bytes;
+                int row_alloc;
+
+                if (ctx->hdr.width == 0 || ctx->hdr.height == 0 || ctx->hdr.bpp == 0) goto done;
+
+                row_bytes = (int)(ctx->hdr.bpp * ctx->hdr.width);
+                row_alloc = 1 + row_bytes;
+
+                if (src_x < 0) { dst_x -= src_x; w += src_x; src_x = 0; }
+                if (src_y < 0) { dst_y -= src_y; h += src_y; src_y = 0; }
+                if (src_x + w > (int)ctx->hdr.width)  w = (int)ctx->hdr.width  - src_x;
+                if (src_y + h > (int)ctx->hdr.height) h = (int)ctx->hdr.height - src_y;
+                if (w <= 0 || h <= 0) { result = true; goto done; }
+
+                ctx->row_bytes = row_bytes;
+                ctx->src_x0 = src_x;
+                ctx->src_y0 = src_y;
+                ctx->out_w = w;
+                ctx->out_h = h;
+                ctx->dst_x0 = dst_x;
+                ctx->dst_y0 = dst_y;
+                ctx->ok = true;
+
+                ctx->row_cur = malloc(row_alloc);
+                ctx->row_prev = calloc(1, row_alloc);
+                ctx->lcd_row = heap_caps_malloc((size_t)w * sizeof(uint16_t), MALLOC_CAP_DMA);
+                decomp = malloc(sizeof(*decomp));
+                dict = malloc(TINFL_LZ_DICT_SIZE);
+                io_buf = malloc(PNG_STREAM_CHUNK_BYTES);
+
+                if (!ctx->row_cur || !ctx->row_prev || !ctx->lcd_row || !decomp || !dict || !io_buf) goto done;
+
+                tinfl_init(decomp);
+                decode_ready = true;
             }
-            if (fread(idat_buf + idat_len, 1, clen, f) != clen) goto done;
-            idat_len += clen;
+
+            if (!png_stream_idat_chunk(f,
+                                       clen,
+                                       ctx,
+                                       decomp,
+                                       dict,
+                                       &dict_ofs,
+                                       io_buf,
+                                       PNG_STREAM_CHUNK_BYTES,
+                                       &zlib_skip,
+                                       &stream_done)) {
+                goto done;
+            }
+
+            if (stream_done) {
+                result = ctx->ok;
+                goto done;
+            }
+
             fseek(f, 4, SEEK_CUR);  /* skip CRC */
         }
         else if (ctype == 0x49454E44) {  /* IEND */
@@ -1358,97 +1551,28 @@ bool map_tile_draw(int zoom, int tile_x, int tile_y,
         }
     }
 
-    if (!idat_buf || idat_len < 6 || hdr.width == 0) goto done;
-
-    /* ── 2. Set up decode context ── */
-    int row_bytes = (int)(hdr.bpp * hdr.width);
-    int row_alloc = 1 + row_bytes;  /* filter byte + pixel data */
-
-    /* Clamp crop region to tile bounds */
-    if (src_x < 0) { dst_x -= src_x; w += src_x; src_x = 0; }
-    if (src_y < 0) { dst_y -= src_y; h += src_y; src_y = 0; }
-    if (src_x + w > (int)hdr.width)  w = (int)hdr.width  - src_x;
-    if (src_y + h > (int)hdr.height) h = (int)hdr.height - src_y;
-    if (w <= 0 || h <= 0) { result = true; goto done; }
-
-    png_ctx_t *ctx = calloc(1, sizeof(png_ctx_t));
-    if (!ctx) goto done;
-    ctx->hdr      = hdr;
-    ctx->row_bytes = row_bytes;
-    ctx->src_x0   = src_x;
-    ctx->src_y0   = src_y;
-    ctx->out_w    = w;
-    ctx->out_h    = h;
-    ctx->dst_x0   = dst_x;
-    ctx->dst_y0   = dst_y;
-    ctx->ok       = true;
-
-    ctx->row_cur  = malloc(row_alloc);
-    ctx->row_prev = calloc(1, row_alloc);  /* zeroed = no previous row */
-    ctx->lcd_row  = heap_caps_malloc(w * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!ctx->row_cur || !ctx->row_prev || !ctx->lcd_row) {
-        free(ctx->row_cur); free(ctx->row_prev); free(ctx->lcd_row);
-        free(ctx); goto done;
-    }
-
-    /* ── 3. Decompress IDAT via ROM tinfl ── */
-    tinfl_decompressor *decomp = malloc(sizeof(tinfl_decompressor));
-    uint8_t *dict = malloc(TINFL_LZ_DICT_SIZE);
-    if (!decomp || !dict) {
-        free(decomp); free(dict);
-        free(ctx->row_cur); free(ctx->row_prev); free(ctx->lcd_row);
-        free(ctx); goto done;
-    }
-    tinfl_init(decomp);
-
-    {
-        /* Skip the 2-byte zlib header manually so we feed raw deflate to tinfl.
-         * zlib header: CMF (byte 0) + FLG (byte 1).  Skip them. */
-        const uint8_t *zin = idat_buf + 2;
-        size_t         zin_left = idat_len - 2;
-        size_t         dict_ofs = 0;
-
-        for (;;) {
-            size_t in_bytes  = zin_left;
-            size_t out_bytes = TINFL_LZ_DICT_SIZE - dict_ofs;
-
-            int flags = (zin_left > 0) ? TINFL_FLAG_HAS_MORE_INPUT : 0;
-
-            tinfl_status status = tinfl_decompress(
-                decomp, zin, &in_bytes,
-                dict, dict + dict_ofs, &out_bytes, flags);
-
-            zin      += in_bytes;
-            zin_left -= in_bytes;
-
-            if (out_bytes > 0 && ctx->ok) {
-                png_feed_bytes(ctx, dict + dict_ofs, out_bytes);
-            }
-
-            dict_ofs = (dict_ofs + out_bytes) & (TINFL_LZ_DICT_SIZE - 1);
-
-            if (status == TINFL_STATUS_DONE) break;
-            if (status < 0) {
-                ESP_LOGD(TAG, "tinfl error %d", status);
-                ctx->ok = false;
-                break;
-            }
-            /* Early exit when we've already drawn all needed rows */
-            if (ctx->current_row >= ctx->src_y0 + ctx->out_h) break;
+    if (decode_ready && !result) {
+        if (!png_finish_idat_stream(ctx, decomp, dict, &dict_ofs)) {
+            goto done;
         }
+        result = ctx->ok && (ctx->visible_rows_drawn > 0);
     }
 
-    result = ctx->ok;
-
-    free(decomp);
-    free(dict);
-    free(ctx->row_cur);
-    free(ctx->row_prev);
-    free(ctx->lcd_row);
-    free(ctx);
+    if (decode_ready && !result && ctx) {
+        ESP_LOGW(TAG, "Tile decode incomplete %s: rows=%d visible=%d src_y=%d out_h=%d",
+                 path,
+                 ctx->current_row,
+                 ctx->visible_rows_drawn,
+                 ctx->src_y0,
+                 ctx->out_h);
+    }
 
 done:
-    free(idat_buf);
+    free(decomp);
+    free(dict);
+    free(io_buf);
+    free_png_ctx(ctx);
     fclose(f);
+    app_spi_bus_unlock();
     return result;
 }

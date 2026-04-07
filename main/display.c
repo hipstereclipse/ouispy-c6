@@ -13,6 +13,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_jd9853.h"
 #include "esp_heap_caps.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -21,6 +22,7 @@ static const char *TAG = "display";
 static uint16_t *s_solid_buf = NULL;
 static size_t s_solid_buf_pixels = 0;
 static SemaphoreHandle_t s_display_mutex = NULL;
+static TaskHandle_t s_display_waiter = NULL;
 
 #define DISPLAY_DMA_STRIP_ROWS 16
 
@@ -109,14 +111,58 @@ static void log_shared_map_render(app_mode_t mode,
 
 static bool display_lock(TickType_t timeout_ticks)
 {
-    return !s_display_mutex || xSemaphoreTakeRecursive(s_display_mutex, timeout_ticks) == pdTRUE;
+    if (s_display_mutex && xSemaphoreTakeRecursive(s_display_mutex, timeout_ticks) != pdTRUE) {
+        return false;
+    }
+
+    if (!app_spi_bus_lock(timeout_ticks)) {
+        if (s_display_mutex) {
+            xSemaphoreGiveRecursive(s_display_mutex);
+        }
+        return false;
+    }
+
+    return true;
 }
 
 static void display_unlock(void)
 {
+    app_spi_bus_unlock();
     if (s_display_mutex) {
         xSemaphoreGiveRecursive(s_display_mutex);
     }
+}
+
+static bool display_color_trans_done_cb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
+{
+    (void)io;
+    (void)edata;
+    TaskHandle_t waiter = (TaskHandle_t)user_ctx;
+    if (!waiter) {
+        waiter = s_display_waiter;
+    }
+    if (waiter) {
+        BaseType_t task_woken = pdFALSE;
+        vTaskNotifyGiveFromISR(waiter, &task_woken);
+        return task_woken == pdTRUE;
+    }
+    return false;
+}
+
+static void display_prepare_for_flush(void)
+{
+    if (!s_io) return;
+    (void)ulTaskNotifyTake(pdTRUE, 0);
+    s_display_waiter = xTaskGetCurrentTaskHandle();
+}
+
+static void display_wait_for_flush(void)
+{
+    if (!s_io) return;
+    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200)) == 0) {
+        ESP_LOGW(TAG, "display flush wait timeout");
+    }
+    s_display_waiter = NULL;
 }
 
 static uint16_t *display_get_solid_buf(size_t pixels)
@@ -160,7 +206,9 @@ static void display_fill_solid_rect(int x, int y, int w, int h, uint16_t color)
         int draw_rows = (row + chunk_rows > h) ? (h - row) : chunk_rows;
         size_t px_count = (size_t)w * (size_t)draw_rows;
         for (size_t i = 0; i < px_count; i++) buf[i] = color;
+        display_prepare_for_flush();
         esp_lcd_panel_draw_bitmap(s_panel, x, y + row, x + w, y + row + draw_rows, buf);
+        display_wait_for_flush();
     }
 }
 
@@ -213,6 +261,8 @@ void display_init(void)
         .lcd_cmd_bits      = 8,
         .lcd_param_bits    = 8,
         .trans_queue_depth = 10,
+        .on_color_trans_done = display_color_trans_done_cb,
+        .user_ctx = NULL,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &s_io));
 
@@ -273,7 +323,9 @@ void display_blit_rgb565(int x, int y, int w, int h, const uint16_t *data)
 {
     if (!data || w <= 0 || h <= 0) return;
     if (!display_lock(pdMS_TO_TICKS(200))) return;
+    display_prepare_for_flush();
     esp_lcd_panel_draw_bitmap(s_panel, x, y, x + w, y + h, data);
+    display_wait_for_flush();
     display_unlock();
 }
 
@@ -302,7 +354,9 @@ void display_draw_text(int x, int y, const char *text, uint16_t fg, uint16_t bg)
             }
         }
         if (x + cw <= LCD_H_RES && y + ch <= LCD_V_RES) {
+            display_prepare_for_flush();
             esp_lcd_panel_draw_bitmap(s_panel, x, y, x + cw, y + ch, cbuf);
+            display_wait_for_flush();
         }
         x += cw;
     }
@@ -411,7 +465,9 @@ void display_draw_text_scaled(int x, int y, const char *text, uint16_t fg, uint1
             }
         }
         if (x + cw <= LCD_H_RES && y + ch <= LCD_V_RES) {
+            display_prepare_for_flush();
             esp_lcd_panel_draw_bitmap(s_panel, x, y, x + cw, y + ch, cbuf);
+            display_wait_for_flush();
         }
         free(cbuf);
         x += cw;

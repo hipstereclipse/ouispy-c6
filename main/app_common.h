@@ -84,6 +84,7 @@ extern "C" {
 
 #define TASK_STACK_BUTTON   4096
 #define TASK_STACK_UI       8192
+#define TASK_STACK_MAP_UI   16384
 #define TASK_STACK_WS       6144
 #define TASK_STACK_SNIFFER  4096
 
@@ -133,13 +134,22 @@ typedef enum {
 typedef enum {
     BORDER_STYLE_PULSE = 0,      /* Smooth sine-wave glow on all edges        */
     BORDER_STYLE_FLAMES,         /* Bottom-up flicker with random hot spots   */
-    BORDER_STYLE_RADIATION,      /* Corner bursts that rotate clockwise       */
+    BORDER_STYLE_RADIATION,      /* Scattered static across the display       */
     BORDER_STYLE_GLITCH,         /* Random horizontal scan-line tears         */
     BORDER_STYLE_VIPER,          /* Chasing segments that orbit the perimeter */
     BORDER_STYLE_SONAR,          /* Expanding rings from the corners inward   */
     BORDER_STYLE_NONE,           /* Disabled — no on-screen border at all     */
+    BORDER_STYLE_DEFAULT,        /* Uses the mode's default style and color   */
     BORDER_STYLE_COUNT,
 } border_style_t;
+
+typedef enum {
+    FX_BEHAVIOR_STANDARD = 0,
+    FX_BEHAVIOR_BREATHE,
+    FX_BEHAVIOR_TRACKER,
+    FX_BEHAVIOR_STING,
+    FX_BEHAVIOR_COUNT,
+} fx_behavior_t;
 
 typedef enum {
     SHORTCUT_NONE = 0,
@@ -274,6 +284,7 @@ typedef struct {
     app_mode_t      current_mode;
     app_mode_t      requested_mode;
     bool            mode_change_pending;
+    SemaphoreHandle_t spi_bus_mutex;
 
     /* Flock You device list */
     ble_device_t    devices[MAX_BLE_DEVICES];
@@ -332,17 +343,25 @@ typedef struct {
     bool            single_ap_name_enabled; /* true = UniSpy-C6 for every mode */
     uint16_t        display_sleep_timeout_sec; /* 0 disables sleep */
     uint8_t         menu_led_color;
-    uint8_t         border_style;         /* active border_style_t for the current screen */
+    uint8_t         border_style;         /* persisted main-menu/settings border_style_t */
+    uint8_t         active_border_style;  /* runtime border_style_t currently rendered */
+    uint8_t         menu_fx_intensity;    /* 0-255 brightness scaling for menu/settings FX */
     uint8_t         detect_behavior;      /* legacy persisted key, no longer user-facing */
     uint8_t         detect_flock_low;     /* menu_led_color_t: Flock board LED color */
     uint8_t         detect_flock_high;    /* border_style_t:   Flock display effect */
     uint8_t         detect_flock_custom;  /* menu_led_color_t: Flock display accent color */
+    uint8_t         detect_flock_behavior;   /* fx_behavior_t: Flock display response curve */
+    uint8_t         detect_flock_intensity;  /* 0-255 Flock effect brightness */
     uint8_t         detect_fox_low;       /* menu_led_color_t: Fox board LED color */
     uint8_t         detect_fox_high;      /* border_style_t:   Fox display effect */
     uint8_t         detect_fox_custom;    /* menu_led_color_t: Fox display accent color */
+    uint8_t         detect_fox_behavior;     /* fx_behavior_t: Fox display response curve */
+    uint8_t         detect_fox_intensity;    /* 0-255 Fox effect brightness */
     uint8_t         detect_sky_low;       /* menu_led_color_t: Sky board LED color */
     uint8_t         detect_sky_high;      /* border_style_t:   Sky display effect */
     uint8_t         detect_sky_custom;    /* menu_led_color_t: Sky display accent color */
+    uint8_t         detect_sky_behavior;     /* fx_behavior_t: Sky display response curve */
+    uint8_t         detect_sky_intensity;    /* 0-255 Sky effect brightness */
     uint8_t         sound_profile_flock;
     uint8_t         sound_profile_fox;
     uint8_t         sound_profile_sky;
@@ -396,9 +415,19 @@ void     app_mode_ap_credentials(app_mode_t mode, const char **ssid, const char 
 float    app_detection_behavior_strength(app_mode_t mode, float detected_strength);
 void     app_palette_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b);
 uint16_t app_palette_rgb565(uint8_t idx);
+uint8_t  app_mode_default_led_color(app_mode_t mode);
+uint8_t  app_mode_default_display_style(app_mode_t mode);
+uint8_t  app_mode_default_display_color(app_mode_t mode);
 uint8_t  app_mode_led_color(app_mode_t mode);
 uint8_t  app_mode_display_style(app_mode_t mode);
+uint8_t  app_mode_display_behavior(app_mode_t mode);
+uint8_t  app_mode_display_intensity(app_mode_t mode);
 uint8_t  app_mode_display_color(app_mode_t mode);
+uint8_t  app_fx_cycle_intensity(uint8_t current);
+uint8_t  app_fx_sanitize_intensity(uint8_t value, uint8_t fallback);
+uint8_t  app_fx_percent(uint8_t value);
+bool     app_spi_bus_lock(TickType_t wait_ticks);
+void     app_spi_bus_unlock(void);
 void     app_apply_mode_visual_prefs(app_mode_t mode);
 uint32_t uptime_ms(void);
 void     mac_to_str(const uint8_t mac[6], char *buf, size_t buf_len);

@@ -29,6 +29,7 @@ typedef struct {
 } storage_log_entry_t;
 
 void storage_ext_init(void);
+void storage_ext_poll(void);
 bool storage_ext_is_available(void);
 storage_status_t storage_ext_get_status(void);
 storage_status_t storage_ext_get_status_cached(void);

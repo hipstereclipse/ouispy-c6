@@ -3,7 +3,7 @@
  *
  * HAS_RGB_LED=1 : drives WS2812 addressable LED via RMT.
  * HAS_RGB_LED=0 : draws an animated detection border around the LCD perimeter.
- *                 Style is configurable via g_app.border_style.
+ *                 Runtime style is driven by g_app.active_border_style.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -22,6 +22,11 @@ static bool s_breathe_force = false;
 static uint8_t s_effect_intensity = 255;
 static uint8_t s_breathe_r, s_breathe_g, s_breathe_b;
 static int s_breathe_period_ms;
+
+static inline uint8_t scale_by_effect_intensity(uint8_t ch)
+{
+    return (uint8_t)((ch * (uint16_t)s_effect_intensity) / 255U);
+}
 
 /* ================================================================
  *  WS2812 addressable RGB LED backend
@@ -63,12 +68,16 @@ void led_ctrl_init(void)
 void led_ctrl_set(uint8_t r, uint8_t g, uint8_t b)
 {
     if (!s_led || !g_app.led_enabled) return;
-    led_ctrl_write(r, g, b);
+    led_ctrl_write(scale_by_effect_intensity(r),
+                   scale_by_effect_intensity(g),
+                   scale_by_effect_intensity(b));
 }
 
 void led_ctrl_set_forced(uint8_t r, uint8_t g, uint8_t b)
 {
-    led_ctrl_write(r, g, b);
+    led_ctrl_write(scale_by_effect_intensity(r),
+                   scale_by_effect_intensity(g),
+                   scale_by_effect_intensity(b));
 }
 
 void led_ctrl_off(void)
@@ -127,11 +136,6 @@ static inline uint8_t ch_scale(uint8_t ch, float f)
     return (uint8_t)(v > 255 ? 255 : (v < 0 ? 0 : v));
 }
 
-static inline uint8_t scale_by_intensity(uint8_t ch)
-{
-    return (uint8_t)((ch * (uint16_t)s_effect_intensity) / 255U);
-}
-
 /* ── Helper: get current ms timestamp ── */
 static inline uint32_t now_ms(void)
 {
@@ -164,20 +168,11 @@ static float edge_peak(float pos, float center, float width)
     return d * d * (3.0f - 2.0f * d);
 }
 
-static float moving_trail(float pos, float head, float trail_len)
-{
-    float d = head - pos;
-    if (d < 0.0f || d > trail_len) return 0.0f;
-    d = 1.0f - (d / trail_len);
-    return d * d;
-}
-
 static uint16_t glow565(uint8_t r, uint8_t g, uint8_t b, float brightness, float white_mix)
 {
     uint8_t rr;
     uint8_t gg;
     uint8_t bb;
-
     brightness = clamp01f(brightness);
     white_mix = clamp01f(white_mix);
 
@@ -216,16 +211,6 @@ static float flame_profile(float pos, float span, float t, float phase)
     float surge = edge_peak(pos, surge_pos, 12.0f + span * 0.08f);
 
     return clamp01f(0.14f + wave0 * 0.38f + wave1 * 0.26f + wave2 * 0.16f + surge * 0.36f);
-}
-
-static float radiation_edge_energy(float dist, float span, float t, float phase)
-{
-    float cycle = span + 28.0f;
-    float head0 = fmodf(t * (34.0f + phase * 2.4f) + phase * 17.0f, cycle);
-    float head1 = fmodf(head0 + span * 0.42f, cycle);
-    float beam0 = moving_trail(dist, head0, 18.0f + span * 0.10f);
-    float beam1 = moving_trail(dist, head1, 12.0f + span * 0.07f) * 0.58f;
-    return clamp01f(beam0 + beam1);
 }
 
 static int effect_depth_for_color(uint8_t r, uint8_t g, uint8_t b)
@@ -290,7 +275,7 @@ void led_ctrl_border_clear(void)
  * ────────────────────────────────────────────────────────── */
 static void draw_pulse(uint8_t r, uint8_t g, uint8_t b)
 {
-    const int T = LED_BORDER_THICK;
+    const int D = effect_depth_limited(r, g, b, LED_BORDER_THICK + 8);
     const int W = LCD_H_RES;
     const int H = LCD_V_RES;
 
@@ -299,16 +284,14 @@ static void draw_pulse(uint8_t r, uint8_t g, uint8_t b)
     float phase = (float)(t % 1200) / 1200.0f;
     float wave  = (1.0f - cosf(phase * 2.0f * 3.14159265f)) * 0.5f;
 
-    /* Outer pixel ring at full brightness, inner rings dim toward content */
-    for (int layer = 0; layer < T; layer++) {
-        float fade = 1.0f - (float)layer / (float)T;
-        fade *= (0.6f + 0.4f * wave);   /* subtle thickness pulse */
-        uint16_t c = rgb565(ch_scale(r, fade), ch_scale(g, fade), ch_scale(b, fade));
+    for (int layer = 0; layer < D; layer++) {
+        float edge = 1.0f - (float)layer / (float)D;
+        float brightness = 0.08f + edge * edge * (0.34f + 0.58f * wave);
+        float white = 0.02f + edge * 0.06f * wave;
+        uint16_t c = glow565(r, g, b, brightness, white);
 
-        /* Horizontal bands (top & bottom) */
         display_draw_rect(layer, layer, W - 2 * layer, 1, c);
         display_draw_rect(layer, H - 1 - layer, W - 2 * layer, 1, c);
-        /* Vertical bands (left & right) */
         display_draw_rect(layer, layer + 1, 1, H - 2 * (layer + 1), c);
         display_draw_rect(W - 1 - layer, layer + 1, 1, H - 2 * (layer + 1), c);
     }
@@ -376,97 +359,51 @@ static void draw_flames(uint8_t r, uint8_t g, uint8_t b)
 }
 
 /* ──────────────────────────────────────────────────────────
- *  STYLE: RADIATION — EMI-style static and scan corruption
+ *  STYLE: RADIATION — display-wide scattered static with no perimeter ring
  * ────────────────────────────────────────────────────────── */
 static void draw_radiation(uint8_t r, uint8_t g, uint8_t b)
 {
     const int D = effect_depth_limited(r, g, b, LED_BORDER_THICK + 4);
     const int W = LCD_H_RES;
     const int H = LCD_V_RES;
-    float t = (float)now_ms() * 0.001f;
     float intensity = (float)max3_u8(r, g, b) / 255.0f;
-    float border_pulse = 0.35f + 0.65f * (0.5f + 0.5f * sinf(t * 7.5f));
-    int speck_count = 26 + (int)(intensity * 150.0f);
-    int streak_count = 3 + (int)(intensity * 14.0f);
-    int burst_count = 2 + (int)(intensity * 7.0f);
+    int speck_count = 18 + (int)(intensity * 90.0f);
+    int cluster_count = 3 + (int)(intensity * 8.0f);
 
-    for (int layer = 0; layer < D; layer++) {
-        float fade = 1.0f - ((float)layer / (float)D);
-        float brightness = 0.06f + border_pulse * fade * (0.22f + intensity * 0.12f);
-        float white = 0.04f + border_pulse * fade * 0.16f;
-        uint16_t edge = glow565(r, g, b, brightness, white);
-
-        display_draw_rect(layer, layer, W - 2 * layer, 1, edge);
-        display_draw_rect(layer, H - 1 - layer, W - 2 * layer, 1, edge);
-        display_draw_rect(layer, layer + 1, 1, H - 2 * (layer + 1), edge);
-        display_draw_rect(W - 1 - layer, layer + 1, 1, H - 2 * (layer + 1), edge);
-    }
+    clear_effect_band(D);
 
     for (int i = 0; i < speck_count; i++) {
-        uint32_t rv = xorshift32();
-        int x;
-        int y;
-        int w;
-        int h;
-        float brightness;
-        float white;
+        int x = (int)(xorshift32() % (uint32_t)W);
+        int y = (int)(xorshift32() % (uint32_t)H);
+        int w = 1 + (int)((xorshift32() % 100U) < (uint32_t)(intensity * 18.0f));
+        int h = 1 + (int)((xorshift32() % 100U) < (uint32_t)(intensity * 12.0f));
+        float brightness = 0.10f + intensity * 0.16f + ((float)(xorshift32() % 100U) / 100.0f) * 0.34f;
+        float white = 0.10f + intensity * 0.14f + ((float)(xorshift32() % 100U) / 100.0f) * 0.20f;
 
-        if ((rv & 3U) == 0U) {
-            int corner = (int)(rv & 3U);
-            int radius = 10 + (int)(xorshift32() % 28U);
-            int ox = (int)(xorshift32() % (uint32_t)radius);
-            int oy = (int)(xorshift32() % (uint32_t)radius);
-            x = (corner & 1) ? (W - 1 - ox) : ox;
-            y = (corner & 2) ? (H - 1 - oy) : oy;
-        } else {
-            x = (int)(xorshift32() % (uint32_t)W);
-            y = (int)(xorshift32() % (uint32_t)H);
-        }
-
-        w = 1 + (int)((xorshift32() % 100U) < (uint32_t)(intensity * 65.0f));
-        h = 1 + (int)((xorshift32() % 100U) < (uint32_t)(intensity * 38.0f));
-        brightness = 0.18f + intensity * 0.22f + ((float)(xorshift32() % 100U) / 100.0f) * 0.52f;
-        white = 0.16f + intensity * 0.36f + ((float)(xorshift32() % 100U) / 100.0f) * 0.24f;
+        if (x + w > W) w = W - x;
+        if (y + h > H) h = H - y;
         display_draw_rect(x, y, w, h, glow565(r, g, b, brightness, white));
     }
 
-    for (int i = 0; i < streak_count; i++) {
-        bool horizontal = (xorshift32() & 1U) == 0U;
+    for (int i = 0; i < cluster_count; i++) {
         int x = (int)(xorshift32() % (uint32_t)W);
         int y = (int)(xorshift32() % (uint32_t)H);
-        int len = 8 + (int)(xorshift32() % (uint32_t)(18 + (int)(intensity * 64.0f)));
-        int thick = 1 + (int)((xorshift32() % 100U) < (uint32_t)(intensity * 90.0f));
-        float brightness = 0.24f + ((float)(xorshift32() % 100U) / 100.0f) * (0.48f + intensity * 0.20f);
-        float white = 0.18f + intensity * 0.28f;
-        uint16_t c = glow565(r, g, b, brightness, white);
-
-        if (horizontal) {
-            if (x + len > W) len = W - x;
-            display_draw_rect(x, y, len, thick, c);
-        } else {
-            if (y + len > H) len = H - y;
-            display_draw_rect(x, y, thick, len, c);
-        }
-    }
-
-    for (int i = 0; i < burst_count; i++) {
-        int cx = (xorshift32() & 1U) ? (W - 1 - (int)(xorshift32() % 28U)) : (int)(xorshift32() % 28U);
-        int cy = (xorshift32() & 1U) ? (H - 1 - (int)(xorshift32() % 34U)) : (int)(xorshift32() % 34U);
-        int radius = 4 + (int)(xorshift32() % (uint32_t)(4 + (int)(intensity * 10.0f)));
+        int radius = 1 + (int)(xorshift32() % 3U);
 
         for (int sy = -radius; sy <= radius; sy++) {
             for (int sx = -radius; sx <= radius; sx++) {
                 float dist = sqrtf((float)(sx * sx + sy * sy));
                 float energy = 1.0f - (dist / (float)(radius + 1));
-                int px;
-                int py;
+                int px = x + sx;
+                int py = y + sy;
+
                 if (energy <= 0.0f || (xorshift32() & 3U) == 0U) continue;
-                px = cx + sx;
-                py = cy + sy;
                 if (px < 0 || px >= W || py < 0 || py >= H) continue;
-                display_draw_rect(px, py, 1, 1, glow565(r, g, b,
-                    0.20f + energy * (0.54f + intensity * 0.14f),
-                    0.10f + energy * 0.34f));
+
+                display_draw_rect(px, py, 1, 1,
+                                  glow565(r, g, b,
+                                          0.10f + energy * (0.22f + intensity * 0.12f),
+                                          0.06f + energy * 0.16f));
             }
         }
     }
@@ -575,10 +512,11 @@ static void draw_glitch(uint8_t r, uint8_t g, uint8_t b)
  * ────────────────────────────────────────────────────────── */
 static void draw_viper(uint8_t r, uint8_t g, uint8_t b)
 {
-    const int T = LED_BORDER_THICK;
+    const int D = effect_depth_limited(r, g, b, LED_BORDER_THICK + 8);
     const int W = LCD_H_RES;
     const int H = LCD_V_RES;
     int perim = 2 * (W + H);
+    float intensity = (float)max3_u8(r, g, b) / 255.0f;
 
     uint32_t t = now_ms();
     /* Two segments chasing each other, 180° apart */
@@ -597,11 +535,13 @@ static void draw_viper(uint8_t r, uint8_t g, uint8_t b)
     for (int x = 0; x < W; x++) {
         int p = x;
         bool lit = IN_SEG(p, head0) || IN_SEG(p, head1);
-        for (int layer = 0; layer < T; layer++) {
-            float lf = lit ? (1.0f - (float)layer / (float)T) : 0.0f;
-            /* Dim glow even outside segment */
-            if (!lit) lf = 0.06f * (1.0f - (float)layer / (float)T);
-            uint16_t c = rgb565(ch_scale(r, lf), ch_scale(g, lf), ch_scale(b, lf));
+        for (int layer = 0; layer < D; layer++) {
+            float edge = 1.0f - (float)layer / (float)D;
+            float brightness = lit
+                ? (0.16f + edge * (0.74f + intensity * 0.12f))
+                : (0.02f + edge * (0.08f + intensity * 0.03f));
+            float white = lit ? (0.04f + edge * 0.08f) : 0.0f;
+            uint16_t c = glow565(r, g, b, brightness, white);
             display_draw_rect(x, layer, 1, 1, c);
         }
     }
@@ -609,9 +549,13 @@ static void draw_viper(uint8_t r, uint8_t g, uint8_t b)
     for (int y = 0; y < H; y++) {
         int p = W + y;
         bool lit = IN_SEG(p, head0) || IN_SEG(p, head1);
-        for (int layer = 0; layer < T; layer++) {
-            float lf = lit ? (1.0f - (float)layer / (float)T) : 0.06f * (1.0f - (float)layer / (float)T);
-            uint16_t c = rgb565(ch_scale(r, lf), ch_scale(g, lf), ch_scale(b, lf));
+        for (int layer = 0; layer < D; layer++) {
+            float edge = 1.0f - (float)layer / (float)D;
+            float brightness = lit
+                ? (0.16f + edge * (0.74f + intensity * 0.12f))
+                : (0.02f + edge * (0.08f + intensity * 0.03f));
+            float white = lit ? (0.04f + edge * 0.08f) : 0.0f;
+            uint16_t c = glow565(r, g, b, brightness, white);
             display_draw_rect(W - 1 - layer, y, 1, 1, c);
         }
     }
@@ -619,9 +563,13 @@ static void draw_viper(uint8_t r, uint8_t g, uint8_t b)
     for (int x = W - 1; x >= 0; x--) {
         int p = W + H + (W - 1 - x);
         bool lit = IN_SEG(p, head0) || IN_SEG(p, head1);
-        for (int layer = 0; layer < T; layer++) {
-            float lf = lit ? (1.0f - (float)layer / (float)T) : 0.06f * (1.0f - (float)layer / (float)T);
-            uint16_t c = rgb565(ch_scale(r, lf), ch_scale(g, lf), ch_scale(b, lf));
+        for (int layer = 0; layer < D; layer++) {
+            float edge = 1.0f - (float)layer / (float)D;
+            float brightness = lit
+                ? (0.16f + edge * (0.74f + intensity * 0.12f))
+                : (0.02f + edge * (0.08f + intensity * 0.03f));
+            float white = lit ? (0.04f + edge * 0.08f) : 0.0f;
+            uint16_t c = glow565(r, g, b, brightness, white);
             display_draw_rect(x, H - 1 - layer, 1, 1, c);
         }
     }
@@ -629,9 +577,13 @@ static void draw_viper(uint8_t r, uint8_t g, uint8_t b)
     for (int y = H - 1; y >= 0; y--) {
         int p = 2 * W + H + (H - 1 - y);
         bool lit = IN_SEG(p, head0) || IN_SEG(p, head1);
-        for (int layer = 0; layer < T; layer++) {
-            float lf = lit ? (1.0f - (float)layer / (float)T) : 0.06f * (1.0f - (float)layer / (float)T);
-            uint16_t c = rgb565(ch_scale(r, lf), ch_scale(g, lf), ch_scale(b, lf));
+        for (int layer = 0; layer < D; layer++) {
+            float edge = 1.0f - (float)layer / (float)D;
+            float brightness = lit
+                ? (0.16f + edge * (0.74f + intensity * 0.12f))
+                : (0.02f + edge * (0.08f + intensity * 0.03f));
+            float white = lit ? (0.04f + edge * 0.08f) : 0.0f;
+            uint16_t c = glow565(r, g, b, brightness, white);
             display_draw_rect(layer, y, 1, 1, c);
         }
     }
@@ -643,29 +595,30 @@ static void draw_viper(uint8_t r, uint8_t g, uint8_t b)
  * ────────────────────────────────────────────────────────── */
 static void draw_sonar(uint8_t r, uint8_t g, uint8_t b)
 {
-    const int T = LED_BORDER_THICK;
+    const int D = effect_depth_limited(r, g, b, LED_BORDER_THICK + 10);
     const int W = LCD_H_RES;
     const int H = LCD_V_RES;
+    float intensity = (float)max3_u8(r, g, b) / 255.0f;
 
     uint32_t t = now_ms();
-    /* Ring pulse: which layer is currently brightest (cycles 0..T-1) */
-    int active_layer = (int)((t / 150) % T);
+    int active_layer = (int)((t / 120) % D);
 
-    for (int layer = 0; layer < T; layer++) {
-        /* Brightness peaks at active_layer, falls off with distance */
+    for (int layer = 0; layer < D; layer++) {
         int dist = abs(layer - active_layer);
-        float f = 1.0f - (float)dist / (float)T;
-        f = f * f;  /* sharpen */
-        if (f < 0.05f) f = 0.05f;
-        uint16_t c = rgb565(ch_scale(r, f), ch_scale(g, f), ch_scale(b, f));
+        float ring = 1.0f - (float)dist / (float)D;
+        float edge = 1.0f - (float)layer / (float)D;
+        float brightness;
+        float white;
 
-        /* Top */
+        if (ring < 0.0f) ring = 0.0f;
+        ring = ring * ring;
+        brightness = 0.03f + edge * 0.05f + ring * (0.72f + intensity * 0.12f);
+        white = 0.01f + ring * 0.10f;
+        uint16_t c = glow565(r, g, b, brightness, white);
+
         display_draw_rect(layer, layer, W - 2 * layer, 1, c);
-        /* Bottom */
         display_draw_rect(layer, H - 1 - layer, W - 2 * layer, 1, c);
-        /* Left */
         display_draw_rect(layer, layer + 1, 1, H - 2 * (layer + 1), c);
-        /* Right */
         display_draw_rect(W - 1 - layer, layer + 1, 1, H - 2 * (layer + 1), c);
     }
 }
@@ -673,9 +626,10 @@ static void draw_sonar(uint8_t r, uint8_t g, uint8_t b)
 /* ── Dispatch to the currently-selected style ── */
 static void border_draw(uint8_t r, uint8_t g, uint8_t b)
 {
-    bool intrusive = border_style_is_intrusive(g_app.border_style);
+    uint8_t style = g_app.active_border_style;
+    bool intrusive = border_style_is_intrusive(style);
 
-    if (g_app.border_style == BORDER_STYLE_NONE) {
+    if (style == BORDER_STYLE_NONE) {
         if (s_border_visible) led_ctrl_border_clear();
         return;
     }
@@ -684,7 +638,7 @@ static void border_draw(uint8_t r, uint8_t g, uint8_t b)
         touch_overlay_request_refresh(true);
     }
 
-    switch (g_app.border_style) {
+    switch (style) {
     case BORDER_STYLE_FLAMES:    draw_flames(r, g, b);    break;
     case BORDER_STYLE_RADIATION: draw_radiation(r, g, b);  break;
     case BORDER_STYLE_GLITCH:    draw_glitch(r, g, b);     break;
@@ -704,15 +658,15 @@ static void border_draw(uint8_t r, uint8_t g, uint8_t b)
 void led_ctrl_init(void)
 {
     s_touch_backlight_level = 0xFF;
-    ESP_LOGI(TAG, "On-screen detection border (%d px, style %d)", LED_BORDER_THICK, g_app.border_style);
+    ESP_LOGI(TAG, "On-screen detection border (%d px, style %d)", LED_BORDER_THICK, g_app.active_border_style);
 }
 
 void led_ctrl_set(uint8_t r, uint8_t g, uint8_t b)
 {
     if (!g_app.led_enabled) return;
-    r = scale_by_intensity(r);
-    g = scale_by_intensity(g);
-    b = scale_by_intensity(b);
+    r = scale_by_effect_intensity(r);
+    g = scale_by_effect_intensity(g);
+    b = scale_by_effect_intensity(b);
     s_cur_r = r; s_cur_g = g; s_cur_b = b;
     border_draw(r, g, b);
     touch_backlight_apply(r, g, b);
@@ -720,9 +674,9 @@ void led_ctrl_set(uint8_t r, uint8_t g, uint8_t b)
 
 void led_ctrl_set_forced(uint8_t r, uint8_t g, uint8_t b)
 {
-    r = scale_by_intensity(r);
-    g = scale_by_intensity(g);
-    b = scale_by_intensity(b);
+    r = scale_by_effect_intensity(r);
+    g = scale_by_effect_intensity(g);
+    b = scale_by_effect_intensity(b);
     s_cur_r = r; s_cur_g = g; s_cur_b = b;
     border_draw(r, g, b);
     touch_backlight_apply(r, g, b);

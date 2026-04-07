@@ -408,6 +408,163 @@ static int rssi_to_interval(int8_t rssi)
     return 800;
 }
 
+static void fox_led_apply_tracker(bool has_target, bool target_visible)
+{
+    uint8_t base_r = 255;
+    uint8_t base_g = 140;
+    uint8_t base_b = 0;
+
+    app_palette_rgb(app_mode_led_color(MODE_FOX_HUNTER), &base_r, &base_g, &base_b);
+
+    if (!has_target) {
+        led_ctrl_set((uint8_t)(base_r * 0.22f),
+                     (uint8_t)(base_g * 0.22f),
+                     (uint8_t)(base_b * 0.22f));
+        vTaskDelay(pdMS_TO_TICKS(500));
+        return;
+    }
+
+    if (target_visible) {
+        int interval = rssi_to_interval(g_app.fox_rssi);
+        uint32_t freq = 800 + (uint32_t)((g_app.fox_rssi + 100) * 20);
+        float str = (g_app.fox_rssi + 100.0f) / 80.0f;
+        float impact;
+        uint8_t peak_red;
+        uint8_t peak_green;
+        uint8_t peak_blue;
+        uint8_t low_red;
+        uint8_t low_green;
+        uint8_t low_blue;
+
+        if (str < 0.0f) str = 0.0f;
+        if (str > 1.0f) str = 1.0f;
+        impact = app_detection_behavior_strength(MODE_FOX_HUNTER, str);
+        buzzer_tone(freq, 20);
+
+        peak_red = (uint8_t)(base_r * (0.24f + (impact * impact) * 0.76f));
+        peak_green = (uint8_t)(base_g * (0.24f + impact * 0.76f));
+        peak_blue = (uint8_t)(base_b * (0.24f + impact * 0.76f));
+        low_red = (uint8_t)(peak_red / 4U);
+        low_green = (uint8_t)(peak_green / 4U);
+        low_blue = (uint8_t)(peak_blue / 4U);
+
+        led_ctrl_set(peak_red, peak_green, peak_blue);
+        vTaskDelay(pdMS_TO_TICKS(interval / 2));
+        led_ctrl_set(low_red, low_green, low_blue);
+        vTaskDelay(pdMS_TO_TICKS(interval / 2));
+        return;
+    }
+
+    led_ctrl_set((uint8_t)(base_r * 0.16f),
+                 (uint8_t)(base_g * 0.16f),
+                 (uint8_t)(base_b * 0.16f));
+    buzzer_off();
+    vTaskDelay(pdMS_TO_TICKS(500));
+}
+
+static void fox_led_apply_sting(bool has_target, bool target_visible)
+{
+    uint8_t base_r = 255;
+    uint8_t base_g = 140;
+    uint8_t base_b = 0;
+
+    app_palette_rgb(app_mode_led_color(MODE_FOX_HUNTER), &base_r, &base_g, &base_b);
+
+    if (!has_target) {
+        led_ctrl_set((uint8_t)(base_r * 0.12f),
+                     (uint8_t)(base_g * 0.12f),
+                     (uint8_t)(base_b * 0.12f));
+        vTaskDelay(pdMS_TO_TICKS(500));
+        return;
+    }
+
+    if (target_visible) {
+        int interval = rssi_to_interval(g_app.fox_rssi);
+        uint32_t freq = 800 + (uint32_t)((g_app.fox_rssi + 100) * 20);
+        float str = (g_app.fox_rssi + 100.0f) / 80.0f;
+        float impact;
+        uint8_t peak_red;
+        uint8_t peak_green;
+        uint8_t peak_blue;
+
+        if (str < 0.0f) str = 0.0f;
+        if (str > 1.0f) str = 1.0f;
+        impact = app_detection_behavior_strength(MODE_FOX_HUNTER, str);
+        buzzer_tone(freq, 20);
+
+        peak_red = (uint8_t)(base_r * (0.16f + (impact * impact) * 0.84f));
+        peak_green = (uint8_t)(base_g * (0.16f + (impact * impact) * 0.84f));
+        peak_blue = (uint8_t)(base_b * (0.16f + (impact * impact) * 0.84f));
+        led_ctrl_set(peak_red, peak_green, peak_blue);
+        vTaskDelay(pdMS_TO_TICKS(interval));
+        return;
+    }
+
+    led_ctrl_set((uint8_t)(base_r * 0.10f),
+                 (uint8_t)(base_g * 0.10f),
+                 (uint8_t)(base_b * 0.10f));
+    buzzer_off();
+    vTaskDelay(pdMS_TO_TICKS(500));
+}
+
+static void fox_led_apply_breathe(bool has_target, bool target_visible, uint32_t now)
+{
+    uint8_t base_r = 255;
+    uint8_t base_g = 140;
+    uint8_t base_b = 0;
+    float str = 0.0f;
+    float impact;
+    uint32_t period_ms;
+    float phase;
+    float breath;
+    float reach;
+
+    app_palette_rgb(app_mode_led_color(MODE_FOX_HUNTER), &base_r, &base_g, &base_b);
+
+    if (target_visible) {
+        str = (g_app.fox_rssi + 100.0f) / 80.0f;
+        if (str < 0.0f) str = 0.0f;
+        if (str > 1.0f) str = 1.0f;
+    }
+    impact = app_detection_behavior_strength(MODE_FOX_HUNTER, str);
+    period_ms = 1100U + (uint32_t)(impact * 1700.0f);
+    phase = (float)(now % period_ms) / (float)period_ms;
+    breath = (1.0f - cosf(phase * 2.0f * 3.14159265f)) * 0.5f;
+    breath = breath * breath;
+
+    if (!has_target) {
+        reach = 0.12f;
+    } else if (!target_visible) {
+        reach = 0.10f + impact * 0.14f;
+    } else {
+        reach = 0.28f + impact * 0.72f;
+    }
+
+    breath = 0.03f + breath * reach;
+    led_ctrl_set((uint8_t)(base_r * breath),
+                 (uint8_t)(base_g * breath),
+                 (uint8_t)(base_b * breath));
+
+    if (target_visible) {
+        uint32_t freq = 800 + (uint32_t)((g_app.fox_rssi + 100) * 20);
+        buzzer_tone(freq, 20);
+    } else {
+        buzzer_off();
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(target_visible ? rssi_to_interval(g_app.fox_rssi) : 500));
+}
+
+static void fox_led_apply_standard(bool has_target, bool target_visible, uint32_t now)
+{
+    (void)now;
+    if (g_app.fox_led_mode == 0) {
+        fox_led_apply_tracker(has_target, target_visible);
+    } else {
+        fox_led_apply_sting(has_target, target_visible);
+    }
+}
+
 /* ── RSSI to color gradient (cool slate -> warm amber -> hot gold) ── */
 static void rssi_to_color(int8_t rssi, uint8_t *r, uint8_t *g, uint8_t *b)
 {
@@ -957,7 +1114,24 @@ static void fox_beep_task(void *arg)
             /* LED mode indicator above footer — always shown */
             {
                 uint16_t mode_col = g_app.fox_led_mode ? rgb565(56, 189, 248) : rgb565(74, 222, 128);
-                const char *led_label = g_app.fox_led_mode ? "STING" : "DETECTOR";
+                const char *led_label = g_app.fox_led_mode ? "STING" : "TRACKER";
+                switch (app_mode_display_behavior(MODE_FOX_HUNTER)) {
+                case FX_BEHAVIOR_BREATHE:
+                    mode_col = rgb565(168, 85, 247);
+                    led_label = "BREATHE";
+                    break;
+                case FX_BEHAVIOR_TRACKER:
+                    mode_col = rgb565(74, 222, 128);
+                    led_label = "TRACKER";
+                    break;
+                case FX_BEHAVIOR_STING:
+                    mode_col = rgb565(56, 189, 248);
+                    led_label = "STING";
+                    break;
+                case FX_BEHAVIOR_STANDARD:
+                default:
+                    break;
+                }
                 char mode_label[24];
                 snprintf(mode_label, sizeof(mode_label), "LED: %s", led_label);
                 /* Clear full label lane so shorter text never leaves stale pixels behind. */
@@ -982,62 +1156,20 @@ static void fox_beep_task(void *arg)
         } /* end if (dirty) */
 
         /* ── LED / buzzer: always runs regardless of display dirty ── */
-        if (!g_app.fox_target_set) {
-            uint8_t base_r = 255;
-            uint8_t base_g = 140;
-            uint8_t base_b = 0;
-            float impact = app_detection_behavior_strength(MODE_FOX_HUNTER, 0.0f);
-            float idle_scale = (g_app.fox_led_mode == 0) ? (0.22f + impact * 0.30f) : (0.12f + impact * 0.22f);
-            app_palette_rgb(app_mode_led_color(MODE_FOX_HUNTER), &base_r, &base_g, &base_b);
-            led_ctrl_set((uint8_t)(base_r * idle_scale),
-                         (uint8_t)(base_g * idle_scale),
-                         (uint8_t)(base_b * idle_scale));
-            vTaskDelay(pdMS_TO_TICKS(500));
-        } else if (target_visible) {
-            int interval = rssi_to_interval(g_app.fox_rssi);
-            uint32_t freq = 800 + (uint32_t)((g_app.fox_rssi + 100) * 20);
-            float str = (g_app.fox_rssi + 100.0f) / 80.0f;
-            float impact;
-            uint8_t base_r = 255;
-            uint8_t base_g = 140;
-            uint8_t base_b = 0;
-            if (str < 0.0f) str = 0.0f;
-            if (str > 1.0f) str = 1.0f;
-            impact = app_detection_behavior_strength(MODE_FOX_HUNTER, str);
-            app_palette_rgb(app_mode_led_color(MODE_FOX_HUNTER), &base_r, &base_g, &base_b);
-            buzzer_tone(freq, 20);
-
-            if (g_app.fox_led_mode == 0) {
-                uint8_t peak_red = (uint8_t)(base_r * (0.24f + (impact * impact) * 0.76f));
-                uint8_t peak_green = (uint8_t)(base_g * (0.24f + impact * 0.76f));
-                uint8_t peak_blue = (uint8_t)(base_b * (0.24f + impact * 0.76f));
-                uint8_t low_red = (uint8_t)(peak_red / 4U);
-                uint8_t low_green = (uint8_t)(peak_green / 4U);
-                uint8_t low_blue = (uint8_t)(peak_blue / 4U);
-
-                led_ctrl_set(peak_red, peak_green, peak_blue);
-                vTaskDelay(pdMS_TO_TICKS(interval / 2));
-                led_ctrl_set(low_red, low_green, low_blue);
-                vTaskDelay(pdMS_TO_TICKS(interval / 2));
-            } else {
-                uint8_t peak_red = (uint8_t)(base_r * (0.16f + (impact * impact) * 0.84f));
-                uint8_t peak_green = (uint8_t)(base_g * (0.16f + (impact * impact) * 0.84f));
-                uint8_t peak_blue = (uint8_t)(base_b * (0.16f + (impact * impact) * 0.84f));
-                led_ctrl_set(peak_red, peak_green, peak_blue);
-                vTaskDelay(pdMS_TO_TICKS(interval));
-            }
-        } else {
-            uint8_t base_r = 255;
-            uint8_t base_g = 140;
-            uint8_t base_b = 0;
-            float impact = app_detection_behavior_strength(MODE_FOX_HUNTER, 0.0f);
-            float lost_scale = (g_app.fox_led_mode == 0) ? (0.16f + impact * 0.22f) : (0.10f + impact * 0.16f);
-            app_palette_rgb(app_mode_led_color(MODE_FOX_HUNTER), &base_r, &base_g, &base_b);
-            led_ctrl_set((uint8_t)(base_r * lost_scale),
-                         (uint8_t)(base_g * lost_scale),
-                         (uint8_t)(base_b * lost_scale));
-            buzzer_off();
-            vTaskDelay(pdMS_TO_TICKS(500));
+        switch (app_mode_display_behavior(MODE_FOX_HUNTER)) {
+        case FX_BEHAVIOR_BREATHE:
+            fox_led_apply_breathe(g_app.fox_target_set, target_visible, uptime_ms());
+            break;
+        case FX_BEHAVIOR_TRACKER:
+            fox_led_apply_tracker(g_app.fox_target_set, target_visible);
+            break;
+        case FX_BEHAVIOR_STING:
+            fox_led_apply_sting(g_app.fox_target_set, target_visible);
+            break;
+        case FX_BEHAVIOR_STANDARD:
+        default:
+            fox_led_apply_standard(g_app.fox_target_set, target_visible, uptime_ms());
+            break;
         }
     }
     vTaskDelete(NULL);

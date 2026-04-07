@@ -42,15 +42,22 @@ enum {
     SET_ITEM_SLEEP_TIMEOUT,
     SET_ITEM_MENU_LED,
     SET_ITEM_BORDER_STYLE,
+    SET_ITEM_MENU_FX_INTENSITY,
     SET_ITEM_DETECT_FLOCK_LOW,
     SET_ITEM_DETECT_FLOCK_HIGH,
     SET_ITEM_DETECT_FLOCK_CUSTOM,
+    SET_ITEM_DETECT_FLOCK_BEHAVIOR,
+    SET_ITEM_DETECT_FLOCK_INTENSITY,
     SET_ITEM_DETECT_FOX_LOW,
     SET_ITEM_DETECT_FOX_HIGH,
     SET_ITEM_DETECT_FOX_CUSTOM,
+    SET_ITEM_DETECT_FOX_BEHAVIOR,
+    SET_ITEM_DETECT_FOX_INTENSITY,
     SET_ITEM_DETECT_SKY_LOW,
     SET_ITEM_DETECT_SKY_HIGH,
     SET_ITEM_DETECT_SKY_CUSTOM,
+    SET_ITEM_DETECT_SKY_BEHAVIOR,
+    SET_ITEM_DETECT_SKY_INTENSITY,
     SET_ITEM_SOUND_FLOCK,
     SET_ITEM_SOUND_FOX,
     SET_ITEM_SOUND_SKY,
@@ -125,24 +132,34 @@ static const int SETTINGS_CAT_DISPLAY_ITEMS[] = {
     SET_ITEM_SLEEP_TIMEOUT,
     SET_ITEM_MENU_LED,
     SET_ITEM_BORDER_STYLE,
+    SET_ITEM_MENU_FX_INTENSITY,
 };
 
 static const int SETTINGS_CAT_FLOCK_IMPACT_ITEMS[] = {
     SET_ITEM_DETECT_FLOCK_LOW,
     SET_ITEM_DETECT_FLOCK_HIGH,
     SET_ITEM_DETECT_FLOCK_CUSTOM,
+    SET_ITEM_DETECT_FLOCK_BEHAVIOR,
+    SET_ITEM_DETECT_FLOCK_INTENSITY,
+    SET_ITEM_SOUND_FLOCK,
 };
 
 static const int SETTINGS_CAT_FOX_IMPACT_ITEMS[] = {
     SET_ITEM_DETECT_FOX_LOW,
     SET_ITEM_DETECT_FOX_HIGH,
     SET_ITEM_DETECT_FOX_CUSTOM,
+    SET_ITEM_DETECT_FOX_BEHAVIOR,
+    SET_ITEM_DETECT_FOX_INTENSITY,
+    SET_ITEM_SOUND_FOX,
 };
 
 static const int SETTINGS_CAT_SKY_IMPACT_ITEMS[] = {
     SET_ITEM_DETECT_SKY_LOW,
     SET_ITEM_DETECT_SKY_HIGH,
     SET_ITEM_DETECT_SKY_CUSTOM,
+    SET_ITEM_DETECT_SKY_BEHAVIOR,
+    SET_ITEM_DETECT_SKY_INTENSITY,
+    SET_ITEM_SOUND_SKY,
 };
 
 static const int SETTINGS_CAT_SOUND_ITEMS[] = {
@@ -177,15 +194,31 @@ static const struct {
     int item_count;
 } SETTINGS_CATEGORIES[SETTINGS_CAT_COUNT] = {
     [SETTINGS_CAT_CONNECTIVITY] = {"Connectivity", "AP name, broadcast, GPS", SETTINGS_CAT_CONNECTIVITY_ITEMS, 3},
-    [SETTINGS_CAT_DISPLAY] = {"Display", "Sleep, LED color, border", SETTINGS_CAT_DISPLAY_ITEMS, 3},
-        [SETTINGS_CAT_FLOCK_IMPACT] = {"Flock Visuals", "LED color, effect, accent", SETTINGS_CAT_FLOCK_IMPACT_ITEMS, 3},
-        [SETTINGS_CAT_FOX_IMPACT] = {"Fox Visuals", "LED color, effect, accent", SETTINGS_CAT_FOX_IMPACT_ITEMS, 3},
-        [SETTINGS_CAT_SKY_IMPACT] = {"Sky Visuals", "LED color, effect, accent", SETTINGS_CAT_SKY_IMPACT_ITEMS, 3},
+    [SETTINGS_CAT_DISPLAY] = {"Display", "Sleep, menu LED, menu FX", SETTINGS_CAT_DISPLAY_ITEMS, 4},
+        [SETTINGS_CAT_FLOCK_IMPACT] = {"Flock Config", "LED, FX, color, sound", SETTINGS_CAT_FLOCK_IMPACT_ITEMS, 6},
+        [SETTINGS_CAT_FOX_IMPACT] = {"Fox Config", "LED, FX, color, sound", SETTINGS_CAT_FOX_IMPACT_ITEMS, 6},
+        [SETTINGS_CAT_SKY_IMPACT] = {"Sky Config", "LED, FX, color, sound", SETTINGS_CAT_SKY_IMPACT_ITEMS, 6},
     [SETTINGS_CAT_SOUND] = {"Sound Profiles", "Per-applet audio behavior", SETTINGS_CAT_SOUND_ITEMS, 3},
     [SETTINGS_CAT_CONTROLS] = {"Button Shortcuts", "Quick actions per button", SETTINGS_CAT_CONTROLS_ITEMS, 3},
     [SETTINGS_CAT_LOGGING] = {"Logging", "Storage, diagnostics, serial", SETTINGS_CAT_LOGGING_ITEMS, 6},
     [SETTINGS_CAT_MAINTENANCE] = {"Maintenance", "microSD tools and service", SETTINGS_CAT_MAINTENANCE_ITEMS, 1},
 };
+
+static uint8_t stored_style_for_mode(app_mode_t mode)
+{
+    switch (mode) {
+    case MODE_FLOCK_YOU:
+        return g_app.detect_flock_high;
+    case MODE_FOX_HUNTER:
+        return g_app.detect_fox_high;
+    case MODE_SKY_SPY:
+        return g_app.detect_sky_high;
+    case MODE_SETTINGS:
+    case MODE_SELECT:
+    default:
+        return g_app.border_style;
+    }
+}
 
 static const char *serial_log_name(uint8_t idx)
 {
@@ -274,6 +307,7 @@ static const char *menu_led_name(uint8_t idx)
 static const char *border_style_name(uint8_t idx)
 {
     switch (idx) {
+    case BORDER_STYLE_DEFAULT:   return "DEFAULT";
     case BORDER_STYLE_FLAMES:    return "FLAMES";
     case BORDER_STYLE_RADIATION: return "RADIATION";
     case BORDER_STYLE_GLITCH:    return "GLITCH";
@@ -282,6 +316,17 @@ static const char *border_style_name(uint8_t idx)
     case BORDER_STYLE_NONE:      return "OFF";
     case BORDER_STYLE_PULSE:
     default:                     return "PULSE";
+    }
+}
+
+static const char *fx_behavior_name(uint8_t idx)
+{
+    switch (idx) {
+    case FX_BEHAVIOR_BREATHE: return "BREATHE";
+    case FX_BEHAVIOR_TRACKER: return "TRACKER";
+    case FX_BEHAVIOR_STING: return "STING";
+    case FX_BEHAVIOR_STANDARD:
+    default: return "STANDARD";
     }
 }
 
@@ -315,15 +360,22 @@ static bool settings_item_uses_visual_preview(int item)
     switch (item) {
     case SET_ITEM_MENU_LED:
     case SET_ITEM_BORDER_STYLE:
+    case SET_ITEM_MENU_FX_INTENSITY:
     case SET_ITEM_DETECT_FLOCK_LOW:
     case SET_ITEM_DETECT_FLOCK_HIGH:
     case SET_ITEM_DETECT_FLOCK_CUSTOM:
+    case SET_ITEM_DETECT_FLOCK_BEHAVIOR:
+    case SET_ITEM_DETECT_FLOCK_INTENSITY:
     case SET_ITEM_DETECT_FOX_LOW:
     case SET_ITEM_DETECT_FOX_HIGH:
     case SET_ITEM_DETECT_FOX_CUSTOM:
+    case SET_ITEM_DETECT_FOX_BEHAVIOR:
+    case SET_ITEM_DETECT_FOX_INTENSITY:
     case SET_ITEM_DETECT_SKY_LOW:
     case SET_ITEM_DETECT_SKY_HIGH:
     case SET_ITEM_DETECT_SKY_CUSTOM:
+    case SET_ITEM_DETECT_SKY_BEHAVIOR:
+    case SET_ITEM_DETECT_SKY_INTENSITY:
         return true;
     default:
         return false;
@@ -336,17 +388,24 @@ static app_mode_t settings_preview_mode_for_item(int item)
     case SET_ITEM_DETECT_FLOCK_LOW:
     case SET_ITEM_DETECT_FLOCK_HIGH:
     case SET_ITEM_DETECT_FLOCK_CUSTOM:
+    case SET_ITEM_DETECT_FLOCK_BEHAVIOR:
+    case SET_ITEM_DETECT_FLOCK_INTENSITY:
         return MODE_FLOCK_YOU;
     case SET_ITEM_DETECT_FOX_LOW:
     case SET_ITEM_DETECT_FOX_HIGH:
     case SET_ITEM_DETECT_FOX_CUSTOM:
+    case SET_ITEM_DETECT_FOX_BEHAVIOR:
+    case SET_ITEM_DETECT_FOX_INTENSITY:
         return MODE_FOX_HUNTER;
     case SET_ITEM_DETECT_SKY_LOW:
     case SET_ITEM_DETECT_SKY_HIGH:
     case SET_ITEM_DETECT_SKY_CUSTOM:
+    case SET_ITEM_DETECT_SKY_BEHAVIOR:
+    case SET_ITEM_DETECT_SKY_INTENSITY:
         return MODE_SKY_SPY;
     case SET_ITEM_MENU_LED:
     case SET_ITEM_BORDER_STYLE:
+    case SET_ITEM_MENU_FX_INTENSITY:
     default:
         return MODE_SELECT;
     }
@@ -399,16 +458,23 @@ static const char *settings_item_label(int item)
     case SET_ITEM_SINGLE_AP_NAME: return "Single AP Name";
     case SET_ITEM_SLEEP_TIMEOUT: return "Sleep Timeout";
     case SET_ITEM_MENU_LED: return "Menu LED";
-    case SET_ITEM_BORDER_STYLE: return "Detect Border";
+    case SET_ITEM_BORDER_STYLE: return "Menu FX";
+    case SET_ITEM_MENU_FX_INTENSITY: return "Menu FX Power";
     case SET_ITEM_DETECT_FLOCK_LOW: return "Board LED";
     case SET_ITEM_DETECT_FLOCK_HIGH: return "Display FX";
     case SET_ITEM_DETECT_FLOCK_CUSTOM: return "Accent Color";
+    case SET_ITEM_DETECT_FLOCK_BEHAVIOR: return "FX Behavior";
+    case SET_ITEM_DETECT_FLOCK_INTENSITY: return "FX Power";
     case SET_ITEM_DETECT_FOX_LOW: return "Board LED";
     case SET_ITEM_DETECT_FOX_HIGH: return "Display FX";
     case SET_ITEM_DETECT_FOX_CUSTOM: return "Accent Color";
+    case SET_ITEM_DETECT_FOX_BEHAVIOR: return "FX Behavior";
+    case SET_ITEM_DETECT_FOX_INTENSITY: return "FX Power";
     case SET_ITEM_DETECT_SKY_LOW: return "Board LED";
     case SET_ITEM_DETECT_SKY_HIGH: return "Display FX";
     case SET_ITEM_DETECT_SKY_CUSTOM: return "Accent Color";
+    case SET_ITEM_DETECT_SKY_BEHAVIOR: return "FX Behavior";
+    case SET_ITEM_DETECT_SKY_INTENSITY: return "FX Power";
     case SET_ITEM_SOUND_FLOCK: return "Sound: Flock";
     case SET_ITEM_SOUND_FOX: return "Sound: Fox";
     case SET_ITEM_SOUND_SKY: return "Sound: Sky";
@@ -441,10 +507,17 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         snprintf(val, val_sz, "%s", g_app.single_ap_name_enabled ? "UNISPY" : "PER MODE");
         break;
     case SET_ITEM_MENU_LED:
-        snprintf(val, val_sz, "%s", menu_led_name(g_app.menu_led_color));
+        if (stored_style_for_mode(MODE_SELECT) == BORDER_STYLE_DEFAULT) {
+            snprintf(val, val_sz, "%s (AUTO)", menu_led_name(app_mode_default_display_color(MODE_SELECT)));
+        } else {
+            snprintf(val, val_sz, "%s", menu_led_name(g_app.menu_led_color));
+        }
         break;
     case SET_ITEM_BORDER_STYLE:
         snprintf(val, val_sz, "%s", border_style_name(g_app.border_style));
+        break;
+    case SET_ITEM_MENU_FX_INTENSITY:
+        snprintf(val, val_sz, "%u%%", (unsigned)app_fx_percent(g_app.menu_fx_intensity));
         break;
     case SET_ITEM_DETECT_FLOCK_LOW:
         snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_flock_low));
@@ -453,7 +526,17 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         snprintf(val, val_sz, "%s", border_style_name(g_app.detect_flock_high));
         break;
     case SET_ITEM_DETECT_FLOCK_CUSTOM:
-        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_flock_custom));
+        if (stored_style_for_mode(MODE_FLOCK_YOU) == BORDER_STYLE_DEFAULT) {
+            snprintf(val, val_sz, "%s (AUTO)", menu_led_name(app_mode_default_display_color(MODE_FLOCK_YOU)));
+        } else {
+            snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_flock_custom));
+        }
+        break;
+    case SET_ITEM_DETECT_FLOCK_BEHAVIOR:
+        snprintf(val, val_sz, "%s", fx_behavior_name(g_app.detect_flock_behavior));
+        break;
+    case SET_ITEM_DETECT_FLOCK_INTENSITY:
+        snprintf(val, val_sz, "%u%%", (unsigned)app_fx_percent(g_app.detect_flock_intensity));
         break;
     case SET_ITEM_DETECT_FOX_LOW:
         snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_fox_low));
@@ -462,7 +545,17 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         snprintf(val, val_sz, "%s", border_style_name(g_app.detect_fox_high));
         break;
     case SET_ITEM_DETECT_FOX_CUSTOM:
-        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_fox_custom));
+        if (stored_style_for_mode(MODE_FOX_HUNTER) == BORDER_STYLE_DEFAULT) {
+            snprintf(val, val_sz, "%s (AUTO)", menu_led_name(app_mode_default_display_color(MODE_FOX_HUNTER)));
+        } else {
+            snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_fox_custom));
+        }
+        break;
+    case SET_ITEM_DETECT_FOX_BEHAVIOR:
+        snprintf(val, val_sz, "%s", fx_behavior_name(g_app.detect_fox_behavior));
+        break;
+    case SET_ITEM_DETECT_FOX_INTENSITY:
+        snprintf(val, val_sz, "%u%%", (unsigned)app_fx_percent(g_app.detect_fox_intensity));
         break;
     case SET_ITEM_DETECT_SKY_LOW:
         snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_sky_low));
@@ -471,7 +564,17 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         snprintf(val, val_sz, "%s", border_style_name(g_app.detect_sky_high));
         break;
     case SET_ITEM_DETECT_SKY_CUSTOM:
-        snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_sky_custom));
+        if (stored_style_for_mode(MODE_SKY_SPY) == BORDER_STYLE_DEFAULT) {
+            snprintf(val, val_sz, "%s (AUTO)", menu_led_name(app_mode_default_display_color(MODE_SKY_SPY)));
+        } else {
+            snprintf(val, val_sz, "%s", menu_led_name(g_app.detect_sky_custom));
+        }
+        break;
+    case SET_ITEM_DETECT_SKY_BEHAVIOR:
+        snprintf(val, val_sz, "%s", fx_behavior_name(g_app.detect_sky_behavior));
+        break;
+    case SET_ITEM_DETECT_SKY_INTENSITY:
+        snprintf(val, val_sz, "%u%%", (unsigned)app_fx_percent(g_app.detect_sky_intensity));
         break;
     case SET_ITEM_SOUND_FLOCK:
         snprintf(val, val_sz, "%s", sound_profile_name(g_app.sound_profile_flock));
@@ -513,7 +616,7 @@ static void settings_item_value(int item, char *val, size_t val_sz)
         snprintf(val, val_sz, "%s", serial_log_name(g_app.serial_log_verbosity));
         break;
     case SET_ITEM_SD_FORMAT:
-        snprintf(val, val_sz, "%s", storage_ext_status_str(storage_ext_get_status()));
+        snprintf(val, val_sz, "%s", storage_ext_status_str(storage_ext_get_status_cached()));
         break;
     case SET_ITEM_BACK:
         snprintf(val, val_sz, "%s", "> EXIT");
@@ -758,15 +861,15 @@ static void render_mode_select_screen(int cursor)
     }
 
     /* microSD card status - bottom of display */
-    storage_status_t microsd_status = storage_ext_get_status();
+    storage_status_t microsd_status = storage_ext_get_status_cached();
     uint16_t microsd_color = microsd_status == STORAGE_STATUS_AVAILABLE
                                  ? rgb565(52, 211, 153)
                                  : (microsd_status == STORAGE_STATUS_NEEDS_FORMAT ? rgb565(251, 191, 36)
                                                                                    : rgb565(249, 115, 22));
     char microsd_text[40];
     if (microsd_status == STORAGE_STATUS_AVAILABLE) {
-        uint32_t used_kb = storage_ext_used_kb();
-        uint32_t total_kb = storage_ext_total_kb();
+        uint32_t used_kb = storage_ext_used_kb_cached();
+        uint32_t total_kb = storage_ext_total_kb_cached();
         if (total_kb >= 1024U) {
             unsigned long used_tenths = (unsigned long)((used_kb * 10U + 512U) / 1024U);
             unsigned long total_mb = (unsigned long)((total_kb + 512U) / 1024U);
@@ -911,12 +1014,12 @@ static void mode_select_task(void *arg)
 
     while (g_app.current_mode == MODE_SELECT) {
         bool gps_tag_active = ui_gps_tag_active();
-        storage_status_t sd_status = storage_ext_get_status();
+        storage_status_t sd_status = storage_ext_get_status_cached();
         bool logging_active = storage_ext_logging_active();
         bool logging_blocked = storage_ext_logging_blocked();
         int sd_used_bucket = 0;
         if (sd_status == STORAGE_STATUS_AVAILABLE) {
-            sd_used_bucket = (int)(storage_ext_used_kb() / 64U);
+            sd_used_bucket = (int)(storage_ext_used_kb_cached() / 64U);
         }
 
         if (g_app.ui_cursor >= 4) g_app.ui_cursor = 3;
@@ -963,7 +1066,7 @@ static void settings_task(void *arg)
     uint32_t border_preview_started_ms = 0;
     while (g_app.current_mode == MODE_SETTINGS) {
         bool gps_tag_active = ui_gps_tag_active();
-        storage_status_t sd_status = storage_ext_get_status();
+        storage_status_t sd_status = storage_ext_get_status_cached();
         bool logging_active = storage_ext_logging_active();
         bool logging_blocked = storage_ext_logging_blocked();
 
@@ -975,29 +1078,30 @@ static void settings_task(void *arg)
         bool wants_visual_preview = settings_item_uses_visual_preview(preview_item);
         if (wants_visual_preview) {
             uint32_t now = uptime_ms();
+            uint8_t preview_style;
+            uint8_t preview_color_idx;
+            uint8_t preview_intensity;
+            uint8_t animated_intensity;
+            app_mode_t preview_mode;
 
             if (visual_preview_item != preview_item || border_preview_started_ms == 0) {
                 border_preview_started_ms = now;
             }
 
-            led_ctrl_set_effect_intensity(settings_preview_intensity_for_item(preview_item, now - border_preview_started_ms));
-
-            app_mode_t preview_mode = settings_preview_mode_for_item(preview_item);
-            uint8_t preview_color_idx = (preview_mode == MODE_SELECT)
-                ? g_app.menu_led_color
-                : app_mode_display_color(preview_mode);
-            uint8_t preview_style = (preview_mode == MODE_SELECT)
-                ? g_app.border_style
-                : app_mode_display_style(preview_mode);
+            preview_mode = settings_preview_mode_for_item(preview_item);
+            preview_color_idx = app_mode_display_color(preview_mode);
+            preview_style = app_mode_display_style(preview_mode);
+            preview_intensity = app_mode_display_intensity(preview_mode);
+            animated_intensity = settings_preview_intensity_for_item(preview_item, now - border_preview_started_ms);
+            preview_intensity = (uint8_t)(((uint16_t)preview_intensity * (uint16_t)animated_intensity + 127U) / 255U);
+            led_ctrl_set_effect_intensity(preview_intensity);
 
             if (!visual_preview_active
                     || visual_preview_item != preview_item
                     || visual_preview_color != preview_color_idx
                     || visual_preview_style != preview_style) {
                 uint8_t r = 0, g = 0, b = 0;
-                if (preview_mode != MODE_SELECT) {
-                    g_app.border_style = preview_style;
-                }
+                g_app.active_border_style = preview_style;
                 app_palette_rgb(preview_color_idx, &r, &g, &b);
                 led_ctrl_breathe_forced(r, g, b, 2200);
                 visual_preview_active = true;
@@ -1007,7 +1111,8 @@ static void settings_task(void *arg)
             }
         } else if (visual_preview_active) {
             border_preview_started_ms = 0;
-            led_ctrl_set_effect_intensity(255);
+            g_app.active_border_style = app_mode_display_style(MODE_SETTINGS);
+            led_ctrl_set_effect_intensity(app_mode_display_intensity(MODE_SETTINGS));
             led_ctrl_breathe_stop();
             led_ctrl_off();
             visual_preview_active = false;
@@ -1016,7 +1121,8 @@ static void settings_task(void *arg)
             visual_preview_style = 0xFF;
         } else {
             border_preview_started_ms = 0;
-            led_ctrl_set_effect_intensity(255);
+            g_app.active_border_style = app_mode_display_style(MODE_SETTINGS);
+            led_ctrl_set_effect_intensity(app_mode_display_intensity(MODE_SETTINGS));
         }
 
         if (g_app.ui_cursor != last_cursor
@@ -1056,6 +1162,7 @@ static void start_mode(app_mode_t mode)
 
     ESP_LOGI(TAG, "Starting mode %d", mode);
     app_apply_mode_visual_prefs(mode);
+    led_ctrl_set_effect_intensity(app_mode_display_intensity(mode));
 
     /* Check if WiFi AP config actually changes for this mode */
     const char *old_ssid = NULL, *old_pass = NULL;
@@ -1245,6 +1352,12 @@ static void apply_settings_leaf_action(int item)
         log_msg = "border_style_updated";
         break;
 
+    case SET_ITEM_MENU_FX_INTENSITY:
+        g_app.menu_fx_intensity = app_fx_cycle_intensity(g_app.menu_fx_intensity);
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "menu_fx_intensity_updated";
+        break;
+
     case SET_ITEM_DETECT_FLOCK_LOW:
         g_app.detect_flock_low = (g_app.detect_flock_low + 1) % MENU_LED_COUNT;
         buzzer_play_profile(SOUND_PROFILE_CHIRP);
@@ -1261,6 +1374,18 @@ static void apply_settings_leaf_action(int item)
         g_app.detect_flock_custom = (g_app.detect_flock_custom + 1) % MENU_LED_COUNT;
         buzzer_play_profile(SOUND_PROFILE_CHIRP);
         log_msg = "detect_flock_custom_updated";
+        break;
+
+    case SET_ITEM_DETECT_FLOCK_BEHAVIOR:
+        g_app.detect_flock_behavior = (g_app.detect_flock_behavior + 1) % FX_BEHAVIOR_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_flock_behavior_updated";
+        break;
+
+    case SET_ITEM_DETECT_FLOCK_INTENSITY:
+        g_app.detect_flock_intensity = app_fx_cycle_intensity(g_app.detect_flock_intensity);
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_flock_intensity_updated";
         break;
 
     case SET_ITEM_DETECT_FOX_LOW:
@@ -1281,6 +1406,18 @@ static void apply_settings_leaf_action(int item)
         log_msg = "detect_fox_custom_updated";
         break;
 
+    case SET_ITEM_DETECT_FOX_BEHAVIOR:
+        g_app.detect_fox_behavior = (g_app.detect_fox_behavior + 1) % FX_BEHAVIOR_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_fox_behavior_updated";
+        break;
+
+    case SET_ITEM_DETECT_FOX_INTENSITY:
+        g_app.detect_fox_intensity = app_fx_cycle_intensity(g_app.detect_fox_intensity);
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_fox_intensity_updated";
+        break;
+
     case SET_ITEM_DETECT_SKY_LOW:
         g_app.detect_sky_low = (g_app.detect_sky_low + 1) % MENU_LED_COUNT;
         buzzer_play_profile(SOUND_PROFILE_CHIRP);
@@ -1297,6 +1434,18 @@ static void apply_settings_leaf_action(int item)
         g_app.detect_sky_custom = (g_app.detect_sky_custom + 1) % MENU_LED_COUNT;
         buzzer_play_profile(SOUND_PROFILE_CHIRP);
         log_msg = "detect_sky_custom_updated";
+        break;
+
+    case SET_ITEM_DETECT_SKY_BEHAVIOR:
+        g_app.detect_sky_behavior = (g_app.detect_sky_behavior + 1) % FX_BEHAVIOR_COUNT;
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_sky_behavior_updated";
+        break;
+
+    case SET_ITEM_DETECT_SKY_INTENSITY:
+        g_app.detect_sky_intensity = app_fx_cycle_intensity(g_app.detect_sky_intensity);
+        buzzer_play_profile(SOUND_PROFILE_CHIRP);
+        log_msg = "detect_sky_intensity_updated";
         break;
 
     case SET_ITEM_SOUND_FLOCK:
@@ -1714,6 +1863,7 @@ void app_main(void)
 
         g_app.uptime_sec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
         g_app.free_heap = esp_get_free_heap_size();
+        storage_ext_poll();
 
         if (!g_app.display_sleeping && g_app.display_sleep_timeout_sec > 0) {
             uint32_t idle_ms = uptime_ms() - g_app.last_input_ms;

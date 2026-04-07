@@ -69,7 +69,12 @@ static void update_space_cache_locked(void)
 
     uint64_t total_bytes = 0;
     uint64_t free_bytes = 0;
-    if (esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes) != ESP_OK) {
+    if (!app_spi_bus_lock(pdMS_TO_TICKS(250))) {
+        return;
+    }
+    esp_err_t info_err = esp_vfs_fat_info("/sdcard", &total_bytes, &free_bytes);
+    app_spi_bus_unlock();
+    if (info_err != ESP_OK) {
         return;
     }
 
@@ -398,7 +403,11 @@ static esp_err_t mount_sd_card(bool format_if_mount_failed, bool log_result)
     slot_cfg.gpio_cd = SDSPI_SLOT_NO_CD;
     slot_cfg.gpio_wp = SDSPI_SLOT_NO_WP;
 
+    if (!app_spi_bus_lock(pdMS_TO_TICKS(1000))) {
+        return ESP_ERR_TIMEOUT;
+    }
     esp_err_t err = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_cfg, &mount_cfg, &s_card);
+    app_spi_bus_unlock();
     if (err == ESP_OK) {
         s_sd_ready = true;
         s_sd_status = STORAGE_STATUS_AVAILABLE;
@@ -438,7 +447,10 @@ static esp_err_t mount_sd_card(bool format_if_mount_failed, bool log_result)
 static void mark_card_missing(void)
 {
     if (s_card) {
-        esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+        if (app_spi_bus_lock(pdMS_TO_TICKS(1000))) {
+            esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+            app_spi_bus_unlock();
+        }
     }
     s_sd_ready = false;
     s_card = NULL;
@@ -470,7 +482,11 @@ static void refresh_card_runtime_status(void)
     }
 
     s_last_runtime_status_us = now_us;
+    if (!app_spi_bus_lock(pdMS_TO_TICKS(250))) {
+        return;
+    }
     esp_err_t err = sdmmc_get_status(s_card);
+    app_spi_bus_unlock();
     if (err == ESP_OK) {
         s_sd_status = STORAGE_STATUS_AVAILABLE;
         return;
@@ -508,6 +524,18 @@ void storage_ext_init(void)
     refresh_storage_dependent_limits();
 
     mount_sd_card(false, true);
+    storage_ext_unlock();
+}
+
+void storage_ext_poll(void)
+{
+    if (!storage_ext_lock(pdMS_TO_TICKS(10))) {
+        return;
+    }
+    refresh_card_runtime_status();
+    if (s_sd_ready) {
+        update_space_cache_locked();
+    }
     storage_ext_unlock();
 }
 
@@ -685,14 +713,21 @@ static esp_err_t storage_ext_append_bucketed(storage_log_bucket_t bucket, const 
     } else if (bucket == STORAGE_LOG_BUCKET_DIAGNOSTICS) {
         path = DIAGNOSTIC_LOG_PATH;
     }
+
+    if (!app_spi_bus_lock(pdMS_TO_TICKS(500))) {
+        storage_ext_unlock();
+        return ESP_ERR_TIMEOUT;
+    }
     FILE *f = fopen(path, "a");
     if (!f) {
+        app_spi_bus_unlock();
         storage_ext_unlock();
         return ESP_FAIL;
     }
 
     fprintf(f, "%lu,%s,%s\n", (unsigned long)now_sec, kind, message);
     fclose(f);
+    app_spi_bus_unlock();
     storage_ext_unlock();
     return ESP_OK;
 }
@@ -747,8 +782,14 @@ int storage_ext_read_recent_lines(char lines[][64], int max_lines)
         struct stat st = {0};
         if (stat(paths[p], &st) != 0 || st.st_size == 0) continue;
 
+        if (!app_spi_bus_lock(pdMS_TO_TICKS(500))) {
+            continue;
+        }
         FILE *f = fopen(paths[p], "rb");
-        if (!f) continue;
+        if (!f) {
+            app_spi_bus_unlock();
+            continue;
+        }
 
         /* Read the tail of the file (last ~4KB) */
         long tail_size = 4096;
@@ -788,6 +829,7 @@ int storage_ext_read_recent_lines(char lines[][64], int max_lines)
             }
         }
         fclose(f);
+        app_spi_bus_unlock();
         total += ring_count;
     }
 
@@ -808,7 +850,12 @@ esp_err_t storage_ext_format(void)
     /* If already mounted, format in-place then remount */
     if (s_sd_ready && s_card) {
         esp_vfs_fat_mount_config_t format_cfg = storage_mount_cfg(false);
+        if (!app_spi_bus_lock(pdMS_TO_TICKS(1000))) {
+            storage_ext_unlock();
+            return ESP_ERR_TIMEOUT;
+        }
         esp_err_t err = esp_vfs_fat_sdcard_format_cfg("/sdcard", s_card, &format_cfg);
+        app_spi_bus_unlock();
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "microSD formatted in-place successfully");
             ensure_log_dir();
@@ -828,7 +875,12 @@ esp_err_t storage_ext_format(void)
 
     /* Unmount if currently mounted */
     if (s_sd_ready) {
+        if (!app_spi_bus_lock(pdMS_TO_TICKS(1000))) {
+            storage_ext_unlock();
+            return ESP_ERR_TIMEOUT;
+        }
         esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+        app_spi_bus_unlock();
         s_sd_ready = false;
         s_card = NULL;
         refresh_storage_dependent_limits();
